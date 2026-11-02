@@ -194,6 +194,14 @@ adb shell am start -n com.hercules.app/com.hercules.mobile.ui.MainActivity --ez 
 
 You can also use **Data → Developer → Load 14 days of demo data**.
 
+The watch has the same switch, so its UI can be checked on an unpaired Wear OS emulator (grant the sensor permissions first, or tap Allow):
+
+```bash
+adb -s <watch-serial> shell am start -n com.hercules.app/com.hercules.wear.ui.MainActivity --ez demo true
+```
+
+Right after midnight the score shows "calibrating" until last night's sleep exists. That is expected; set the emulator clock to the morning to see a score.
+
 **Synthetic sensors on a Wear emulator:**
 
 ```bash

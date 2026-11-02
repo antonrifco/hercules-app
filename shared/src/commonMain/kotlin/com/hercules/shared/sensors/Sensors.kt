@@ -10,7 +10,7 @@ import kotlinx.serialization.json.Json
 @Serializable
 enum class SensorKind(val label: String, val feeds: String) {
     HEART_RATE("Heart rate", "Recovery"),
-    SLEEP("Sleep", "Sleep"),
+    SLEEP("Sleep", "Readiness"),
     STEPS("Steps", "Activity"),
     CALORIES("Calories", "Stats"),
     DISTANCE("Distance", "Stats"),

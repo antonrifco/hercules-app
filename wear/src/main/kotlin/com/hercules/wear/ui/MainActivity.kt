@@ -26,6 +26,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import com.hercules.wear.BuildConfig
+import com.hercules.shared.demo.DemoData
+import androidx.lifecycle.lifecycleScope
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,6 +58,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.material.icons.rounded.FitnessCenter
+import androidx.compose.material.icons.automirrored.rounded.DirectionsBike
+import androidx.compose.material.icons.automirrored.rounded.DirectionsRun
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -92,12 +98,42 @@ import kotlinx.coroutines.launch
 
 private val Accent = Color(0xFF3FE0FF)
 
+/** Brand palette for the stock Wear components (switches, buttons): black, deep panels and cyan, no default purple. */
+private val HerculesWearColors = ColorScheme(
+    primary = Accent,
+    primaryDim = Color(0xFF2BB8D4),
+    primaryContainer = Color(0xFF0D2A33),
+    onPrimary = Color.Black,
+    onPrimaryContainer = Color.White,
+    secondary = Accent,
+    secondaryContainer = Color(0xFF10111B),
+    onSecondaryContainer = Color.White,
+    surfaceContainerLow = Color(0xFF0B0C14),
+    surfaceContainer = Color(0xFF10111B),
+    surfaceContainerHigh = Color(0xFF181A28),
+    onSurface = Color.White,
+    onSurfaceVariant = Color(0xFF8B90A8),
+    outline = Color(0xFF3A3D55),
+    outlineVariant = Color(0xFF262838),
+    background = Color.Black,
+    onBackground = Color.White,
+)
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+        // Debug only: `adb shell am start -n com.hercules.app/com.hercules.wear.ui.MainActivity --ez demo true`
+        // loads the same 14-day demo as the phone, so the watch UI can be checked without pairing.
+        if (BuildConfig.DEBUG && savedInstanceState == null && intent.getBooleanExtra("demo", false)) {
+            lifecycleScope.launch {
+                val g = graph
+                DemoData.load(g.repo, g.insights, g.cognitive, System.currentTimeMillis())
+                recreate()
+            }
+        }
         setContent {
-            MaterialTheme(colorScheme = ColorScheme(primary = Accent, background = Color.Black)) {
+            MaterialTheme(colorScheme = HerculesWearColors) {
                 AppScaffold { HerculesWearNav() }
             }
         }
@@ -229,7 +265,11 @@ private fun HomeScreen(onWorkout: () -> Unit, onRecords: () -> Unit, onSensors: 
                             Modifier.fillMaxWidth().padding(top = 8.dp).border(1.dp, WLine, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(dayLabel(ev.daysUntil), fontSize = 24.sp, fontWeight = FontWeight.Thin, color = accent)
+                            if (ev.daysUntil <= 0) {
+                                Text("TODAY", fontSize = 11.sp, letterSpacing = 1.5.sp, fontWeight = FontWeight.Medium, color = accent)
+                            } else {
+                                Text("D-${ev.daysUntil}", fontSize = 24.sp, fontWeight = FontWeight.Thin, color = accent)
+                            }
                             Spacer(Modifier.width(10.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(ev.event.title, style = MaterialTheme.typography.labelMedium, color = Color.White, maxLines = 2)
@@ -240,9 +280,13 @@ private fun HomeScreen(onWorkout: () -> Unit, onRecords: () -> Unit, onSensors: 
                 }
                 r?.suggestions?.drop(1)?.firstOrNull()?.let { tip ->
                     item {
-                        Column(Modifier.fillMaxWidth().padding(top = 6.dp, start = 6.dp, end = 6.dp)) {
+                        // Centred and inset so the text never runs into the round edge.
+                        Column(
+                            Modifier.fillMaxWidth().padding(top = 6.dp, start = 18.dp, end = 18.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
                             WEyebrow("Move", WCyan)
-                            Text(tip.title, style = MaterialTheme.typography.labelMedium, color = Color.White)
+                            Text(tip.title, style = MaterialTheme.typography.labelMedium, color = Color.White, textAlign = TextAlign.Center)
                         }
                     }
                 }
@@ -287,6 +331,14 @@ private fun WEyebrow(text: String, color: Color = WText2) {
     Text(text.uppercase(), fontSize = 9.sp, letterSpacing = 1.4.sp, color = color, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
 }
 
+private val WorkoutKind.icon: ImageVector
+    get() = when (this) {
+        WorkoutKind.RUN -> Icons.AutoMirrored.Rounded.DirectionsRun
+        WorkoutKind.WALK -> Icons.AutoMirrored.Rounded.DirectionsWalk
+        WorkoutKind.BIKE -> Icons.AutoMirrored.Rounded.DirectionsBike
+        WorkoutKind.OTHER -> Icons.Rounded.FitnessCenter
+    }
+
 @Composable
 private fun WAction(label: String, onClick: () -> Unit) {
     Box(
@@ -302,8 +354,6 @@ private fun Stat(icon: ImageVector, value: String) {
         Text(value, fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = Color.White)
     }
 }
-
-private fun dayLabel(daysUntil: Int) = if (daysUntil <= 0) "D" else "D-$daysUntil"
 
 private val WCyan = Color(0xFF3FE0FF)
 private val WText2 = Color(0xFF8B90A8)
@@ -348,7 +398,11 @@ private fun WorkoutScreen() {
                 LiveWorkout.Phase.IDLE -> {
                     item { ListHeader { Text("Start workout") } }
                     items(WorkoutKind.entries.toList()) { k ->
-                        Button(onClick = { ExerciseService.start(ctx, k) }, modifier = Modifier.fillMaxWidth()) { Text(k.label) }
+                        FilledTonalButton(
+                            onClick = { ExerciseService.start(ctx, k) },
+                            modifier = Modifier.fillMaxWidth(),
+                            icon = { Icon(k.icon, contentDescription = null, tint = WCyan) },
+                        ) { Text(k.label) }
                     }
                 }
                 LiveWorkout.Phase.STARTING -> item { Text("Starting…") }

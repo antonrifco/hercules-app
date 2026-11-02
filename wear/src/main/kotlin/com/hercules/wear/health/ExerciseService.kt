@@ -41,10 +41,10 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 
 enum class WorkoutKind(val wire: String, val label: String, val hsType: ExerciseType) {
-    RUN("run", "Lari", ExerciseType.RUNNING),
-    WALK("walk", "Jalan", ExerciseType.WALKING),
-    BIKE("bike", "Sepeda", ExerciseType.BIKING),
-    OTHER("workout", "Latihan lain", ExerciseType.WORKOUT),
+    RUN("run", "Run", ExerciseType.RUNNING),
+    WALK("walk", "Walk", ExerciseType.WALKING),
+    BIKE("bike", "Ride", ExerciseType.BIKING),
+    OTHER("workout", "Other", ExerciseType.WORKOUT),
 }
 
 /** Live workout state observed by the UI (same process as the service). */
@@ -193,13 +193,13 @@ class ExerciseService : LifecycleService() {
 
     private fun goForeground(kind: WorkoutKind) {
         val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CHANNEL, "Latihan", NotificationManager.IMPORTANCE_DEFAULT))
+        nm.createNotificationChannel(NotificationChannel(CHANNEL, "Workouts", NotificationManager.IMPORTANCE_DEFAULT))
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
         )
         val builder = NotificationCompat.Builder(this, CHANNEL)
             .setContentTitle("Hercules · ${kind.label}")
-            .setContentText("Merekam detak jantung")
+            .setContentText("Recording heart rate")
             .setSmallIcon(R.drawable.ic_hercules)
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_WORKOUT)
