@@ -253,8 +253,8 @@ class ReadinessEngine(private val dayKeys: DayKeys) {
         out += when (band) {
             ReadinessBand.PRIMA -> Suggestion(band.headline, "Schedule negotiations, interviews or big decisions for ${range(peak)}. Today is a day for hard problems.", Tone.POSITIVE)
             ReadinessBand.BAIK -> Suggestion(band.headline, "Put the most important thing at ${range(peak)} or ${range(second)}. Do a short warm-up beforehand.", Tone.POSITIVE)
-            ReadinessBand.CUKUP -> Suggestion(band.headline, "Important work is still fine at ${range(peak)}. Avoid ${range(dip)}, use a checklist, and don't decide on impulse.", Tone.CAUTION)
-            ReadinessBand.RENDAH -> Suggestion(band.headline, "If you can, move important decisions to another day. If it has to be today, do it at ${range(peak)}, get a second opinion, and pause before agreeing.", Tone.CAUTION)
+            ReadinessBand.CUKUP -> Suggestion(band.headline, "Important work is still fine at ${range(peak)}. Avoid ${range(dip)}.", Tone.CAUTION)
+            ReadinessBand.RENDAH -> Suggestion(band.headline, "If you can, move important decisions to another day. If it has to be today, do it at ${range(peak)}.", Tone.CAUTION)
             ReadinessBand.TERKURAS -> Suggestion(band.headline, "Reschedule interviews or important deals if possible. Stick to routine tasks and go to bed early tonight.", Tone.CAUTION)
         }
 
@@ -263,7 +263,7 @@ class ReadinessEngine(private val dayKeys: DayKeys) {
             val bedtime = dayKeys.clock(wake + 24 * HOUR_MS - 8 * HOUR_MS - 30 * MIN_MS)
             out += Suggestion(
                 "Short on sleep (${formatDuration((sleepHours * 60).roundToInt())})",
-                "Take a 10–20 minute nap before 15:00. Have caffeine 30–60 minutes before the key moment, none after 14:00. Tonight, be in bed by $bedtime.",
+                "Take a 10–20 minute nap before 15:00 and skip caffeine after 14:00. Tonight, be in bed by $bedtime.",
                 Tone.ACTION,
             )
         }
@@ -277,7 +277,7 @@ class ReadinessEngine(private val dayKeys: DayKeys) {
         input.checkIn?.takeIf { it.stress >= 4 }?.let {
             out += Suggestion(
                 "High stress",
-                "Spend 10 minutes writing down your worries and how you'll respond. Expressive writing frees up working memory before demanding tasks.",
+                "Try 5 minutes of box breathing (4-4-4-4) and a short walk. Slow breathing lowers your heart rate and calms the body.",
                 Tone.ACTION,
             )
         }

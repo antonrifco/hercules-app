@@ -20,71 +20,43 @@ class PrepCoach(private val dayKeys: DayKeys, private val engine: ReadinessEngin
         else -> PrepPhase.FOUNDATION
     }
 
+    /**
+     * The run-up is limited to what Hercules can see or influence: sleep, recovery, activity and stress. It
+     * deliberately says nothing about the content of the event (research, rehearsal, outfit), whatever its type.
+     */
     fun tasks(event: PlanEvent, phase: PrepPhase, typicalWakeMinute: Int?): List<PrepTask> {
         val clockAt = { ms: Long -> dayKeys.clock(ms) }
         // Needs ~8h sleep and ~2.5h awake before the event; never later than usual bedtime.
         val wakeForEvent = event.startMs - (2.5 * HOUR_MS).toLong()
         val bedtime = clockAt(wakeForEvent - 8 * HOUR_MS - 15 * MIN_MS)
+        val wearWatch = PrepTask("wear_watch", "Wear your watch to bed", "So your sleep and recovery are measured, not guessed.")
         return when (phase) {
             PrepPhase.FOUNDATION -> listOf(
                 PrepTask("sleep_window", "Sleep and wake at consistent times", "Keep it within ±30 minutes. Consistent sleep in the days before matters more than one long night."),
-                PrepTask("move", "20–30 minutes of light to moderate exercise", "Improves sleep quality and executive function. Avoid workouts that are completely new to you."),
+                PrepTask("move", "20–30 minutes of light to moderate exercise", "Improves sleep quality and your resting heart rate. Avoid workouts that are completely new to you."),
                 PrepTask("alcohol", "Limit alcohol", "Alcohol disrupts REM sleep and raises your overnight heart rate."),
-            ) + typeFoundation(event.type)
+                wearWatch,
+            )
             PrepPhase.SHARPEN -> listOf(
-                typeRehearsal(event.type),
+                PrepTask("sleep_steady", "Keep your bed and wake times steady", "Same times as the last few days, even if you feel ready early."),
                 PrepTask("no_alcohol", "No alcohol from today", "Protect the quality of the last two nights of sleep."),
                 PrepTask("no_hard_training", "Skip hard training", "A hard session can raise your resting heart rate for 1–2 days."),
+                wearWatch,
             )
             PrepPhase.EVE -> listOf(
-                PrepTask("final_prep", "Finish preparing by 20:00", "Cramming late into the night lowers tomorrow's performance."),
-                PrepTask("logistics", "Lay out clothes, documents and route", "Fewer small decisions tomorrow morning saves mental energy."),
                 PrepTask("caffeine_cut", "No caffeine after 14:00", "Caffeine lingers 5–6 hours and delays sleep."),
+                PrepTask("late_meal", "Finish eating 2–3 hours before bed", "A late meal raises your heart rate during sleep."),
                 PrepTask("screens", "No screens for the last hour before bed", "Helps you fall asleep faster."),
                 PrepTask("bedtime", "In bed by $bedtime", "Gets you ~8 hours of sleep and up 2.5 hours before the event."),
+                wearWatch,
             )
             PrepPhase.DAY -> listOf(
                 PrepTask("light", "10 minutes of morning light", "Morning daylight boosts alertness and anchors your body clock."),
-                PrepTask("breakfast", "Breakfast with protein", "Steady energy without a blood-sugar spike."),
-                PrepTask("caffeine", "Caffeine around ${clockAt(event.startMs - 45 * MIN_MS)}", "If you drink coffee: 30–60 minutes before the start is when it peaks."),
                 PrepTask("walk", "Brisk 10-minute walk before you start", "Increases blood flow to the brain and lowers anxiety."),
-                PrepTask("breathing", "2 minutes of box breathing before you go in", "In 4 seconds, hold 4, out 4, hold 4. Calms the nervous system."),
-                PrepTask("arrive", "Be ready 15 minutes early", "Avoid the stress of rushing."),
+                PrepTask("breathing", "2 minutes of box breathing before you go in", "In 4 seconds, hold 4, out 4, hold 4. Calms the nervous system and slows your heart rate."),
             )
             PrepPhase.DONE -> emptyList()
         }
-    }
-
-    private fun typeFoundation(type: EventType): List<PrepTask> = when (type) {
-        EventType.INTERVIEW -> listOf(
-            PrepTask("research", "Research the company and role", "Understand their product, challenges and culture."),
-            PrepTask("star", "Prepare 5 STAR stories", "Situation, Task, Action, Result for behavioural questions."),
-        )
-        EventType.NEGOTIATION -> listOf(
-            PrepTask("batna", "Define your BATNA and walk-away point", "Set your limits now, with a cool head, not at the table."),
-            PrepTask("counterpart", "Study the other side's interests", "What do they need, and what is cheap for you but valuable to them?"),
-        )
-        EventType.PRESENTATION -> listOf(
-            PrepTask("outline", "Outline the story and 3 key messages", "Audiences remember little, so make sure it's the right things."),
-            PrepTask("deck", "Prepare your slides", "Finish early so there is time to rehearse."),
-        )
-        EventType.EXAM -> listOf(
-            PrepTask("spaced", "Spaced practice", "Short daily sessions beat an all-nighter."),
-        )
-        EventType.DECISION -> listOf(
-            PrepTask("options", "Write down options and criteria", "Set criteria before judging options to avoid bias."),
-            PrepTask("premortem", "Run a pre-mortem", "Imagine this decision failed a year from now: what caused it?"),
-        )
-        EventType.OTHER -> listOf(PrepTask("materials", "Prepare the core material", "Get the important parts done early."))
-    }
-
-    private fun typeRehearsal(type: EventType): PrepTask = when (type) {
-        EventType.INTERVIEW -> PrepTask("rehearse", "Mock interview", "Practise answers out loud, ideally with another person.")
-        EventType.NEGOTIATION -> PrepTask("rehearse", "Role-play the negotiation", "Rehearse responses for 3 scenarios: easy, tough, and deadlock.")
-        EventType.PRESENTATION -> PrepTask("rehearse", "Timed dress rehearsal", "At least twice, including Q&A.")
-        EventType.EXAM -> PrepTask("rehearse", "Practice exam", "Work through questions under the real time limit.")
-        EventType.DECISION -> PrepTask("rehearse", "Talk it through with someone you trust", "An outside view helps catch blind spots.")
-        EventType.OTHER -> PrepTask("rehearse", "Final practice / review", "Go over the most important parts again.")
     }
 
     /** Average sleep score of recent nights, penalized for irregular wake times. */
@@ -158,17 +130,8 @@ class PrepCoach(private val dayKeys: DayKeys, private val engine: ReadinessEngin
         if (window.adjustment < 0 && abs(event.startMs - peak.startMs) < 12 * HOUR_MS) {
             actions += "If you can, move it to ${dayKeys.clock(peak.startMs)}–${dayKeys.clock(peak.endMs)} (your peak focus)."
         }
-        actions += "Caffeine around ${dayKeys.clock(event.startMs - 45 * MIN_MS)} (if you drink coffee)."
         actions += "A brisk 10-minute walk, then 2 minutes of box breathing before you start."
-        if (expected < 70) {
-            actions += when (event.type) {
-                EventType.NEGOTIATION, EventType.DECISION -> "Don't decide on the spot. Ask for 24 hours before agreeing to anything big."
-                EventType.INTERVIEW -> "Bring notes on your 3 main STAR stories; answer with structure, don't improvise."
-                EventType.PRESENTATION -> "Keep your outline handy; focus on the 3 key messages only."
-                EventType.EXAM -> "Do the easiest questions first to build momentum."
-                EventType.OTHER -> "Use a written checklist so nothing slips."
-            }
-        }
+        if (expected < 70) actions += "Be in bed early tonight. Sleep is the biggest lever on tomorrow's readiness."
         return DecisionAdvice(verdict, expected, headline, reasons, actions)
     }
 }

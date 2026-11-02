@@ -145,12 +145,26 @@ class PrepCoachTest {
         assertEquals(PrepPhase.DONE, coach.phase(-1))
     }
 
-    @Test fun tasksAreTypeSpecificAndTimed() {
-        assertTrue(coach.tasks(event, PrepPhase.FOUNDATION, 420).any { it.id == "star" })
+    @Test fun runUpStaysWithinWhatHerculesCanSeeOrInfluence() {
+        // Sleep, recovery, activity, stress: never the content of the event, whatever its type.
+        val allowed = setOf(
+            "sleep_window", "move", "alcohol", "wear_watch", "sleep_steady", "no_alcohol", "no_hard_training",
+            "caffeine_cut", "late_meal", "screens", "bedtime", "light", "walk", "breathing",
+        )
+        for (type in EventType.entries) {
+            val e = event.copy(type = type)
+            for (phase in PrepPhase.entries) {
+                val ids = coach.tasks(e, phase, 420).map { it.id }
+                assertTrue(allowed.containsAll(ids), "$type/$phase has out-of-scope tasks: ${ids - allowed}")
+                if (phase != PrepPhase.DONE) assertTrue(ids.isNotEmpty(), "$type/$phase is empty")
+            }
+            // Same list for every type: nothing is inferred from the title any more.
+            assertEquals(coach.tasks(event, PrepPhase.FOUNDATION, 420), coach.tasks(e, PrepPhase.FOUNDATION, 420))
+        }
         val eve = coach.tasks(event, PrepPhase.EVE, 420)
         assertTrue(eve.first { it.id == "bedtime" }.title.endsWith("23:15")) // 10:00 − 2.5h − 8h15m
-        assertTrue(coach.tasks(event, PrepPhase.DAY, 420).first { it.id == "caffeine" }.title.contains("09:15"))
     }
+
 
     @Test fun adviceGoesFromGoToReschedule() {
         fun adviceFor(hours: Double, hr: Double): Verdict {

@@ -66,8 +66,8 @@ Readings are labelled by origin: *measured by your watch*, *you reported*, *esti
 |---|---|---|---|
 | 85–100 | **Prime** | Focus and judgement at their best | Schedule the hardest things today |
 | 70–84 | **Good** | Ready for important work | Put it in your peak window |
-| 55–69 | **Fair** | You can still perform well, but timing matters | Peak window only, use a checklist, don't decide on impulse |
-| 40–54 | **Low** | Risk judgement and impulse control drop | Postpone non-urgent big decisions, get a second opinion |
+| 55–69 | **Fair** | You can still perform well, but timing matters | Peak window only |
+| 40–54 | **Low** | Judgement and impulse control drop | Postpone non-urgent big decisions |
 | 1–39 | **Drained** | Body and brain need recovery | Reschedule if possible, light tasks, sleep early |
 
 **Accuracy.** The score compares you with *your own* normal (14-day personal baseline). During the first 7 days the app shows "Calibrating x/7 days".
@@ -99,17 +99,15 @@ So an interview at 10:00 can score noticeably better than the same interview at 
 
 **Example:** "Job Interview with Google", 6 days from now at 10:00.
 
-1. **Add it** in the Plan tab: title, stakes (normal, important, critical), day (up to 7 days out) and time. No category to pick: the kind of moment (interview, negotiation, pitch, exam, decision) is inferred from the title. The app shows which daily phase that time usually falls in.
-2. **Every day until then** you get a short checklist for the current phase:
+1. **Add it** in the Plan tab: title, stakes (normal, important, critical), day (up to 7 days out) and time. The app shows which daily phase that time usually falls in.
+2. **Every day until then** you get a short checklist for the current phase. It only covers what Hercules can measure or influence: **sleep, recovery, activity and stress**. It never tells you how to prepare the content (research, rehearsal, outfit); that is your job, and the same for every kind of moment.
 
 | Days to go | Phase | Focus | Example tasks |
 |---|---|---|---|
-| D-7 … D-3 | Build the foundation | Consistent sleep, core material | Sleep/wake at fixed times, prepare 5 STAR stories, limit alcohol |
-| D-2 | Sharpen | Realistic rehearsal | Mock interview, no alcohol, skip hard training |
-| D-1 | The day before | Protect tonight's sleep | Finish by 20:00, lay out clothes, no caffeine after 14:00, *in bed by 23:15* (calculated from the event time) |
-| D | Event day | Activate | Morning light, protein breakfast, *caffeine at 09:15*, brisk walk, box breathing |
-
-Tasks are specific to the kind of moment, inferred from the title. A negotiation gets "define your BATNA" and a presentation gets "timed dress rehearsal".
+| D-7 … D-3 | Build the foundation | Consistent sleep | Sleep/wake at fixed times, light exercise, limit alcohol, wear the watch to bed |
+| D-2 | Sharpen | Protect recovery | Keep bed and wake times steady, no alcohol, skip hard training |
+| D-1 | The day before | Protect tonight's sleep | No caffeine after 14:00, finish eating 2–3 h before bed, no screens the last hour, *in bed by 23:15* (calculated from the event time) |
+| D | Event day | Activate | Morning light, brisk walk, box breathing |
 
 3. **Progress is visible:**
    - **Prep score** = recent readiness (45%) + sleep consistency (35%) + checklist completion (20%)
@@ -124,7 +122,7 @@ Tasks are specific to the kind of moment, inferred from the title. A negotiation
 | 45–59 | Go, with a game plan | Consider rescheduling |
 | < 45 | Consider rescheduling | Postpone if you can |
 
-It comes with the reasons (for example "Sleep: 5h 10m" or "14:00 falls in your afternoon dip") and concrete actions, such as moving to your peak window, timing caffeine, or for a negotiation, "ask for 24 hours before agreeing to anything big".
+It comes with the reasons (for example "Sleep: 5h 10m" or "14:00 falls in your afternoon dip") and concrete actions, such as moving to your peak window, a short walk and box breathing, and getting to bed early.
 
 ## 6. Sensors are your choice
 

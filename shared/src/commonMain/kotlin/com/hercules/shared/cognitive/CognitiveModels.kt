@@ -47,12 +47,12 @@ enum class ReadinessBand(val label: String, val minScore: Int, val headline: Str
     CUKUP(
         "Fair", 55,
         "Fair, so choose your timing",
-        "You can still perform well if it's scheduled in your peak window. Avoid impulsive decisions and use a checklist.",
+        "You can still perform well if it's scheduled in your peak window. Best kept to your peak window.",
     ),
     RENDAH(
         "Low", 40,
         "Postpone big decisions that aren't urgent",
-        "Risk judgement and impulse control tend to drop. If you must decide, get a second opinion and pause before committing.",
+        "Judgement and impulse control tend to drop. If it has to be today, keep it to your peak window.",
     ),
     TERKURAS(
         "Drained", 0,
@@ -165,9 +165,9 @@ data class PlanEvent(
 
 @Serializable
 enum class PrepPhase(val label: String, val description: String) {
-    FOUNDATION("Build the foundation", "Lock in a consistent sleep pattern and prepare the core material."),
-    SHARPEN("Sharpen", "Rehearse under realistic conditions and cut anything that hurts recovery."),
-    EVE("The day before", "Finish preparing early and protect tonight's sleep."),
+    FOUNDATION("Build the foundation", "Lock in a consistent sleep pattern."),
+    SHARPEN("Sharpen", "Protect your sleep and cut anything that hurts recovery."),
+    EVE("The day before", "Wind down early and protect tonight's sleep."),
     DAY("Event day", "Wake up body and brain, then perform at your best hour."),
     DONE("Done", "The event has passed. Hope it went great!"),
 }
