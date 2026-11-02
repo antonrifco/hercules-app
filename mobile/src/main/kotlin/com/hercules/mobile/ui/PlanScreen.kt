@@ -249,7 +249,7 @@ fun AddEventDialog(g: MobileGraph, nowMs: Long, onDismiss: () -> Unit) {
                     Icon(Icons.Rounded.TrackChanges, null, tint = Cyan, modifier = Modifier.size(18.dp))
                     HSpace(10.dp)
                     Text(
-                        "Pick a day up to 7 days out. Hercules tracks your readiness every day until then and guides your sleep and prep, so your mind is at its best on the big day.",
+                        "Pick a day in the next 7. Hercules guides your sleep and prep until then.",
                         style = MaterialTheme.typography.bodySmall, color = Text1,
                     )
                 }

@@ -55,18 +55,28 @@ import kotlinx.coroutines.launch
 private enum class Tab(val label: String) { TODAY("Today"), PLAN("Plan"), DATA("Setup") }
 
 class MainActivity : ComponentActivity() {
+    /** The reminder that opened (or re-opened) the app, until the screen has acted on it. */
+    private var launch by mutableStateOf<android.content.Intent?>(null)
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        launch = intent
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen() // system splash: the mark on the brand background
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val coldStart = savedInstanceState == null
+        if (savedInstanceState == null) launch = intent
         // Debug only: `adb shell am start -n com.hercules.app/com.hercules.mobile.ui.MainActivity --ez demo true`
         val loadDemo = BuildConfig.DEBUG && savedInstanceState == null && intent.getBooleanExtra("demo", false)
         setContent {
             HerculesTheme(isSystemInDarkTheme()) {
                 val (onboarded, finishOnboarding) = rememberOnboarded()
                 Box {
-                    if (onboarded) HerculesApp(loadDemo) else Onboarding(finishOnboarding)
+                    if (onboarded) HerculesApp(loadDemo, launch) { launch = null } else Onboarding(finishOnboarding)
                     LaunchArt(coldStart)
                 }
             }
@@ -76,12 +86,24 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun HerculesApp(loadDemoOnStart: Boolean) {
+private fun HerculesApp(loadDemoOnStart: Boolean, launch: android.content.Intent?, onLaunchHandled: () -> Unit) {
     val g: MobileGraph = LocalContext.current.graph
     val scope = rememberCoroutineScope()
     var tab by rememberSaveable { mutableStateOf(Tab.TODAY) }
     var openEventId by rememberSaveable { mutableStateOf<String?>(null) }
     var adding by remember { mutableStateOf(false) }
+    var todayRequest by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(launch) {
+        val target = launch?.getStringExtra(com.hercules.mobile.notify.Notifier.EXTRA_TARGET) ?: return@LaunchedEffect
+        val ev = launch.getStringExtra(com.hercules.mobile.notify.Notifier.EXTRA_EVENT)
+        when (target) {
+            "EVENT", "REFLECT" -> if (ev != null) openEventId = ev else tab = Tab.TODAY
+            "CHECK_IN" -> { openEventId = null; tab = Tab.TODAY; todayRequest = "checkin" }
+            "SLEEP" -> { openEventId = null; tab = Tab.TODAY; todayRequest = "tonight" }
+            else -> { openEventId = null; tab = Tab.TODAY }
+        }
+        onLaunchHandled()
+    }
     var guide by remember { mutableStateOf(false) }
     var tick by remember { mutableIntStateOf(0) } // bump to recompute event statuses
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -184,6 +206,8 @@ private fun HerculesApp(loadDemoOnStart: Boolean) {
                 onOpenGuide = { guide = true },
                 onPlanEvent = { tab = Tab.PLAN; adding = true },
                 onOpenSetup = { tab = Tab.DATA },
+                request = todayRequest,
+                onRequestHandled = { todayRequest = null },
             )
             tab == Tab.PLAN -> PlanScreen(statuses, inner, onAdd = { adding = true }) { openEventId = it }
             else -> DataScreen(g, today, inner, onLoadDemo = { loadDemo() })

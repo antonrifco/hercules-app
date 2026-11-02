@@ -141,6 +141,8 @@ fun TodayScreen(
     onOpenGuide: () -> Unit,
     onPlanEvent: () -> Unit = {},
     onOpenSetup: () -> Unit = {},
+    request: String? = null,
+    onRequestHandled: () -> Unit = {},
 ) {
     val r = data.readiness
     val brief = data.brief
@@ -191,6 +193,13 @@ fun TodayScreen(
         add("sleep" to { SleepBlock(data.sleep, data.sleepWeek, data.today, g) })
         data.checkIn?.let { ci -> add("checkin" to { CheckInSummary(ci) { sheet = Sheet.CHECK_IN } }) }
         if (data.trend.size >= 2) add("week" to { WeekBlock(data.trend, data.sleepWeek, g) })
+    }
+    LaunchedEffect(request) {
+        when (request) {
+            "checkin" -> sheet = Sheet.CHECK_IN
+            "tonight" -> scrollTo = "tonight"
+        }
+        if (request != null) onRequestHandled()
     }
     LaunchedEffect(scrollTo) {
         scrollTo?.let { k -> listState.animateScrollToItem(sections.indexOfFirst { it.first == k }.coerceAtLeast(0)) }

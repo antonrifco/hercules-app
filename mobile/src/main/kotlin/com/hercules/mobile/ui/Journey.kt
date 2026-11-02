@@ -93,9 +93,11 @@ fun LaunchArt(show: Boolean, durationMs: Long = 2_600) {
 private class Step(val image: Int, val eyebrow: String, val title: String, val body: String)
 
 private val Steps = listOf(
-    Step(R.drawable.ill_score, "01 · The dial", "Your brain has a readiness level", "Every morning Hercules reads it, 1 to 100, from your sleep, heart and how you feel."),
-    Step(R.drawable.ill_sleep, "02 · The setup", "Sleep sets the dial", "Wear the watch to bed. That's the whole setup. It learns your normal in 7 nights."),
-    Step(R.drawable.ill_plan, "03 · The plan", "Aim for the big day", "Add an interview or a pitch up to 7 days out. Get a daily run-up and a clear call on the day."),
+    Step(R.drawable.ill_score, "01 · The dial", "Know when your brain is ready", "A daily score from 1 to 100, built from your sleep, heart and how you feel."),
+    Step(R.drawable.ill_no_watch, "02 · The watch", "Wear it to bed", "Install Hercules on your watch and open it once. It asks to read heart rate and sleep, only to score your nights. Your data stays on your devices."),
+    Step(R.drawable.ill_sleep, "03 · Sleep", "Nothing to log", "Sleep is tracked for you. The first week, Hercules learns what normal looks like for you."),
+    Step(R.drawable.ill_plan, "04 · The plan", "Aim for the big day", "Add an interview or pitch. Get a daily run-up and a clear go or wait call."),
+    Step(R.drawable.ill_checkin, "05 · Reminders", "At most three a day", "Morning score, event prep and bedtime. Switch each off any time in Setup."),
 )
 
 private const val PREFS = "hercules_ui"
@@ -113,6 +115,8 @@ fun rememberOnboarded(): Pair<Boolean, () -> Unit> {
 fun Onboarding(onDone: () -> Unit) {
     val pager = rememberPagerState { Steps.size }
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
+    val askNotifications = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { onDone() }
     Column(Modifier.fillMaxSize().background(Ink).statusBarsPadding().navigationBarsPadding().padding(horizontal = 24.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("HERCULES", color = Text1, fontSize = 13.sp, letterSpacing = 5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
@@ -135,11 +139,19 @@ fun Onboarding(onDone: () -> Unit) {
                 }
             }
             val last = pager.currentPage == Steps.lastIndex
+            if (last) TextButton(onClick = onDone) { Text("NOT NOW", letterSpacing = 1.5.sp, color = Text2, fontSize = 12.sp) }
             Button(
-                onClick = { if (last) onDone() else scope.launch { pager.animateScrollToPage(pager.currentPage + 1) } },
+                onClick = {
+                    when {
+                        !last -> scope.launch { pager.animateScrollToPage(pager.currentPage + 1) }
+                        android.os.Build.VERSION.SDK_INT >= 33 && !com.hercules.mobile.notify.Notifier.canPost(ctx) -> askNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                        else -> onDone()
+                    }
+                },
+                modifier = Modifier.height(48.dp),
                 shape = RoundedCornerShape(6.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Ink),
-            ) { Text(if (last) "START" else "NEXT", letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold) }
+            ) { Text(if (last) "ALLOW & START" else "NEXT", letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold) }
         }
     }
 }

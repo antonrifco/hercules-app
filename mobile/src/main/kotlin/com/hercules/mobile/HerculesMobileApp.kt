@@ -103,6 +103,8 @@ class HerculesMobileApp : Application() {
     override fun onCreate() {
         super.onCreate()
         graph = MobileGraph(this)
+        com.hercules.mobile.notify.Notifier.ensureChannel(this)
+        com.hercules.mobile.notify.ReminderWorker.schedule(this)
     }
 }
 
