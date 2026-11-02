@@ -238,12 +238,13 @@ private fun DayStrip(g: MobileGraph, data: TodayData, r: Readiness?, nowMs: Long
                 t += 6 * HOUR
             }
             // Sleep lane
-            data.sleep?.let { s ->
-                val x0 = x(s.startMs); val x1 = x(s.endMs)
+            val sleep = data.sleep
+            if (sleep != null) {
+                val x0 = x(sleep.startMs); val x1 = x(sleep.endMs)
                 drawRoundRect(Brand.copy(alpha = 0.4f), Offset(x0, top), Size(x1 - x0, sleepPx), CornerRadius(4.dp.toPx()))
-                val txt = measurer.measure(formatDuration(s.asleepMinutes), tickStyle.copy(color = Text1))
+                val txt = measurer.measure(formatDuration(sleep.asleepMinutes), tickStyle.copy(color = Text1))
                 if (txt.size.width < x1 - x0 - 12.dp.toPx()) drawText(txt, topLeft = Offset(x0 + 6.dp.toPx(), top + (sleepPx - txt.size.height) / 2))
-            } ?: run {
+            } else {
                 drawRoundRect(Hairline, Offset(0f, top), Size(x(dayStart), sleepPx), CornerRadius(4.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
             }
             // Focus windows on a visible track, so dim phases (dip, evening) still read.
@@ -331,9 +332,13 @@ private fun Readouts(r: Readiness) {
                     VSpace(6.dp)
                     ScoreBar(c.score, col, 2.dp)
                     VSpace(6.dp)
-                    Text(c.kind.label.uppercase(UiLocale), fontSize = 9.sp, letterSpacing = 1.sp, color = Text2, maxLines = 1)
+                    Text(c.kind.label.uppercase(UiLocale), fontSize = 10.sp, letterSpacing = 1.sp, color = Text2, maxLines = 2, minLines = 2)
                 }
             }
+        }
+        if (selected == null) {
+            VSpace(8.dp)
+            Muted("Tap a reading to see what it measured.")
         }
         selected?.let { i ->
             val c = r.components[i]
@@ -426,6 +431,8 @@ private fun SleepBlock(sleep: SleepNight?, week: List<SleepNight>, today: String
             colorOf = { scoreColor(g.cognitive.engine.sleepScore(it.toDouble())) },
             target = 7f,
         )
+        VSpace(6.dp)
+        Muted("Hours asleep per night. The dashed line is a 7h target.")
     }
     if (correcting) CorrectSleepDialog(g, today, sleep) { correcting = false }
 }
@@ -547,8 +554,8 @@ private fun SegmentScale(title: String, icon: ImageVector, low: String, high: St
         }
     }
     Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
-        Text(low.uppercase(UiLocale), fontSize = 9.sp, letterSpacing = 1.sp, color = Text2, modifier = Modifier.weight(1f))
-        Text(high.uppercase(UiLocale), fontSize = 9.sp, letterSpacing = 1.sp, color = Text2)
+        Text(low.uppercase(UiLocale), fontSize = 10.sp, letterSpacing = 1.sp, color = Text2, modifier = Modifier.weight(1f))
+        Text(high.uppercase(UiLocale), fontSize = 10.sp, letterSpacing = 1.sp, color = Text2)
     }
 }
 
@@ -567,6 +574,8 @@ private fun TrendBlock(trend: List<Readiness>, g: MobileGraph) {
             colorOf = { scoreColor(it.roundToInt()) },
             target = 70f,
         )
+        VSpace(6.dp)
+        Muted("Daily readiness score. The dashed line at 70 marks a good day.")
     }
 }
 

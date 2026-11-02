@@ -162,7 +162,7 @@ fun <T> HerculesNavBar(items: List<T>, selected: T, icon: (T) -> ImageVector, la
                     Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(icon(t), null, tint = if (on) Cyan else Text2, modifier = Modifier.size(22.dp))
-                            Text(label(t).uppercase(UiLocale), fontSize = 9.sp, letterSpacing = 1.5.sp, color = if (on) Text1 else Text2, modifier = Modifier.padding(top = 4.dp))
+                            Text(label(t).uppercase(UiLocale), fontSize = 10.sp, letterSpacing = 1.5.sp, color = if (on) Text1 else Text2, modifier = Modifier.padding(top = 4.dp))
                         }
                     }
                 }

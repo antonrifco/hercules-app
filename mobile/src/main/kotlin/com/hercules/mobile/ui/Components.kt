@@ -303,7 +303,7 @@ fun MiniBars(
         }
         VSpace(6.dp)
         Row(Modifier.fillMaxWidth()) {
-            labels.forEach { Text(it.uppercase(UiLocale), Modifier.weight(1f), fontSize = 9.sp, letterSpacing = 1.sp, color = Text2, textAlign = TextAlign.Center) }
+            labels.forEach { Text(it.uppercase(UiLocale), Modifier.weight(1f), fontSize = 10.sp, letterSpacing = 1.sp, color = Text2, textAlign = TextAlign.Center) }
         }
     }
 }
