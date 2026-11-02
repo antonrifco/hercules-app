@@ -34,10 +34,10 @@ Hercules answers three questions every day:
 ```
 
 1. **Sleep is recorded automatically.** Wear the watch to bed. It detects falling asleep and waking up, and measures your sleeping heart rate.
-2. **Morning check-in (optional, 30 seconds).** Tap two 1–5 scales: energy and stress. If the watch missed your sleep, you can enter your sleep hours here.
+2. **Morning check-in (optional, 30 seconds).** Tap two 1–5 scales: energy and stress. Sleep is never asked: it always comes from the watch. If the detected times look wrong (or the watch missed the night), tap **Correct** in the Sleep section and set when you fell asleep and woke up. A corrected night is marked "Corrected by you" and automatic detection never overwrites it.
 3. **The score appears**, with a band, a one-line meaning, and your **best hours** for demanding work.
 4. **Tips** are short headlines; tap one to see the detail.
-5. **The watch shows the same score** on its home screen, plus a countdown to your next event.
+5. **The watch is kept simple:** today's score and peak hours, what it is tracking (sleep, heart, steps) and whether that data reached the phone, and a readiness forecast ring for each big moment in the next 7 days. Small animations (the bezel sweeping up to the score, a heart beating at your pulse, a breathing moon while calibrating) make it feel alive without extra battery-heavy assets.
 
 ## 3. Reading the score
 
@@ -55,7 +55,7 @@ Hercules answers three questions every day:
 
 | Ingredient | Weight | Signal | Source |
 |---|---|---|---|
-| Sleep | 40% | Hours asleep last night (best at 7.5–9 h) | Watch (or check-in) |
+| Sleep | 40% | Hours asleep last night (best at 7.5–9 h) | Watch (user can correct the times) |
 | Recovery | 30% | Sleeping heart rate (or resting HR) vs. your usual. Higher means strain: stress, alcohol, illness, poor recovery | Watch |
 | How you feel | 15% | Energy and stress, each 1–5 | Morning check-in |
 | Activity | 15% | Yesterday's steps vs. your usual. Too little and too much both cost readiness | Watch |
@@ -126,8 +126,8 @@ Phone **Data → Sensors** (or watch **Sensors**) lists every background sensor 
 │ Health Services passive monitoring          │        │ WatchSyncListenerService                           │
 │  HR, steps, calories, distance, floors      │ batch  │  store samples → insights → readiness refresh      │
 │  + user activity state (asleep/awake) ──────┼───────►│  → push WatchState back to the watch               │
-│ ExerciseService (workouts, HR recovery)     │MessageC│ Compose UI: Today · Plan · Data(+Sensors)          │
-│ Home: score ring, peak time, next event     │◄───────┤ DataClient: /hercules/state, /hercules/sensors/*   │
+│ Sync status: "Sent to phone · 2m ago"       │MessageC│ Compose UI: Today · Plan · Data(+Sensors)          │
+│ Home: score, tracking, big-moment forecasts │◄───────┤ DataClient: /hercules/state, /hercules/sensors/*   │
 │ Sensors screen ◄──── /hercules/sensors ────►│DataCli.│ NoopRemoteSink → (future) HttpRemoteSink → backend │
 └──────────────────────┬──────────────────────┘        └──────────────────────────┬─────────────────────────┘
                        └───────────── shared (Kotlin Multiplatform) ──────────────┘
@@ -142,7 +142,7 @@ All scoring and coaching logic is in `shared`, so the watch can compute a score 
 | Module | Contents |
 |---|---|
 | `shared/` | `model/` samples and summaries · `insights/` day keys, daily aggregation, personal records, HRV · `cognitive/` `SleepAnalyzer`, `Baseline`, `ReadinessEngine`, `PrepCoach`, `CognitiveService` + `CognitiveStore` · `sensors/` `SensorKind`, `SensorConfig`, `SensorReport` · `sync/` batch sync + wire format · `demo/` synthetic data · `sqldelight/` schema |
-| `wear/` | `health/` passive monitoring, sleep (activity state), sensor settings + listener, workouts · `sync/` phone sink, periodic worker, `WatchStateSource` · `ui/` Wear Compose M3 |
+| `wear/` | `health/` passive monitoring, sleep (activity state), sensor settings + listener · `sync/` phone sink, periodic worker, `SyncStatus`, `WatchStateSource` · `ui/` Wear Compose M3 |
 | `mobile/` | `sync/` receives watch batches · `HerculesMobileApp` graph (state + sensor push) · `ui/` Today, Plan, event detail, guide, Data/Sensors |
 
 ## Sensors and what they're used for
@@ -152,7 +152,6 @@ All scoring and coaching logic is in `shared`, so the watch can compute a score 
 | Heart rate | `HEART_RATE_BPM` (passive) | `heart_rate` | Sleeping HR, resting HR → Recovery |
 | Sleep | `UserActivityInfo` (`USER_ACTIVITY_ASLEEP / PASSIVE / EXERCISE`) | `activity_state` points (state changes) | `SleepAnalyzer`: main sleep in the window 18:00 the day before → 14:00, at least 60 min, wake-ups merged |
 | Steps, calories, distance, floors | passive deltas | interval samples | Activity, daily stats, records |
-| Workout HR, speed, recovery | `ExerciseClient`, `MeasureClient` | session samples | Workouts, HR-recovery record |
 
 Only sensors that are **enabled** (`SensorConfig`) and **supported** by the watch are registered. The watch publishes a `SensorReport` (supported + active) so the phone shows the real state.
 
@@ -209,7 +208,7 @@ adb -s <watch> shell am broadcast -a "whs.USE_SYNTHETIC_PROVIDERS" com.google.an
 adb -s <watch> shell am broadcast -a "whs.synthetic.user.START_WALKING" com.google.android.wearable.healthservices
 ```
 
-Logs: `adb logcat -s Hercules HerculesSync HerculesState HerculesWorkout HerculesPhoneSync`.
+Logs: `adb logcat -s Hercules HerculesSync HerculesState HerculesPhoneSync`.
 
 ## Porting to iOS / watchOS
 

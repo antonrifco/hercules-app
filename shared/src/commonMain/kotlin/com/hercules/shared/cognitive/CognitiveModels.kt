@@ -11,10 +11,18 @@ data class SleepNight(
     val asleepMinutes: Int,
     val sleepingHrAvg: Double? = null,
     val sleepingHrLow: Double? = null,
-    val source: String = "sensor",
-)
+    val source: String = SOURCE_SENSOR,
+) {
+    val corrected: Boolean get() = source == SOURCE_USER
 
-/** Morning self-report. Energy and stress are on a 1..5 scale. */
+    companion object {
+        const val SOURCE_SENSOR = "sensor"
+        /** Times the user corrected; automatic detection never overwrites these. */
+        const val SOURCE_USER = "user"
+    }
+}
+
+/** Morning self-report. Energy and stress are on a 1..5 scale. Sleep is never asked: it comes from the watch. */
 @Serializable
 data class CheckIn(
     val dayKey: String,
@@ -206,4 +214,6 @@ data class WatchState(
     val readiness: Readiness?,
     val nextEvent: EventStatus?,
     val updatedMs: Long,
+    /** Upcoming big moments (up to 7 days), soonest first, for the watch's schedule list. */
+    val upcoming: List<EventStatus> = emptyList(),
 )

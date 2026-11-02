@@ -31,12 +31,18 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.rounded.Watch
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.rememberTimePickerState
+import androidx.compose.material3.TimeInput
+import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -106,7 +112,7 @@ fun TodayScreen(
         data.nextEvent?.let { ev -> item { NextEvent(ev, onOpenEvent) } }
         if (r != null) item { Tips(r.suggestions) }
         item { SleepBlock(data.sleep, data.sleepWeek, data.today, g) }
-        item { CheckInBlock(g, data.checkIn, sensorSleep = data.sleep != null) }
+        item { CheckInBlock(g, data.checkIn) }
         if (data.trend.size >= 2) item { TrendBlock(data.trend, g) }
     }
 }
@@ -284,7 +290,7 @@ private fun NextEvent(s: EventStatus, onOpen: (String) -> Unit) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(s.event.type.icon, null, tint = Text2, modifier = Modifier.size(14.dp))
                         HSpace(6.dp)
-                        Eyebrow("${s.event.type.label} · ${clockOf(s.event.startMs)}")
+                        Eyebrow("${s.event.importance.label} · ${clockOf(s.event.startMs)}")
                     }
                     VSpace(4.dp)
                     Text(s.event.title, style = MaterialTheme.typography.titleMedium, color = Text1, maxLines = 2)
@@ -324,15 +330,24 @@ private fun Tips(tips: List<Suggestion>) {
 @Composable
 private fun SleepBlock(sleep: SleepNight?, week: List<SleepNight>, today: String, g: MobileGraph) {
     val dk = g.cognitive.dayKeys
-    Section("Sleep") {
+    var correcting by remember { mutableStateOf(false) }
+    Section("Sleep", trailing = {
+        TextButton(onClick = { correcting = true }) { Text(if (sleep == null) "Add" else "Correct", fontSize = 12.sp) }
+    }) {
         if (sleep == null) {
-            Muted("Not recorded last night. Wear the watch to bed.")
+            Muted("Nothing tracked last night. Wear the watch to bed and sleep is recorded automatically.")
         } else {
             Row(Modifier.fillMaxWidth()) {
                 FactTile(Icons.Rounded.Bedtime, formatDuration(sleep.asleepMinutes), "asleep", Modifier.weight(1f), scoreColor(g.cognitive.engine.sleepScore(sleep.asleepMinutes / 60.0)))
                 FactTile(Icons.Rounded.NightsStay, clockOf(sleep.startMs), "in bed", Modifier.weight(1f), Brand)
                 FactTile(Icons.Rounded.WbSunny, clockOf(sleep.endMs), "awake", Modifier.weight(1f), Brand)
                 FactTile(Icons.Rounded.Favorite, sleep.sleepingHrAvg?.roundToInt()?.toString() ?: "--", "bpm", Modifier.weight(1f), Brand)
+            }
+            VSpace(10.dp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(if (sleep.corrected) Icons.Rounded.Edit else Icons.Rounded.Watch, null, tint = Text2, modifier = Modifier.size(14.dp))
+                HSpace(6.dp)
+                Eyebrow(if (sleep.corrected) "Corrected by you" else "Auto-tracked by your watch")
             }
         }
         VSpace(18.dp)
@@ -346,15 +361,75 @@ private fun SleepBlock(sleep: SleepNight?, week: List<SleepNight>, today: String
             target = 7f,
         )
     }
+    if (correcting) CorrectSleepDialog(g, today, sleep) { correcting = false }
+}
+
+/**
+ * Fix the times the watch detected (or add a night it missed). Bedtime after noon belongs to the previous
+ * evening; the wake time is on the morning of [today].
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CorrectSleepDialog(g: MobileGraph, today: String, sleep: SleepNight?, onDismiss: () -> Unit) {
+    val dk = g.cognitive.dayKeys
+    val scope = rememberCoroutineScope()
+    val midnight = dk.startOf(today)
+    fun hm(ms: Long?, fallbackH: Int): Pair<Int, Int> =
+        ms?.let { val m = ((it - midnight).mod(24 * HOUR)) / 60_000L; (m / 60).toInt() to (m % 60).toInt() } ?: (fallbackH to 0)
+    val (bh, bm) = hm(sleep?.startMs, 23)
+    val (wh, wm) = hm(sleep?.endMs, 7)
+    val bed = rememberTimePickerState(initialHour = bh, initialMinute = bm, is24Hour = true)
+    val wake = rememberTimePickerState(initialHour = wh, initialMinute = wm, is24Hour = true)
+    val bedMs = midnight + bed.hour * HOUR + bed.minute * 60_000L - if (bed.hour >= 12) 24 * HOUR else 0
+    val wakeMs = midnight + wake.hour * HOUR + wake.minute * 60_000L
+    val minutes = ((wakeMs - bedMs) / 60_000L).toInt()
+    val future = wakeMs > System.currentTimeMillis()
+    val valid = minutes in 60..16 * 60 && !future
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Panel,
+        shape = RoundedCornerShape(8.dp),
+        title = { Text(if (sleep == null) "Add last night" else "Correct last night", fontWeight = FontWeight.Light) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Muted("Your watch tracks sleep on its own. Fix the times only if they look wrong.")
+                VSpace(14.dp)
+                Eyebrow("Went to sleep")
+                VSpace(6.dp)
+                TimeInput(bed)
+                Eyebrow("Woke up")
+                VSpace(6.dp)
+                TimeInput(wake)
+                Text(
+                    when {
+                        future -> "Wake time is still ahead"
+                        valid -> "${formatDuration(minutes)} in bed"
+                        else -> "Check the times"
+                    },
+                    fontFamily = Mono, fontSize = 14.sp, color = if (valid) Cyan else Text2,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = valid, onClick = {
+                scope.launch {
+                    runCatching { g.cognitive.correctSleep(today, bedMs, wakeMs) }
+                    g.pushToWatch()
+                    onDismiss()
+                }
+            }) { Text("SAVE", letterSpacing = 1.5.sp) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("CANCEL", letterSpacing = 1.5.sp, color = Text2) } },
+    )
 }
 
 @Composable
-private fun CheckInBlock(g: MobileGraph, existing: CheckIn?, sensorSleep: Boolean) {
+private fun CheckInBlock(g: MobileGraph, existing: CheckIn?) {
     val scope = rememberCoroutineScope()
     var editing by remember(existing) { mutableStateOf(existing == null) }
     var energy by remember(existing) { mutableIntStateOf(existing?.energy ?: 3) }
     var stress by remember(existing) { mutableIntStateOf(existing?.stress ?: 3) }
-    var sleepHours by remember(existing) { mutableFloatStateOf((existing?.sleepHours ?: 7.0).toFloat()) }
     Section("Check-in", trailing = { if (!editing && existing != null) TextButton(onClick = { editing = true }) { Text("Edit", fontSize = 12.sp) } }) {
         if (!editing && existing != null) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -368,16 +443,11 @@ private fun CheckInBlock(g: MobileGraph, existing: CheckIn?, sensorSleep: Boolea
         SegmentScale("Energy", Icons.Rounded.Bolt, "Drained", "Charged", energy, higherIsBetter = true) { energy = it }
         VSpace(16.dp)
         SegmentScale("Stress", Icons.Rounded.Psychology, "Calm", "Tense", stress, higherIsBetter = false) { stress = it }
-        if (!sensorSleep) {
-            VSpace(12.dp)
-            Eyebrow("Sleep ${"%.1f".format(UiLocale, sleepHours)} h")
-            Slider(value = sleepHours, onValueChange = { sleepHours = (it * 2).roundToInt() / 2f }, valueRange = 3f..11f, steps = 15)
-        }
         VSpace(14.dp)
         Button(
             onClick = {
                 scope.launch {
-                    g.cognitive.saveCheckIn(if (sensorSleep) null else sleepHours.toDouble(), energy, stress)
+                    g.cognitive.saveCheckIn(energy, stress)
                     g.pushToWatch()
                     editing = false
                 }

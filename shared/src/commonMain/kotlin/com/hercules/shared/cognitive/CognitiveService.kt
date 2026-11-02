@@ -119,6 +119,7 @@ class CognitiveService(
         for (key in listOf(yesterday, today)) {
             val (from, to) = analyzer.window(key)
             val samples = repo.samplesBetween(from - 12 * HOUR_MS, to)
+            if (store.sleep(key)?.corrected == true) continue // the user's correction wins
             analyzer.analyze(key, samples, now)?.let { store.upsertSleep(it) }
         }
         val input = ReadinessInput(
@@ -133,8 +134,31 @@ class CognitiveService(
         engine.compute(input)?.also { store.upsertReadiness(it) }
     }
 
-    suspend fun saveCheckIn(sleepHours: Double?, energy: Int, stress: Int): Readiness? {
-        store.upsertCheckIn(CheckIn(today(), sleepHours, energy, stress, clock()))
+    suspend fun saveCheckIn(energy: Int, stress: Int): Readiness? {
+        store.upsertCheckIn(CheckIn(today(), null, energy, stress, clock()))
+        return refresh()
+    }
+
+    /**
+     * The user fixes the automatically detected night ending on the morning of [dayKey] (or adds one the
+     * watch missed). Time awake during the night is kept from the detection; HR stats are kept too.
+     */
+    suspend fun correctSleep(dayKey: String, startMs: Long, endMs: Long): Readiness? {
+        require(endMs > startMs) { "wake time must be after bedtime" }
+        val auto = store.sleep(dayKey)
+        val awakeMin = auto?.let { ((it.endMs - it.startMs) / 60_000L).toInt() - it.asleepMinutes }?.coerceAtLeast(0) ?: 0
+        val inBedMin = ((endMs - startMs) / 60_000L).toInt()
+        store.upsertSleep(
+            SleepNight(
+                dayKey = dayKey,
+                startMs = startMs,
+                endMs = endMs,
+                asleepMinutes = (inBedMin - awakeMin).coerceIn(inBedMin / 2, inBedMin),
+                sleepingHrAvg = auto?.sleepingHrAvg,
+                sleepingHrLow = auto?.sleepingHrLow,
+                source = SleepNight.SOURCE_USER,
+            ),
+        )
         return refresh()
     }
 
@@ -190,6 +214,7 @@ class CognitiveService(
         return WatchState(
             readiness = store.readinessRange(today, today).firstOrNull(),
             nextEvent = upcoming().firstOrNull { it.phase != PrepPhase.DONE },
+            upcoming = upcoming().filter { it.phase != PrepPhase.DONE }.take(5),
             updatedMs = clock(),
         )
     }

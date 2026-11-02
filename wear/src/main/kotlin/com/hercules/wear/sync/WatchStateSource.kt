@@ -26,11 +26,13 @@ class WatchStateSource(context: Context, private val cognitive: CognitiveService
             return fromPhone
         }
         val local = runCatching { cognitive.refresh() }.getOrNull()
+        val onWatch = runCatching { cognitive.watchState() }.getOrNull() // events stored on the watch (demo)
+        val phoneUpcoming = fromPhone?.upcoming.orEmpty().filter { it.event.startMs > nowMs - 3 * HOUR_MS }
         return WatchState(
             readiness = local ?: fromPhone?.readiness?.takeIf { it.dayKey == today },
-            nextEvent = fromPhone?.nextEvent?.takeIf { it.event.startMs > nowMs - 3 * HOUR_MS }
-                ?: runCatching { cognitive.watchState().nextEvent }.getOrNull(), // events stored on the watch (demo)
+            nextEvent = fromPhone?.nextEvent?.takeIf { it.event.startMs > nowMs - 3 * HOUR_MS } ?: onWatch?.nextEvent,
             updatedMs = nowMs,
+            upcoming = phoneUpcoming.ifEmpty { onWatch?.upcoming.orEmpty() },
         )
     }
 

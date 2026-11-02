@@ -143,10 +143,11 @@ class ReadinessEngine(private val dayKeys: DayKeys) {
         val components = mutableListOf<ReadinessComponent>()
 
         // Sleep
-        val sleepHours = input.sleep?.let { it.asleepMinutes / 60.0 } ?: input.checkIn?.sleepHours
+        // Sleep only comes from the watch (optionally corrected by the user), never from a questionnaire.
+        val sleepHours = input.sleep?.let { it.asleepMinutes / 60.0 }
         if (sleepHours != null) {
             val avg = b.sleepMinutes?.let { " · avg ${formatDuration(it.roundToInt())}" }.orEmpty()
-            val src = if (input.sleep == null) " (check-in)" else ""
+            val src = if (input.sleep.corrected) " (corrected)" else ""
             components += ReadinessComponent(ComponentKind.SLEEP, sleepScore(sleepHours), "${formatDuration((sleepHours * 60).roundToInt())} asleep$src$avg")
         }
 

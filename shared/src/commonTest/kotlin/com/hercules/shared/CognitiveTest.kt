@@ -105,10 +105,11 @@ class ReadinessEngineTest {
         assertTrue("High stress" in titles)
     }
 
-    @Test fun checkInAloneStillProducesAScore() {
+    @Test fun checkInAloneStillProducesAScoreButNeverInventsSleep() {
+        // Even a legacy check-in carrying sleep hours must not count as sleep: sleep only comes from the watch.
         val r = engine.compute(input(null, CheckIn("2026-11-10", 7.0, 4, 2, 0), baseline = Baseline.EMPTY))!!
-        assertEquals(setOf(ComponentKind.SLEEP, ComponentKind.SELF_REPORT, ComponentKind.ACTIVITY), r.components.map { it.kind }.toSet())
-        assertEquals(Confidence.MEDIUM, r.confidence)
+        assertEquals(setOf(ComponentKind.SELF_REPORT, ComponentKind.ACTIVITY), r.components.map { it.kind }.toSet())
+        assertEquals(Confidence.LOW, r.confidence)
     }
 
     @Test fun noSleepNoCheckInNoBaselineMeansNoScore() {

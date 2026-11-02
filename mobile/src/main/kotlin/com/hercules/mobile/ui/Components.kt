@@ -121,6 +121,8 @@ fun HerculesTheme(@Suppress("UNUSED_PARAMETER") dark: Boolean, content: @Composa
             background = Ink, surface = Ink, surfaceContainer = Panel, surfaceContainerLowest = Panel,
             surfaceVariant = Hairline, onSurface = Text1, onSurfaceVariant = Text2,
             outline = Text2, outlineVariant = Hairline, secondaryContainer = Color(0xFF16263A), onSecondaryContainer = Cyan,
+            // Time inputs, chips and selections: deep cyan instead of Material's default purple.
+            primaryContainer = Color(0xFF0D2A33), onPrimaryContainer = Cyan, tertiaryContainer = Color(0xFF16263A), onTertiaryContainer = Cyan,
         ),
         typography = base.copy(
             headlineSmall = base.headlineSmall.copy(fontWeight = FontWeight.Light, letterSpacing = (-0.5).sp),

@@ -1,6 +1,7 @@
 package com.hercules.shared
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import com.hercules.shared.cognitive.ComponentKind
 import com.hercules.shared.cognitive.CognitiveService
 import com.hercules.shared.cognitive.CognitiveStore
 import com.hercules.shared.cognitive.PrepPhase
@@ -66,7 +67,7 @@ class CognitiveServiceTest {
         val (repo, insights, cognitive) = services()
         DemoData.load(repo, insights, cognitive, now)
         val before = cognitive.refresh()!!
-        val after = cognitive.saveCheckIn(null, energy = 5, stress = 1)!!
+        val after = cognitive.saveCheckIn(energy = 5, stress = 1)!!
         assertTrue(after.score > before.score)
         assertTrue(after.suggestions.none { it.title == "Do your morning check-in" })
     }
@@ -80,5 +81,36 @@ class CognitiveServiceTest {
         val after = cognitive.eventStatus(ev)
         assertEquals(after.todayTasks.map { it.id }.toSet(), after.doneTaskIds)
         assertTrue(after.prepScore!! > before.prepScore!!)
+    }
+
+    @Test fun correctedSleepWinsOverAutoDetectionAndChangesScore() = runTest {
+        val (repo, insights, cognitive) = services()
+        DemoData.load(repo, insights, cognitive, now)
+        val today = cognitive.today()
+        val auto = cognitive.store.sleep(today)!!
+        assertEquals(false, auto.corrected)
+        val before = cognitive.refresh()!!
+
+        // The user says they actually slept a full 8.5 hours.
+        val start = auto.endMs - (8.5 * 3_600_000).toLong()
+        val after = cognitive.correctSleep(today, start, auto.endMs)!!
+        val fixed = cognitive.store.sleep(today)!!
+        assertTrue(fixed.corrected)
+        assertEquals(start, fixed.startMs)
+        assertTrue(fixed.asleepMinutes > auto.asleepMinutes)
+        assertTrue(after.score > before.score)
+        assertTrue(after.components.first { it.kind == ComponentKind.SLEEP }.detail.contains("corrected"))
+
+        // A later automatic refresh must not overwrite the correction.
+        cognitive.refresh()
+        assertEquals(fixed, cognitive.store.sleep(today))
+    }
+
+    @Test fun watchStateListsUpcomingMoments() = runTest {
+        val (repo, insights, cognitive) = services()
+        DemoData.load(repo, insights, cognitive, now)
+        val state = cognitive.watchState()
+        assertEquals(listOf("demo-pitch", "demo-interview"), state.upcoming.map { it.event.id })
+        assertEquals(state, cognitive.decodeWatchState(cognitive.encodeWatchState(state)))
     }
 }
