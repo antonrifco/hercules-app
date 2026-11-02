@@ -41,6 +41,10 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.TaskAlt
 import androidx.compose.material.icons.rounded.TrackChanges
 import androidx.compose.material3.AlertDialog
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.hercules.shared.cognitive.EventReflection
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -87,7 +91,7 @@ private const val HOUR = 3_600_000L
 private const val MAX_DAYS_AHEAD = 7
 
 @Composable
-fun PlanScreen(statuses: List<EventStatus>, padding: PaddingValues, onOpen: (String) -> Unit) {
+fun PlanScreen(statuses: List<EventStatus>, padding: PaddingValues, onAdd: () -> Unit, onOpen: (String) -> Unit) {
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()),
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = padding.calculateBottomPadding() + 96.dp),
@@ -100,19 +104,25 @@ fun PlanScreen(statuses: List<EventStatus>, padding: PaddingValues, onOpen: (Str
         }
         if (statuses.isEmpty()) {
             item {
-                Illustration(R.drawable.ill_plan, Modifier.fillMaxWidth().height(240.dp))
+                Illustration(R.drawable.ill_plan, Modifier.fillMaxWidth().height(220.dp))
                 VSpace(8.dp)
-                Text("Nothing on the runway", style = MaterialTheme.typography.titleMedium, color = Text1)
-                Muted("Add an interview, pitch or exam up to 7 days out. Hercules builds the run-up for you.")
+                Text("Nothing planned", style = MaterialTheme.typography.titleLarge, color = Text1)
+                VSpace(4.dp)
+                Muted("Add an interview, pitch or exam. Hercules plans your sleep and prep, then tells you if you're ready.")
+                VSpace(16.dp)
+                Button(
+                    onClick = onAdd, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(6.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Ink),
+                ) { Text("ADD A BIG MOMENT", letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold) }
             }
         }
-        itemsIndexed(statuses, key = { _, s -> s.event.id }) { i, s -> RailRow(s, first = i == 0, last = i == statuses.lastIndex) { onOpen(s.event.id) } }
+        itemsIndexed(statuses, key = { _, s -> s.event.id }) { i, s -> RailRow(s, first = i == 0, last = i == statuses.lastIndex, primary = i == 0) { onOpen(s.event.id) } }
     }
 }
 
 /** One stop on the countdown rail: node + D-x on the left, the event on the right. */
 @Composable
-private fun RailRow(s: EventStatus, first: Boolean, last: Boolean, onClick: () -> Unit) {
+private fun RailRow(s: EventStatus, first: Boolean, last: Boolean, primary: Boolean, onClick: () -> Unit) {
     val accent = s.advice?.verdict?.color ?: if (s.phase == PrepPhase.DONE) Text2 else Cyan
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).clickable(onClick = onClick)) {
         Box(Modifier.width(64.dp).fillMaxHeight()) {
@@ -141,15 +151,36 @@ private fun RailRow(s: EventStatus, first: Boolean, last: Boolean, onClick: () -
                         when {
                             s.advice != null -> Pill(s.advice!!.verdict.label, s.advice!!.verdict.color)
                             s.phase == PrepPhase.DONE -> Pill("Done", Text2)
-                            else -> Pill("${s.phase.label} · ${s.doneTaskIds.size}/${s.todayTasks.size}", Cyan, icon = Icons.Rounded.TaskAlt)
+                            else -> Text(daysLeft(s.daysUntil), style = MaterialTheme.typography.bodyMedium, color = Text1)
                         }
                     }
                     s.prepScore?.let { ScoreRing(it, "prep", 54.dp) }
+                }
+                if (s.todayTasks.isNotEmpty() && s.phase != PrepPhase.DONE) {
+                    Column {
+                        VSpace(12.dp)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.TaskAlt, null, tint = Cyan, modifier = Modifier.size(14.dp))
+                            HSpace(6.dp)
+                            Text("${s.doneTaskIds.size}/${s.todayTasks.size} steps done today", style = MaterialTheme.typography.bodySmall, color = Text2)
+                        }
+                        VSpace(6.dp)
+                        ScoreBar(s.doneTaskIds.size * 100 / s.todayTasks.size, Cyan, 3.dp)
+                        if (primary) {
+                            VSpace(12.dp)
+                            Button(
+                                onClick = onClick, modifier = Modifier.fillMaxWidth().height(44.dp), shape = RoundedCornerShape(6.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Ink),
+                            ) { Text(if (s.doneTaskIds.isEmpty()) "START PREPARATION" else "CONTINUE PREPARATION", letterSpacing = 1.2.sp, fontWeight = FontWeight.SemiBold, fontSize = 13.sp) }
+                        }
+                    }
                 }
             }
         }
     }
 }
+
+private fun daysLeft(d: Int) = when (d) { 0 -> "Today"; 1 -> "Tomorrow"; else -> "$d days remaining" }
 
 @Composable private fun Spacer6() = HSpace(6.dp)
 
@@ -310,6 +341,8 @@ fun EventDetail(
     val scope = rememberCoroutineScope()
     var confirmDelete by remember { mutableStateOf(false) }
     val today = g.cognitive.today()
+    val reflections by remember { g.cognitive.store.observeReflections() }.collectAsStateWithLifecycle(emptyList())
+    val myReflection = reflections.firstOrNull { it.eventId == s.event.id }
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()),
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = padding.calculateBottomPadding() + 32.dp),
@@ -332,11 +365,11 @@ fun EventDetail(
                             when {
                                 s.daysUntil < 0 -> "Done"
                                 s.daysUntil == 0 -> "Today"
-                                else -> "D-${s.daysUntil}"
+                                else -> "${s.daysUntil}"
                             },
                             fontSize = 64.sp, fontWeight = FontWeight.Thin, color = Text1, letterSpacing = (-2).sp,
                         )
-                        Eyebrow(s.phase.label, color = Cyan)
+                        Eyebrow(when { s.daysUntil > 1 -> "days remaining"; s.daysUntil == 1 -> "day remaining"; else -> s.phase.label }, color = Cyan)
                     }
                     s.prepScore?.let { ScoreRing(it, "prep") }
                     s.projectedScore?.let { HSpace(14.dp); ScoreRing(it, "forecast") }
@@ -372,31 +405,27 @@ fun EventDetail(
                 }
             }
         }
-        item {
-            Section("Run-up") {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-                    s.history.forEachIndexed { i, d ->
-                        val offset = s.history.size - 1 - i
-                        val isToday = d.dayKey == today
-                        val c = d.score?.let { scoreColor(it) }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(d.score?.toString() ?: "·", fontFamily = Mono, fontSize = 11.sp, color = c ?: Text2)
-                            VSpace(4.dp)
-                            Box(
-                                Modifier.width(16.dp).height(((d.score ?: 6) * 0.7f).dp).clip(RoundedCornerShape(2.dp))
-                                    .background(c ?: Hairline)
-                                    .border(BorderStroke(if (isToday) 1.5.dp else 0.dp, if (isToday) Text1 else Color.Transparent), RoundedCornerShape(2.dp)),
-                            )
-                            VSpace(6.dp)
-                            Text(if (offset == 0) "D" else "-$offset", fontFamily = Mono, fontSize = 10.sp, color = if (isToday) Cyan else Text2)
-                        }
+        if (s.event.startMs < System.currentTimeMillis()) {
+            item {
+                Section("How did it go?") {
+                    FacesRow(myReflection?.rating) { v ->
+                        scope.launch { g.cognitive.store.saveReflection(EventReflection(s.event.id, v, System.currentTimeMillis())); onChanged() }
+                    }
+                    myReflection?.let { rf ->
+                        val score = s.history.lastOrNull { it.score != null }?.score
+                        VSpace(14.dp)
+                        Text(
+                            "You rated it ${rf.rating}/5" + (score?.let { " · readiness that day $it" } ?: ""),
+                            style = MaterialTheme.typography.bodyMedium, color = Text1,
+                        )
+                        Muted("Compare over time. This can't tell what caused what.")
                     }
                 }
             }
         }
         if (s.todayTasks.isNotEmpty()) {
             item {
-                Section("Today's checklist", trailing = { Text("${s.doneTaskIds.size}/${s.todayTasks.size}", fontFamily = Mono, fontSize = 12.sp, color = Cyan) }) {
+                Section("Prepare today", trailing = { Text("${s.doneTaskIds.size}/${s.todayTasks.size}", fontFamily = Mono, fontSize = 12.sp, color = Cyan) }) {
                     s.todayTasks.forEachIndexed { i, t ->
                         val done = t.id in s.doneTaskIds
                         var open by remember(t.id) { mutableStateOf(false) }
@@ -415,6 +444,28 @@ fun EventDetail(
                         }
                         AnimatedVisibility(open) { Muted(t.detail, Modifier.padding(start = 48.dp, bottom = 8.dp)) }
                         if (i < s.todayTasks.lastIndex) Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
+                    }
+                }
+            }
+        }
+        item {
+            Section("Run-up") {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
+                    s.history.forEachIndexed { i, d ->
+                        val offset = s.history.size - 1 - i
+                        val isToday = d.dayKey == today
+                        val c = d.score?.let { scoreColor(it) }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(d.score?.toString() ?: "·", fontFamily = Mono, fontSize = 11.sp, color = c ?: Text2)
+                            VSpace(4.dp)
+                            Box(
+                                Modifier.width(16.dp).height(((d.score ?: 6) * 0.7f).dp).clip(RoundedCornerShape(2.dp))
+                                    .background(c ?: Hairline)
+                                    .border(BorderStroke(if (isToday) 1.5.dp else 0.dp, if (isToday) Text1 else Color.Transparent), RoundedCornerShape(2.dp)),
+                            )
+                            VSpace(6.dp)
+                            Text(if (offset == 0) "D" else "-$offset", fontFamily = Mono, fontSize = 10.sp, color = if (isToday) Cyan else Text2)
+                        }
                     }
                 }
             }

@@ -21,6 +21,24 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.automirrored.rounded.TrendingDown
+import androidx.compose.material.icons.automirrored.rounded.TrendingUp
+import androidx.compose.material.icons.rounded.Insights
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.Event
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.hercules.shared.cognitive.ActionKind
+import com.hercules.shared.cognitive.DailyBrief
+import com.hercules.shared.cognitive.EventReflection
+import com.hercules.shared.cognitive.Moment
+import com.hercules.shared.cognitive.learningNote
+import com.hercules.shared.cognitive.provenance
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.automirrored.rounded.DirectionsWalk
@@ -63,7 +81,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hercules.shared.model.DailySummary
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -104,10 +121,16 @@ class TodayData(
     val checkIn: CheckIn?,
     val nextEvent: EventStatus?,
     val todayEvents: List<EventStatus> = emptyList(),
+    val brief: DailyBrief? = null,
+    val allEvents: List<EventStatus> = emptyList(),
+    val reflections: List<EventReflection> = emptyList(),
 )
 
 private const val HOUR = 3_600_000L
 
+private enum class Sheet { CHECK_IN, REFLECT, LEARN }
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TodayScreen(
     g: MobileGraph,
@@ -116,24 +139,110 @@ fun TodayScreen(
     padding: PaddingValues,
     onOpenEvent: (String) -> Unit,
     onOpenGuide: () -> Unit,
+    onPlanEvent: () -> Unit = {},
+    onOpenSetup: () -> Unit = {},
 ) {
     val r = data.readiness
+    val brief = data.brief
     val summary by remember(data.today) { g.repo.observeDaily(data.today) }.collectAsStateWithLifecycle(null)
+    val lastSync by g.lastWatchSync.collectAsStateWithLifecycle()
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    var sheet by remember { mutableStateOf<Sheet?>(null) }
+    var reflectId by remember { mutableStateOf<String?>(null) }
+    val watchDone = stickyFlag("start_watch", lastSync != null)
+    val checkInDone = stickyFlag("start_checkin", data.checkIn != null)
+    val eventDone = stickyFlag("start_event", data.allEvents.isNotEmpty())
+    val moment = g.cognitive.daily.moment(nowMs)
+    val hour = g.cognitive.dayKeys.minuteOfDay(nowMs) / 60
+    val showTonight = brief?.sleep != null && (moment == Moment.EVENING || moment == Moment.NIGHT || hour >= 16)
+    val actionEvent = brief?.action?.eventId
+    var scrollTo by remember { mutableStateOf<String?>(null) }
+
+    val sections = buildList<Pair<String, @Composable () -> Unit>> {
+        add("top" to { TopLine(nowMs, onOpenGuide) })
+        add("hero" to { if (r != null && brief != null) Briefing(r, brief) { sheet = Sheet.LEARN } else NoScoreCard { sheet = Sheet.CHECK_IN } })
+        if (brief != null) {
+            add("action" to {
+                ActionCard(brief.action) { a ->
+                    when (a.kind) {
+                        ActionKind.CHECK_IN -> sheet = Sheet.CHECK_IN
+                        ActionKind.PREPARE -> a.eventId?.let(onOpenEvent)
+                        ActionKind.REFLECT -> { reflectId = a.eventId; sheet = Sheet.REFLECT }
+                        ActionKind.SLEEP -> scrollTo = "tonight"
+                        ActionKind.PLAN_EVENT -> onPlanEvent()
+                        ActionKind.FOCUS -> scrollTo = "day"
+                    }
+                }
+            })
+            if (r != null) add("focus" to { FocusCard(brief.focus, brief.focusNow, nowMs) })
+        }
+        if (!(watchDone && checkInDone && eventDone)) {
+            add("start" to {
+                GettingStarted(watchDone, checkInDone, eventDone, onWatch = onOpenSetup, onCheckIn = { sheet = Sheet.CHECK_IN }, onEvent = onPlanEvent)
+            })
+        }
+        data.nextEvent?.takeIf { it.event.id != actionEvent }?.let { ev -> add("next" to { NextEvent(ev, onOpenEvent) }) }
+        add("day" to { DayStrip(g.cognitive.dayKeys, data, r, nowMs, onOpenEvent) })
+        if (showTonight) add("tonight" to { TonightCard(brief!!.sleep!!, r) })
+        if (r != null) add("why" to { Readouts(r) })
+        if (r != null) add("tips" to { Tips(r.suggestions) })
+        add("stats" to { TodayStats(summary) })
+        add("sleep" to { SleepBlock(data.sleep, data.sleepWeek, data.today, g) })
+        data.checkIn?.let { ci -> add("checkin" to { CheckInSummary(ci) { sheet = Sheet.CHECK_IN } }) }
+        if (data.trend.size >= 2) add("week" to { WeekBlock(data.trend, data.sleepWeek, g) })
+    }
+    LaunchedEffect(scrollTo) {
+        scrollTo?.let { k -> listState.animateScrollToItem(sections.indexOfFirst { it.first == k }.coerceAtLeast(0)) }
+        scrollTo = null
+    }
+
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()),
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = padding.calculateBottomPadding() + 32.dp),
         verticalArrangement = CardGap,
     ) {
-        item { TopLine(nowMs, onOpenGuide) }
-        item { if (r != null) Hero(r) else EmptyHero() }
-        item { DayStrip(g.cognitive.dayKeys, data, r, nowMs, onOpenEvent) }
-        if (r != null) item { Readouts(r) }
-        data.nextEvent?.let { ev -> item { NextEvent(ev, onOpenEvent) } }
-        if (r != null) item { Tips(r.suggestions) }
-        item { TodayStats(summary) }
-        item { SleepBlock(data.sleep, data.sleepWeek, data.today, g) }
-        item { CheckInBlock(g, data.checkIn) }
-        if (data.trend.size >= 2) item { TrendBlock(data.trend, g) }
+        items(sections, key = { it.first }) { it.second() }
+    }
+
+    sheet?.let { which ->
+        ModalBottomSheet(onDismissRequest = { sheet = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = Panel) {
+            when (which) {
+                Sheet.CHECK_IN -> CheckInForm(g, data.checkIn) { sheet = null }
+                Sheet.REFLECT -> {
+                    val ev = data.allEvents.firstOrNull { it.event.id == reflectId }
+                    var rating by remember(reflectId) { mutableStateOf(data.reflections.firstOrNull { it.eventId == reflectId }?.rating) }
+                    ReflectContent(ev?.event?.title ?: "Your event", r?.score, rating) { v ->
+                        rating = v
+                        reflectId?.let { id -> scope.launch { g.cognitive.store.saveReflection(EventReflection(id, v, System.currentTimeMillis())) } }
+                    }
+                }
+                Sheet.LEARN -> LearnContent(r)
+            }
+        }
+    }
+}
+
+/** A "done" flag that stays done, so first-week hints never come back once completed. */
+@Composable
+private fun stickyFlag(key: String, now: Boolean): Boolean {
+    val ctx = LocalContext.current
+    val prefs = remember { ctx.getSharedPreferences("hercules_ui", android.content.Context.MODE_PRIVATE) }
+    var saved by remember { mutableStateOf(prefs.getBoolean(key, false)) }
+    if (now && !saved) { prefs.edit().putBoolean(key, true).apply(); saved = true }
+    return saved || now
+}
+
+/** Why the score is still "learning". Short, then done. */
+@Composable
+private fun LearnContent(r: Readiness?) {
+    Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp)) {
+        Eyebrow("Learning your patterns")
+        VSpace(6.dp)
+        Text(r?.learningNote ?: "Your score is fully calibrated.", style = MaterialTheme.typography.headlineSmall, color = Text1)
+        VSpace(12.dp)
+        Muted("Hercules compares you with your own normal. It needs about 7 nights to learn it. Until then the score is a rougher estimate.")
     }
 }
 
@@ -149,35 +258,6 @@ private fun TopLine(nowMs: Long, onOpenGuide: () -> Unit) {
     }
 }
 
-@Composable
-private fun Hero(r: Readiness) {
-    val c = r.band.color
-    Column(Modifier.fillMaxWidth().background(glow(c)), horizontalAlignment = Alignment.CenterHorizontally) {
-        ScoreGauge(r.score, c)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(r.band.icon, null, tint = c, modifier = Modifier.size(16.dp))
-            HSpace(8.dp)
-            Eyebrow(r.band.label, color = c)
-        }
-        VSpace(10.dp)
-        Text(r.band.headline, style = MaterialTheme.typography.headlineSmall, color = Text1, textAlign = TextAlign.Center)
-        if (r.confidence != Confidence.HIGH) {
-            VSpace(10.dp)
-            Pill("${r.confidence.label} ${r.baselineDays.coerceAtMost(7)}/7", Text2)
-        }
-    }
-}
-
-@Composable
-private fun EmptyHero() {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Illustration(R.drawable.ill_sleep, Modifier.fillMaxWidth().height(260.dp))
-        Eyebrow("No reading yet", color = Cyan)
-        VSpace(8.dp)
-        Text("Sleep sets the dial", style = MaterialTheme.typography.headlineSmall, color = Text1)
-        Muted("Wear the watch to bed tonight, or log a check-in below.")
-    }
-}
 
 /**
  * The signature view: one line for the whole day. Last night's sleep, focus windows,
@@ -330,7 +410,8 @@ private fun Legend(color: Color, text: String) {
 @Composable
 internal fun Readouts(r: Readiness) {
     var selected by remember { mutableStateOf<Int?>(null) }
-    Section("Readout") {
+    var technical by remember { mutableStateOf(false) }
+    Section("Why this score", trailing = { Pill("Estimate", Text2) }) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             r.components.forEachIndexed { i, c ->
                 val col = scoreColor(c.score)
@@ -345,19 +426,24 @@ internal fun Readouts(r: Readiness) {
                     VSpace(6.dp)
                     ScoreBar(c.score, col, 2.dp)
                     VSpace(6.dp)
-                    Text(c.kind.label.uppercase(UiLocale), fontSize = 10.sp, letterSpacing = 1.sp, color = Text2, maxLines = 2, minLines = 2)
+                    Text(c.kind.plainName.uppercase(UiLocale), fontSize = 10.sp, letterSpacing = 1.sp, color = Text2, maxLines = 2, minLines = 2)
                 }
             }
         }
         if (selected == null) {
             VSpace(8.dp)
-            Muted("Tap a reading to see what it measured.")
+            Muted("Tap a reading to see where it comes from.")
         }
         selected?.let { i ->
             val c = r.components[i]
             VSpace(10.dp)
             Text(c.detail, style = MaterialTheme.typography.bodyMedium, color = Text1)
-            Muted("${(c.kind.weight * 100).roundToInt()}% of the score. ${c.kind.explanation}")
+            VSpace(8.dp)
+            ProvenanceTag(c.kind.provenance)
+            TextButton(onClick = { technical = !technical }, contentPadding = PaddingValues(0.dp)) {
+                Text(if (technical) "HIDE DETAILS" else "HOW IS THIS USED?", fontSize = 11.sp, letterSpacing = 1.2.sp, color = Cyan)
+            }
+            AnimatedVisibility(technical) { Muted("${(c.kind.weight * 100).roundToInt()}% of the score. ${c.kind.explanation}") }
         }
     }
 }
@@ -392,8 +478,8 @@ private fun NextEvent(s: EventStatus, onOpen: (String) -> Unit) {
 
 @Composable
 private fun Tips(tips: List<Suggestion>) {
-    Section("Today's moves") {
-        tips.take(4).forEachIndexed { i, s ->
+    Section("Tips", trailing = { Eyebrow("general advice") }) {
+        tips.take(3).forEachIndexed { i, s ->
             var open by remember(s.title) { mutableStateOf(false) }
             Column(Modifier.fillMaxWidth().clickable { open = !open }.padding(vertical = 10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -406,7 +492,7 @@ private fun Tips(tips: List<Suggestion>) {
                     Text(s.detail, style = MaterialTheme.typography.bodyMedium, color = Text2, modifier = Modifier.padding(start = 34.dp, top = 6.dp))
                 }
             }
-            if (i < tips.take(4).lastIndex) Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
+            if (i < tips.take(3).lastIndex) Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
         }
     }
 }
@@ -510,38 +596,49 @@ private fun CorrectSleepDialog(g: MobileGraph, today: String, sleep: SleepNight?
     )
 }
 
+/** The two-tap check-in: used from the action button and from "Edit". */
 @Composable
-private fun CheckInBlock(g: MobileGraph, existing: CheckIn?) {
+private fun CheckInForm(g: MobileGraph, existing: CheckIn?, onDone: () -> Unit) {
     val scope = rememberCoroutineScope()
-    var editing by remember(existing) { mutableStateOf(existing == null) }
     var energy by remember(existing) { mutableIntStateOf(existing?.energy ?: 3) }
     var stress by remember(existing) { mutableIntStateOf(existing?.stress ?: 3) }
-    Section("Check-in", trailing = { if (!editing && existing != null) TextButton(onClick = { editing = true }) { Text("Edit", fontSize = 12.sp) } }) {
-        if (!editing && existing != null) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Illustration(R.drawable.ill_checkin, Modifier.size(96.dp))
-                HSpace(12.dp)
-                FactTile(Icons.Rounded.Bolt, "${existing.energy}/5", "energy", Modifier.weight(1f), scoreColor(existing.energy * 20))
-                FactTile(Icons.Rounded.Psychology, "${existing.stress}/5", "stress", Modifier.weight(1f), scoreColor(120 - existing.stress * 20))
-            }
-            return@Section
-        }
+    var saving by remember { mutableStateOf(false) }
+    Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp)) {
+        Eyebrow("Check-in")
+        VSpace(6.dp)
+        Text("How do you feel right now?", style = MaterialTheme.typography.headlineSmall, color = Text1)
+        VSpace(20.dp)
         SegmentScale("Energy", Icons.Rounded.Bolt, "Drained", "Charged", energy, higherIsBetter = true) { energy = it }
-        VSpace(16.dp)
+        VSpace(18.dp)
         SegmentScale("Stress", Icons.Rounded.Psychology, "Calm", "Tense", stress, higherIsBetter = false) { stress = it }
-        VSpace(14.dp)
+        VSpace(20.dp)
         Button(
+            enabled = !saving,
             onClick = {
+                saving = true
                 scope.launch {
                     g.cognitive.saveCheckIn(energy, stress)
                     g.pushToWatch()
-                    editing = false
+                    onDone()
                 }
             },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().height(48.dp),
             shape = RoundedCornerShape(6.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Ink),
-        ) { Text("LOG CHECK-IN", letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold) }
+        ) { Text(if (saving) "SAVING…" else "SAVE", letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold) }
+    }
+}
+
+/** Today's check-in, once done: two numbers and an edit button. */
+@Composable
+private fun CheckInSummary(c: CheckIn, onEdit: () -> Unit) {
+    Section("Check-in", trailing = { TextButton(onClick = onEdit) { Text("Edit", fontSize = 12.sp) } }) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Illustration(R.drawable.ill_checkin, Modifier.size(80.dp))
+            HSpace(12.dp)
+            FactTile(Icons.Rounded.Bolt, "${c.energy}/5", "energy", Modifier.weight(1f), scoreColor(c.energy * 20))
+            FactTile(Icons.Rounded.Psychology, "${c.stress}/5", "stress", Modifier.weight(1f), scoreColor(120 - c.stress * 20))
+        }
     }
 }
 
@@ -572,14 +669,30 @@ private fun SegmentScale(title: String, icon: ImageVector, low: String, high: St
     }
 }
 
+/** This week against last week, then the 14-day shape. All of it is measured or reported, only the score is an estimate. */
 @Composable
-private fun TrendBlock(trend: List<Readiness>, g: MobileGraph) {
+private fun WeekBlock(trend: List<Readiness>, sleepWeek: List<SleepNight>, g: MobileGraph) {
     val dk = g.cognitive.dayKeys
     val today = trend.last().dayKey
     val keys = (-13..0).map { dk.plusDays(today, it) }
     val byKey = trend.associateBy { it.dayKey }
-    val avg = trend.map { it.score }.average().roundToInt()
-    Section("14 days", trailing = { Text("avg $avg", fontFamily = Mono, fontSize = 12.sp, color = Text2) }) {
+    val thisWeek = keys.takeLast(7).mapNotNull { byKey[it] }
+    val lastWeek = keys.take(7).mapNotNull { byKey[it] }
+    val avg = thisWeek.map { it.score }.average().takeIf { !it.isNaN() }?.roundToInt()
+    val prev = lastWeek.map { it.score }.average().takeIf { !it.isNaN() }?.roundToInt()
+    val best = thisWeek.maxByOrNull { it.score }
+    val sleepAvg = sleepWeek.map { it.asleepMinutes }.average().takeIf { !it.isNaN() }?.roundToInt()
+    Section("This week", trailing = { Pill("Estimate", Text2) }) {
+        Row(Modifier.fillMaxWidth()) {
+            FactTile(Icons.Rounded.Insights, avg?.toString() ?: "--", "avg score", Modifier.weight(1f), avg?.let { scoreColor(it) } ?: Cyan)
+            FactTile(
+                if ((avg ?: 0) >= (prev ?: 0)) Icons.AutoMirrored.Rounded.TrendingUp else Icons.AutoMirrored.Rounded.TrendingDown,
+                if (avg != null && prev != null) "%+d".format(avg - prev) else "--", "vs last week", Modifier.weight(1f), Cyan,
+            )
+            FactTile(Icons.Rounded.Star, best?.let { weekdayShort(dk.startOf(it.dayKey) + 12 * HOUR) } ?: "--", "best day", Modifier.weight(1f), Cyan)
+            FactTile(Icons.Rounded.Bedtime, sleepAvg?.let { formatDuration(it) } ?: "--", "avg sleep", Modifier.weight(1f), Brand)
+        }
+        VSpace(16.dp)
         MiniBars(
             values = keys.map { k -> byKey[k]?.score?.toFloat() },
             max = 100f,
@@ -588,7 +701,7 @@ private fun TrendBlock(trend: List<Readiness>, g: MobileGraph) {
             target = 70f,
         )
         VSpace(6.dp)
-        Muted("Daily readiness score. The dashed line at 70 marks a good day.")
+        Muted("Daily score, last 14 days. Dashed line: 70 is a good day.")
     }
 }
 

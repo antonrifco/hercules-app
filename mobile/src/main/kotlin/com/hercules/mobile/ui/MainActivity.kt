@@ -46,6 +46,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hercules.mobile.BuildConfig
 import com.hercules.mobile.MobileGraph
 import com.hercules.mobile.graph
+import com.hercules.shared.cognitive.DailyBrief
 import com.hercules.shared.cognitive.EventStatus
 import com.hercules.shared.demo.DemoData
 import kotlinx.coroutines.delay
@@ -116,6 +117,11 @@ private fun HerculesApp(loadDemoOnStart: Boolean) {
         value = events.map { g.cognitive.eventStatus(it) }
     }
 
+    val reflections by remember { store.observeReflections() }.collectAsStateWithLifecycle(emptyList())
+    val brief by produceState<DailyBrief?>(null, readiness, checkIn, sleep, statuses, reflections, nowMs) {
+        value = runCatching { g.cognitive.brief(nowMs) }.getOrNull()
+    }
+
     val detail = openEventId?.let { id -> statuses.firstOrNull { it.event.id == id } }
     BackHandler(enabled = openEventId != null) { openEventId = null }
 
@@ -169,12 +175,17 @@ private fun HerculesApp(loadDemoOnStart: Boolean) {
             openEventId != null -> Unit // statuses still loading
             tab == Tab.TODAY -> TodayScreen(
                 g,
-                TodayData(today, readiness, sleep, sleepWeek, trend, checkIn, statuses.nextRelevant(nowMs), statuses.filter { it.daysUntil == 0 }),
+                TodayData(
+                    today, readiness, sleep, sleepWeek, trend, checkIn, statuses.nextRelevant(nowMs), statuses.filter { it.daysUntil == 0 },
+                    brief, statuses, reflections,
+                ),
                 nowMs, inner,
                 onOpenEvent = { openEventId = it },
                 onOpenGuide = { guide = true },
+                onPlanEvent = { tab = Tab.PLAN; adding = true },
+                onOpenSetup = { tab = Tab.DATA },
             )
-            tab == Tab.PLAN -> PlanScreen(statuses, inner) { openEventId = it }
+            tab == Tab.PLAN -> PlanScreen(statuses, inner, onAdd = { adding = true }) { openEventId = it }
             else -> DataScreen(g, today, inner, onLoadDemo = { loadDemo() })
         }
     }

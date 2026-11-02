@@ -28,6 +28,12 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            all { it.systemProperty("robolectric.offline", "true"); it.systemProperty("robolectric.dependency.dir", "/tmp/robo") }
+        }
+    }
     buildFeatures {
         compose = true
         buildConfig = true // BuildConfig.DEBUG gates the demo-data loader
@@ -55,4 +61,12 @@ dependencies {
     implementation(libs.androidx.activity.compose)
 
     testImplementation(libs.junit)
+    // Optional JVM screenshots of the Compose UI (-Phercules.screenshots=true). Off by default.
+    if (providers.gradleProperty("hercules.screenshots").isPresent) {
+        testImplementation("org.robolectric:robolectric:4.14.1")
+        testImplementation(platform(libs.compose.bom))
+        testImplementation("androidx.compose.ui:ui-test-junit4")
+        debugImplementation("androidx.compose.ui:ui-test-manifest")
+    }
+    implementation(libs.androidx.work)
 }
