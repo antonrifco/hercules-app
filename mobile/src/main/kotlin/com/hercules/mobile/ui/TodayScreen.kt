@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -88,6 +90,7 @@ import com.hercules.shared.cognitive.Readiness
 import com.hercules.shared.cognitive.SleepNight
 import com.hercules.shared.cognitive.Suggestion
 import com.hercules.shared.cognitive.WindowKind
+import com.hercules.shared.insights.DayKeys
 import com.hercules.shared.cognitive.formatDuration
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -123,11 +126,11 @@ fun TodayScreen(
     ) {
         item { TopLine(nowMs, onOpenGuide) }
         item { if (r != null) Hero(r) else EmptyHero() }
-        item { DayStrip(g, data, r, nowMs, onOpenEvent) }
-        item { TodayStats(summary) }
+        item { DayStrip(g.cognitive.dayKeys, data, r, nowMs, onOpenEvent) }
         if (r != null) item { Readouts(r) }
         data.nextEvent?.let { ev -> item { NextEvent(ev, onOpenEvent) } }
         if (r != null) item { Tips(r.suggestions) }
+        item { TodayStats(summary) }
         item { SleepBlock(data.sleep, data.sleepWeek, data.today, g) }
         item { CheckInBlock(g, data.checkIn) }
         if (data.trend.size >= 2) item { TrendBlock(data.trend, g) }
@@ -185,8 +188,7 @@ private fun EmptyHero() {
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun DayStrip(g: MobileGraph, data: TodayData, r: Readiness?, nowMs: Long, onOpenEvent: (String) -> Unit) {
-    val dk = g.cognitive.dayKeys
+internal fun DayStrip(dk: DayKeys, data: TodayData, r: Readiness?, nowMs: Long, onOpenEvent: (String) -> Unit) {
     val dayStart = dk.startOf(data.today)
     val start = minOf(data.sleep?.startMs ?: (dayStart - 2 * HOUR), dayStart - HOUR)
     val end = dayStart + 24 * HOUR
@@ -250,7 +252,9 @@ private fun DayStrip(g: MobileGraph, data: TodayData, r: Readiness?, nowMs: Long
                 val w = maxOf(x(dayStart + 7 * HOUR), 0f)
                 drawRoundRect(Hairline, Offset(0f, top), Size(w, sleepPx), CornerRadius(4.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
                 val txt = measurer.measure("No sleep tracked", tickStyle)
-                if (txt.size.width < w - 12.dp.toPx()) drawText(txt, topLeft = Offset(6.dp.toPx(), top + (sleepPx - txt.size.height) / 2))
+                val lx = w - txt.size.width - 8.dp.toPx()
+                val nowCrosses = nowMs in start..end && x(nowMs) in (lx - 6.dp.toPx())..(lx + txt.size.width + 6.dp.toPx())
+                if (lx > 6.dp.toPx() && !nowCrosses) drawText(txt, topLeft = Offset(lx, top + (sleepPx - txt.size.height) / 2))
             }
             // Focus windows on a visible track, so dim phases (dip, evening) still read.
             drawRoundRect(Hairline, Offset(0f, bandY), Size(size.width, bandPx), CornerRadius(3.dp.toPx()))
@@ -259,11 +263,14 @@ private fun DayStrip(g: MobileGraph, data: TodayData, r: Readiness?, nowMs: Long
                 if (x1 > x0) drawRect(w.kind.color, Offset(x0, bandY), Size(x1 - x0 - 1f, bandPx))
             }
             // Events: numbered pins on a stem; the matching list sits below.
+            var lastPin = -1e9f
             events.forEachIndexed { i, e ->
                 val ex = x(e.event.startMs)
                 val col = e.advice?.verdict?.color ?: Cyan
                 val rad = 9.dp.toPx()
-                val cx = ex.coerceIn(rad, size.width - rad)
+                // Nudge neighbours apart so numbered pins never overlap; the stem still marks the true time.
+                val cx = ex.coerceIn(rad, size.width - rad).coerceAtLeast(lastPin + 2 * rad + 2.dp.toPx())
+                lastPin = cx
                 val cy = rad + 1.dp.toPx()
                 drawLine(Text2, Offset(ex, cy + rad), Offset(ex, bandY + bandPx), 1f)
                 drawCircle(col, rad, Offset(cx, cy))
@@ -285,8 +292,9 @@ private fun DayStrip(g: MobileGraph, data: TodayData, r: Readiness?, nowMs: Long
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).clickable { onOpenEvent(e.event.id) }.padding(vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(Modifier.size(20.dp).clip(CircleShape).background(col), contentAlignment = Alignment.Center) {
-                        Text("${i + 1}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Ink)
+                    Box(Modifier.size(22.dp).clip(CircleShape).background(col), contentAlignment = Alignment.Center) {
+                        val badgeSp = with(density) { 11.dp.toSp() } // stays inside the circle at any system font size
+                        Text("${i + 1}", fontSize = badgeSp, lineHeight = badgeSp, fontWeight = FontWeight.Bold, color = Ink)
                     }
                     HSpace(10.dp)
                     Text(clockOf(e.event.startMs), fontFamily = Mono, fontSize = 13.sp, color = Text2)
@@ -320,7 +328,7 @@ private fun Legend(color: Color, text: String) {
 
 /** Four instrument readouts; tap one to see what it measured. */
 @Composable
-private fun Readouts(r: Readiness) {
+internal fun Readouts(r: Readiness) {
     var selected by remember { mutableStateOf<Int?>(null) }
     Section("Readout") {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -589,7 +597,7 @@ fun List<EventStatus>.nextRelevant(nowMs: Long): EventStatus? =
     firstOrNull { it.phase != PrepPhase.DONE && it.event.startMs > nowMs - 2 * 3_600_000L }
 
 @Composable
-private fun TodayStats(s: DailySummary?) {
+internal fun TodayStats(s: DailySummary?) {
     val stats = listOf(
         Stat(Icons.AutoMirrored.Rounded.DirectionsWalk, "Steps", s?.steps?.let { "%,d".format(UiLocale, it) } ?: "--", "", "Movement today"),
         Stat(Icons.Rounded.Straighten, "Distance", s?.let { "%.1f".format(UiLocale, it.distanceMeters / 1000) } ?: "--", "km", "Walked and run"),
@@ -601,8 +609,8 @@ private fun TodayStats(s: DailySummary?) {
     Section("Today") {
         stats.chunked(2).forEachIndexed { row, pair ->
             if (row > 0) VSpace(10.dp)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                pair.forEach { StatTile(it, Modifier.weight(1f)) }
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                pair.forEach { StatTile(it, Modifier.weight(1f).fillMaxHeight()) }
             }
         }
     }
@@ -631,6 +639,6 @@ private fun StatTile(st: Stat, modifier: Modifier) {
             }
         }
         VSpace(4.dp)
-        Text(st.hint, style = MaterialTheme.typography.bodySmall, color = Text2, minLines = 2, maxLines = 2)
+        Text(st.hint, style = MaterialTheme.typography.bodySmall, color = Text2, maxLines = 2)
     }
 }
