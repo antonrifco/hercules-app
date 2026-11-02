@@ -50,6 +50,10 @@ Hercules is built around one question: *what should I do next?* The Today screen
 | After important work | One tap to say how it went, shown next to that day's readiness (never claimed as cause) |
 | Evening | Bedtime, "try sleeping 40 min earlier", and an *estimate* of tomorrow's readiness at 6 h vs. the target |
 
+**Meet Herc.** The mascot is a round cub whose mane is the readiness dial: the ticks light up to your score and his face follows how you are doing (happy, calm, tired, or asleep when there is no score yet). He is the launcher icon on phone and watch, the splash, and the face of the next-step card. One script, `tools/mascot/mascot.py`, draws him and writes the launcher, splash and notification vector drawables for both apps, so the icon and the in-app character stay the same drawing.
+
+![Herc: good, moderate, low, no score](docs/images/hercules-mascot.png)
+
 **Reminders** (all optional, set in Setup): morning score, event prep (evening before and 2 h ahead), bedtime, after an event, and focus start (off by default). Each is tied to your data, none are generic. **Only one device delivers each reminder:** the watch while it is worn (it has a fresh heart-rate reading), the phone otherwise. Tapping one opens the matching screen on that device.
 
 **Watch:** glanceable home (score, level, focus time, one next step), a two-tap check-in that syncs to the phone, event and tonight screens, a tracking-status screen that says what to fix, and "Continue on phone".

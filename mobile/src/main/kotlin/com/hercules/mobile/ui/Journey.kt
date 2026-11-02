@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -35,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -54,48 +56,41 @@ import kotlinx.coroutines.launch
 // ------------------------------------------------------------------ animated launch
 
 /**
- * Picks up where the system splash ends (same mark, same black): plays the generated splash
- * animation once, then fades into the app.
+ * Picks up where the system splash ends (same Herc, same black): the mane lights up, he blinks, the name
+ * fades in, then it all fades into the app.
  */
 @Composable
 fun LaunchArt(show: Boolean, durationMs: Long = 2_600) {
     var visible by remember { mutableStateOf(show) }
+    var lit by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(Unit) {
-        delay(durationMs)
+        delay(300)
+        lit = 0.78f
+        delay(durationMs - 300)
         visible = false
     }
     AnimatedVisibility(visible, enter = EnterTransition.None, exit = fadeOut(tween(500))) {
         Box(Modifier.fillMaxSize().background(Ink).clickable { visible = false }, contentAlignment = Alignment.Center) {
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { ctx ->
-                    ImageView(ctx).apply {
-                        scaleType = ImageView.ScaleType.CENTER_CROP
-                        val d = runCatching {
-                            ImageDecoder.decodeDrawable(ImageDecoder.createSource(ctx.resources, R.raw.splash_anim))
-                        }.getOrNull()
-                        if (d is AnimatedImageDrawable) {
-                            d.repeatCount = 0
-                            setImageDrawable(d)
-                            d.start()
-                        } else {
-                            setImageResource(R.drawable.splash_art)
-                        }
-                    }
-                },
-            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                // Same size as the system splash icon, so the hand-over is seamless.
+                Herc(HercMood.HAPPY, size = 288.dp, lit = lit, crop = false)
+                Text(
+                    "HERCULES", color = Text1, fontSize = 15.sp, letterSpacing = 8.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.offset(y = (-52).dp).alpha(if (lit > 0f) 1f else 0f),
+                )
+            }
         }
     }
 }
 
 // ------------------------------------------------------------------ onboarding
 
-private class Step(val image: Int, val eyebrow: String, val title: String, val body: String)
+private class Step(val image: Int, val eyebrow: String, val title: String, val body: String, val herc: HercMood? = null)
 
 private val Steps = listOf(
-    Step(R.drawable.ill_score, "01 · The dial", "Know when your brain is ready", "A daily score from 1 to 100, built from your sleep, heart and how you feel."),
+    Step(R.drawable.ill_score, "01 · Meet Herc", "Know when your brain is ready", "Herc turns your sleep and heart into a daily score from 1 to 100. His mane is the dial.", HercMood.HAPPY),
     Step(R.drawable.ill_no_watch, "02 · The watch", "Wear it to bed", "Install Hercules on your watch and open it once. It asks to read heart rate and sleep, only to score your nights. Your data stays on your devices."),
-    Step(R.drawable.ill_sleep, "03 · Sleep", "Nothing to log", "Sleep is tracked for you. The first week, Hercules learns what normal looks like for you."),
+    Step(R.drawable.ill_sleep, "03 · Sleep", "Nothing to log", "Sleep is tracked for you. The first week, Herc learns what normal looks like for you.", HercMood.SLEEPING),
     Step(R.drawable.ill_plan, "04 · The plan", "Aim for the big day", "Add an interview or pitch. Get a daily run-up and a clear go or wait call."),
     Step(R.drawable.ill_checkin, "05 · Reminders", "At most three a day", "Morning score, event prep and bedtime. Switch each off any time in Setup."),
 )
@@ -126,7 +121,13 @@ fun Onboarding(onDone: () -> Unit) {
             val s = Steps[page]
             val shown by animateFloatAsState(if (pager.currentPage == page) 1f else 0.3f, tween(400), label = "step")
             Column(Modifier.fillMaxSize().alpha(shown), verticalArrangement = Arrangement.Center) {
-                Illustration(s.image, Modifier.fillMaxWidth().aspectRatio(1f))
+                if (s.herc != null) {
+                    Box(Modifier.fillMaxWidth().aspectRatio(1f), contentAlignment = Alignment.Center) {
+                        Herc(s.herc, size = 280.dp, lit = if (pager.currentPage == page && s.herc == HercMood.HAPPY) 0.8f else 0f)
+                    }
+                } else {
+                    Illustration(s.image, Modifier.fillMaxWidth().aspectRatio(1f))
+                }
                 Eyebrow(s.eyebrow, color = Cyan)
                 Text(s.title, fontSize = 30.sp, fontWeight = FontWeight.Light, color = Text1, lineHeight = 36.sp, modifier = Modifier.padding(top = 10.dp))
                 Text(s.body, fontSize = 15.sp, color = Text2, lineHeight = 22.sp, modifier = Modifier.padding(top = 12.dp))

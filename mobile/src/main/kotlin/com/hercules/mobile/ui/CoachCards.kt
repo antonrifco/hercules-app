@@ -136,14 +136,14 @@ private fun minutesLeft(ms: Long): String {
 
 /** The one thing to do next. This is the primary button on the screen. */
 @Composable
-fun ActionCard(action: RecommendedAction, onAct: (RecommendedAction) -> Unit) {
+fun ActionCard(action: RecommendedAction, mood: HercMood = HercMood.HAPPY, lit: Float = 0.78f, onAct: (RecommendedAction) -> Unit) {
     PanelBox(Modifier.clickable { onAct(action) }, accent = Cyan) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconBadge(action.kind.icon, Cyan)
-                HSpace(14.dp)
+                Herc(mood, size = 56.dp, lit = lit)
+                HSpace(8.dp)
                 Column(Modifier.weight(1f)) {
-                    Eyebrow("Next", color = Cyan)
+                    Eyebrow("Herc suggests", color = Cyan)
                     Text(action.title, style = MaterialTheme.typography.titleMedium, color = Text1)
                     action.detail?.let { Muted(it) }
                 }
@@ -167,7 +167,7 @@ fun ActionCard(action: RecommendedAction, onAct: (RecommendedAction) -> Unit) {
 @Composable
 fun NoScoreCard(onCheckIn: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-        Illustration(com.hercules.mobile.R.drawable.ill_sleep, Modifier.fillMaxWidth().height(200.dp))
+        Herc(HercMood.SLEEPING, size = 170.dp, lit = 0f)
         Eyebrow("No score yet", color = Cyan)
         VSpace(8.dp)
         Text("Sleep sets the dial", style = MaterialTheme.typography.headlineSmall, color = Text1)
@@ -255,10 +255,15 @@ private fun StartRow(done: Boolean, icon: ImageVector, title: String, hint: Stri
 @Composable
 fun ReflectContent(title: String, readinessThatDay: Int?, current: Int?, onRate: (Int) -> Unit) {
     Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp)) {
-        Eyebrow("After the event")
-        VSpace(6.dp)
-        Text("How did it go?", style = MaterialTheme.typography.headlineSmall, color = Text1)
-        Muted(title)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Eyebrow("After the event")
+                VSpace(6.dp)
+                Text("How did it go?", style = MaterialTheme.typography.headlineSmall, color = Text1)
+                Muted(title)
+            }
+            Herc(HercMood.CALM, size = 64.dp, lit = 0.78f)
+        }
         VSpace(20.dp)
         FacesRow(current, onRate)
         if (current != null && readinessThatDay != null) {

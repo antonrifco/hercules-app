@@ -35,9 +35,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hercules.shared.cognitive.ActionKind
 import com.hercules.shared.cognitive.DailyBrief
+import com.hercules.shared.cognitive.Level
 import com.hercules.shared.cognitive.EventReflection
 import com.hercules.shared.cognitive.Moment
 import com.hercules.shared.cognitive.learningNote
+import com.hercules.shared.cognitive.level
 import com.hercules.shared.cognitive.provenance
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -162,11 +164,11 @@ fun TodayScreen(
     var scrollTo by remember { mutableStateOf<String?>(null) }
 
     val sections = buildList<Pair<String, @Composable () -> Unit>> {
-        add("top" to { TopLine(nowMs, onOpenGuide) })
+        add("top" to { TopLine(nowMs, r?.band?.level, r?.score, onOpenGuide) })
         add("hero" to { if (r != null && brief != null) Briefing(r, brief) { sheet = Sheet.LEARN } else NoScoreCard { sheet = Sheet.CHECK_IN } })
         if (brief != null) {
             add("action" to {
-                ActionCard(brief.action) { a ->
+                ActionCard(brief.action, r?.band?.level.mood(), (r?.score ?: 0) / 100f) { a ->
                     when (a.kind) {
                         ActionKind.CHECK_IN -> sheet = Sheet.CHECK_IN
                         ActionKind.PREPARE -> a.eventId?.let(onOpenEvent)
@@ -256,8 +258,10 @@ private fun LearnContent(r: Readiness?) {
 }
 
 @Composable
-private fun TopLine(nowMs: Long, onOpenGuide: () -> Unit) {
+private fun TopLine(nowMs: Long, level: Level?, score: Int?, onOpenGuide: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
+        Herc(level.mood(), size = 40.dp, lit = (score ?: 0) / 100f)
+        HSpace(8.dp)
         Text("HERCULES", color = Text1, fontSize = 13.sp, letterSpacing = 5.sp, fontWeight = FontWeight.Medium)
         HSpace(12.dp)
         Box(Modifier.size(width = 18.dp, height = 1.dp).background(Hairline))

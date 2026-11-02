@@ -294,7 +294,7 @@ internal fun PermissionScreen(onResult: () -> Unit) {
     val listState = rememberScalingLazyListState()
     ScreenScaffold(scrollState = listState) { padding ->
         ScalingLazyColumn(state = listState, contentPadding = padding, modifier = Modifier.fillMaxSize()) {
-            item { PulseRings(Modifier.size(56.dp)) }
+            item { Herc(HercMood.HAPPY, size = 60.dp) }
             item { Text("Allow access", style = MaterialTheme.typography.titleSmall, color = Color.White) }
             item { WhyRow(Icons.Rounded.Favorite, "Heart rate", "to score your recovery") }
             item { WhyRow(Icons.Rounded.Bedtime, "Sleep & motion", "to track your nights") }
@@ -359,7 +359,7 @@ internal fun HomeScreen(
                 item {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(top = 6.dp)) {
                         if (r == null) {
-                            SleepOrbit(Modifier.size(50.dp))
+                            Herc(HercMood.SLEEPING, size = 52.dp, lit = 0f)
                             WEyebrow("No score yet", WCyan)
                         } else {
                             CountUp(r.score)
@@ -519,8 +519,7 @@ internal fun CheckInScreen(existing: CheckIn?, onSave: suspend (Int, Int) -> Uni
         Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
             when {
                 saved -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Rounded.CheckCircle, null, tint = WCyan, modifier = Modifier.size(44.dp))
-                    Spacer(Modifier.height(6.dp))
+                    Herc(HercMood.HAPPY, size = 76.dp, lit = 0.8f)
                     Text("Saved", style = MaterialTheme.typography.titleMedium, color = Color.White)
                     WEyebrow("Score updated", WText2)
                 }
@@ -627,7 +626,7 @@ internal fun TonightScreen(advice: SleepAdvice?, hasScore: Boolean) {
     val dk = LocalContext.current.graph.cognitive.dayKeys
     ScreenScaffold(scrollState = listState) { padding ->
         ScalingLazyColumn(state = listState, contentPadding = padding, modifier = Modifier.fillMaxSize()) {
-            item { Icon(Icons.Rounded.Bedtime, null, tint = WCyan, modifier = Modifier.size(26.dp)) }
+            item { Herc(HercMood.SLEEPING, size = 44.dp, lit = 0.3f) }
             if (advice == null) {
                 item { Text("Sleep plan appears once your day is scored.", fontSize = 12.sp, color = WText2, textAlign = TextAlign.Center) }
                 return@ScalingLazyColumn
@@ -786,44 +785,7 @@ private fun CountUp(score: Int) {
 }
 
 /** Breathing crescent moon with twinkling stars: "waiting for a night of data". */
-@Composable
-private fun SleepOrbit(modifier: Modifier) {
-    val t = rememberInfiniteTransition(label = "orbit")
-    val breath by t.animateFloat(0.92f, 1.06f, infiniteRepeatable(tween(2200, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "breath")
-    val twinkle by t.animateFloat(0f, 1f, infiniteRepeatable(tween(2600, easing = LinearEasing)), label = "twinkle")
-    val orbit by t.animateFloat(0f, 360f, infiniteRepeatable(tween(9000, easing = LinearEasing)), label = "spin")
-    Canvas(modifier) {
-        val c = center
-        val r = size.minDimension * 0.26f * breath
-        drawCircle(WCyan.copy(alpha = 0.10f), radius = r * 1.9f, center = c)
-        drawCircle(WCyan, radius = r, center = c)
-        drawCircle(Color.Black, radius = r * 0.86f, center = Offset(c.x + r * 0.45f, c.y - r * 0.32f))
-        listOf(0f, 120f, 240f).forEachIndexed { i, base ->
-            val a = Math.toRadians((base + orbit).toDouble())
-            val d = size.minDimension * 0.44f
-            val phase = (twinkle + i / 3f) % 1f
-            val alpha = if (phase < 0.5f) phase * 2f else (1f - phase) * 2f
-            drawCircle(Color.White.copy(alpha = 0.25f + 0.75f * alpha), radius = 1.6.dp.toPx(), center = Offset(c.x + (d * cos(a)).toFloat(), c.y + (d * sin(a)).toFloat()))
-        }
-    }
-}
-
 /** Heart with rings expanding outward, used on the permission screen. */
-@Composable
-private fun PulseRings(modifier: Modifier) {
-    val t = rememberInfiniteTransition(label = "rings")
-    val p by t.animateFloat(0f, 1f, infiniteRepeatable(tween(1800, easing = LinearEasing)), label = "p")
-    Box(modifier, contentAlignment = Alignment.Center) {
-        Canvas(Modifier.fillMaxSize()) {
-            for (k in 0..1) {
-                val q = (p + k * 0.5f) % 1f
-                drawCircle(WCyan.copy(alpha = (1f - q) * 0.6f), radius = size.minDimension * (0.2f + 0.3f * q), style = Stroke(1.5.dp.toPx()))
-            }
-        }
-        BeatingIcon(Icons.Rounded.Favorite, bpm = 64, size = 22)
-    }
-}
-
 /** An icon that beats like a heart at [bpm]. */
 @Composable
 private fun BeatingIcon(icon: ImageVector, bpm: Int, size: Int, tint: Color = WCyan) {
