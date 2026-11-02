@@ -216,4 +216,9 @@ data class WatchState(
     val updatedMs: Long,
     /** Upcoming big moments (up to 7 days), soonest first, for the watch's schedule list. */
     val upcoming: List<EventStatus> = emptyList(),
+    /** Today's check-in (null = not done yet), so the watch can offer it or show it as done. */
+    val checkIn: CheckIn? = null,
+    val sleepMinutes: Int? = null,
+    /** The phone's message and next step, so both screens always say the same thing. */
+    val brief: DailyBrief? = null,
 )

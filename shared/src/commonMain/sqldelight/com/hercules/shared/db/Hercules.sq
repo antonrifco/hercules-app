@@ -176,6 +176,12 @@ CREATE TABLE prep_task_done (
     PRIMARY KEY (event_id, day_key, task_id)
 );
 
+CREATE TABLE event_reflection (
+    event_id TEXT NOT NULL PRIMARY KEY,
+    rating INTEGER NOT NULL,
+    created_ms INTEGER NOT NULL
+);
+
 upsertSleep:
 INSERT OR REPLACE INTO sleep_night VALUES ?;
 
@@ -223,3 +229,12 @@ DELETE FROM prep_task_done WHERE event_id = ? AND day_key = ? AND task_id = ?;
 
 tasksDone:
 SELECT * FROM prep_task_done WHERE event_id = ?;
+
+upsertReflection:
+INSERT OR REPLACE INTO event_reflection VALUES ?;
+
+reflectionById:
+SELECT * FROM event_reflection WHERE event_id = ?;
+
+reflectionsAll:
+SELECT * FROM event_reflection ORDER BY created_ms DESC;

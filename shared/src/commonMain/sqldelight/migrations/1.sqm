@@ -1,0 +1,6 @@
+-- Version 1 → 2: how an important event felt afterwards.
+CREATE TABLE event_reflection (
+    event_id TEXT NOT NULL PRIMARY KEY,
+    rating INTEGER NOT NULL,
+    created_ms INTEGER NOT NULL
+);

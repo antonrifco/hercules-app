@@ -74,6 +74,18 @@ class CognitiveStore(db: HerculesDatabase, private val io: CoroutineDispatcher =
     fun observeTasksDone(eventId: String): Flow<List<Pair<String, String>>> =
         q.tasksDone(eventId).asFlow().mapToList(io).map { rows -> rows.map { it.day_key to it.task_id } }
 
+    suspend fun saveReflection(r: EventReflection) = withContext(io) {
+        q.upsertReflection(com.hercules.shared.db.Event_reflection(r.eventId, r.rating.toLong(), r.createdMs))
+    }
+    suspend fun reflection(eventId: String): EventReflection? = withContext(io) {
+        q.reflectionById(eventId).executeAsOneOrNull()?.let { EventReflection(it.event_id, it.rating.toInt(), it.created_ms) }
+    }
+    suspend fun reflections(): List<EventReflection> = withContext(io) {
+        q.reflectionsAll().executeAsList().map { EventReflection(it.event_id, it.rating.toInt(), it.created_ms) }
+    }
+    fun observeReflections(): Flow<List<EventReflection>> =
+        q.reflectionsAll().asFlow().mapToList(io).map { rows -> rows.map { EventReflection(it.event_id, it.rating.toInt(), it.created_ms) } }
+
     private fun SleepRow.toModel() = SleepNight(day_key, start_ms, end_ms, asleep_min.toInt(), hr_avg, hr_low, source)
     private fun CheckInRow.toModel() = CheckIn(day_key, sleep_hours, energy.toInt(), stress.toInt(), created_ms)
     private fun ReadinessRow.toModel(): Readiness? =
@@ -96,6 +108,7 @@ class CognitiveService(
     val engine = ReadinessEngine(dayKeys)
     val analyzer = SleepAnalyzer(dayKeys)
     val coach = PrepCoach(dayKeys, engine)
+    val daily = Coach(dayKeys, engine)
     private val mutex = Mutex()
 
     fun today(): String = dayKeys.of(clock())
@@ -209,13 +222,28 @@ class CognitiveService(
     suspend fun upcoming(): List<EventStatus> =
         store.eventsFrom(dayKeys.startOf(today())).map { eventStatus(it) }
 
+    /** Today's message and next step from what is stored right now. */
+    suspend fun brief(nowMs: Long = clock()): DailyBrief {
+        val today = dayKeys.of(nowMs)
+        val readiness = store.readinessRange(today, today).firstOrNull()
+        return daily.brief(
+            nowMs, readiness, store.checkIn(today), store.sleep(today),
+            upcoming(), store.reflections().map { it.eventId }.toSet(), baseline(today).wakeMinuteOfDay,
+        )
+    }
+
     suspend fun watchState(): WatchState {
         val today = today()
+        val events = upcoming()
+        val open = events.filter { it.phase != PrepPhase.DONE }
         return WatchState(
             readiness = store.readinessRange(today, today).firstOrNull(),
-            nextEvent = upcoming().firstOrNull { it.phase != PrepPhase.DONE },
-            upcoming = upcoming().filter { it.phase != PrepPhase.DONE }.take(5),
+            nextEvent = open.firstOrNull(),
+            upcoming = open.take(5),
             updatedMs = clock(),
+            checkIn = store.checkIn(today),
+            sleepMinutes = store.sleep(today)?.asleepMinutes,
+            brief = brief(),
         )
     }
 
