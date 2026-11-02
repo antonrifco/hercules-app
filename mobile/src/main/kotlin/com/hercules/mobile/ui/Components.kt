@@ -134,6 +134,9 @@ fun HerculesTheme(@Suppress("UNUSED_PARAMETER") dark: Boolean, content: @Composa
 
 // ------------------------------------------------------------------ formatting
 
+/** Shortens to at most [max] characters, ending with "…" when anything was cut. */
+fun String.clip(max: Int): String = if (length <= max) this else take(max - 1).trimEnd() + "…"
+
 val UiLocale: Locale = Locale.ENGLISH
 private val zone get() = ZoneId.systemDefault()
 private fun fmt(pattern: String, ms: Long) = DateTimeFormatter.ofPattern(pattern, UiLocale).format(Instant.ofEpochMilli(ms).atZone(zone))

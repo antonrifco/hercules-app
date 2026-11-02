@@ -61,6 +61,8 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hercules.mobile.MobileGraph
@@ -213,8 +215,16 @@ private fun DayStrip(g: MobileGraph, data: TodayData, r: Readiness?, nowMs: Long
                 val y = top - 14.dp.toPx()
                 drawPath(Path().apply { moveTo(ex, y - d); lineTo(ex + d, y); lineTo(ex, y + d); lineTo(ex - d, y); close() }, e.advice?.verdict?.color ?: Cyan)
                 drawLine(Text2, Offset(ex, y + d), Offset(ex, bandY + bandH), 1f)
-                val txt = measurer.measure("${clockOf(e.event.startMs)} ${e.event.title}".take(28), eventLabel)
-                drawText(txt, topLeft = Offset((ex + 8.dp.toPx()).coerceAtMost(size.width - txt.size.width), y - txt.size.height / 2 - 12.dp.toPx()))
+                // Up to 27 title characters, then "…"; and never wider than the strip (ellipsized by width too).
+                val txt = measurer.measure(
+                    "${clockOf(e.event.startMs)} ${e.event.title.clip(27)}",
+                    eventLabel,
+                    overflow = TextOverflow.Ellipsis,
+                    maxLines = 1,
+                    constraints = Constraints(maxWidth = size.width.toInt()),
+                )
+                val lx = (ex + 8.dp.toPx()).coerceAtMost(size.width - txt.size.width).coerceAtLeast(0f)
+                drawText(txt, topLeft = Offset(lx, y - txt.size.height / 2 - 12.dp.toPx()))
             }
             // now
             if (nowMs in start..end) {
@@ -225,7 +235,7 @@ private fun DayStrip(g: MobileGraph, data: TodayData, r: Readiness?, nowMs: Long
         }
         if (events.isNotEmpty()) {
             Row(Modifier.fillMaxWidth().padding(top = 2.dp)) {
-                events.forEach { e -> TextButton(onClick = { onOpenEvent(e.event.id) }) { Text("Open ${e.event.title.take(18)}", fontSize = 12.sp) } }
+                events.forEach { e -> TextButton(onClick = { onOpenEvent(e.event.id) }) { Text("Open ${e.event.title.clip(27)}", fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) } }
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {

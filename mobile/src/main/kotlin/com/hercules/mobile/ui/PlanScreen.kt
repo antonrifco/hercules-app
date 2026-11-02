@@ -27,6 +27,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import kotlinx.coroutines.delay
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Remove
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.TaskAlt
@@ -86,7 +95,7 @@ fun PlanScreen(statuses: List<EventStatus>, padding: PaddingValues, onOpen: (Str
         item {
             Eyebrow("Countdown")
             VSpace(6.dp)
-            Text("Big moments", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Light, color = Text1)
+            Text("Big moments ahead", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Light, color = Text1)
             VSpace(20.dp)
         }
         if (statuses.isEmpty()) {
@@ -154,23 +163,48 @@ fun AddEventDialog(g: MobileGraph, nowMs: Long, onDismiss: () -> Unit) {
     var title by remember { mutableStateOf("") }
     var importance by remember { mutableStateOf(Importance.HIGH) }
     var dayOffset by remember { mutableIntStateOf(3) }
-    val time = rememberTimePickerState(initialHour = 10, initialMinute = 0, is24Hour = true)
+    var hour by remember { mutableIntStateOf(10) }
+    var minute by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
-    val startMs = dk.startOf(dk.plusDays(today, dayOffset)) + time.hour * HOUR + time.minute * 60_000L
+    val titleFocus = remember { FocusRequester() }
+    val startMs = dk.startOf(dk.plusDays(today, dayOffset)) + hour * HOUR + minute * 60_000L
     val valid = title.isNotBlank() && startMs > nowMs
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(Unit) {
+        // Type the title straight away. The dialog window needs a frame before it can take focus.
+        delay(200)
+        runCatching { titleFocus.requestFocus() }
+        keyboard?.show()
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        // Wider than the platform default so the three stakes chips fit on one line.
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         containerColor = Panel,
         shape = RoundedCornerShape(8.dp),
         title = { Text("New big moment", fontWeight = FontWeight.Light) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                OutlinedTextField(title, { title = it }, label = { Text("Title") }, placeholder = { Text("e.g. Interview at Acme") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    title, { title = it },
+                    label = { Text("Title") },
+                    placeholder = { Text("e.g. Interview at Acme") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().focusRequester(titleFocus),
+                )
                 VSpace(14.dp)
                 Eyebrow("Stakes")
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Importance.entries.forEach { i -> FilterChip(importance == i, { importance = i }, { Text(i.label) }) }
+                VSpace(6.dp)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Importance.entries.forEach { i ->
+                        FilterChip(
+                            importance == i, { importance = i },
+                            label = { Text(i.label, maxLines = 1, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
                 VSpace(14.dp)
                 Eyebrow("When")
@@ -200,19 +234,18 @@ fun AddEventDialog(g: MobileGraph, nowMs: Long, onDismiss: () -> Unit) {
                     }
                 }
                 VSpace(8.dp)
-                Eyebrow("Time")
-                VSpace(6.dp)
-                TimeInput(time)
-                VSpace(8.dp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Eyebrow("Time", modifier = Modifier.weight(1f))
+                    Stepper(hour.toString().padStart(2, '0'), onMinus = { hour = (hour + 23) % 24 }, onPlus = { hour = (hour + 1) % 24 })
+                    Text(":", fontFamily = Mono, fontSize = 20.sp, color = Text2, modifier = Modifier.padding(horizontal = 4.dp))
+                    Stepper(minute.toString().padStart(2, '0'), onMinus = { minute = (minute + 45) % 60 }, onPlus = { minute = (minute + 15) % 60 })
+                }
+                VSpace(10.dp)
                 val ws = g.cognitive.engine.windows(dk.startOf(dk.plusDays(today, dayOffset)) + 7 * HOUR)
                 val kind = ws.firstOrNull { startMs >= it.startMs && startMs < it.endMs }?.kind
                 when {
-                    startMs <= nowMs -> Muted("That time has passed.")
-                    kind != null -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(width = 10.dp, height = 4.dp).background(kind.color))
-                        HSpace(8.dp)
-                        Muted("Typically your ${kind.label.lowercase()} phase")
-                    }
+                    startMs <= nowMs -> Muted("That time has already passed.")
+                    kind != null -> TimingHint(kind, clockOf(startMs))
                 }
             }
         },
@@ -227,6 +260,41 @@ fun AddEventDialog(g: MobileGraph, nowMs: Long, onDismiss: () -> Unit) {
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("CANCEL", letterSpacing = 1.5.sp, color = Text2) } },
     )
+}
+
+/** Compact − value + control (hours step by 1, minutes by 15). */
+@Composable
+private fun Stepper(value: String, onMinus: () -> Unit, onPlus: () -> Unit) {
+    Row(
+        Modifier.clip(RoundedCornerShape(6.dp)).border(1.dp, Hairline, RoundedCornerShape(6.dp)),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(32.dp).clickable(onClick = onMinus), contentAlignment = Alignment.Center) {
+            Icon(Icons.Rounded.Remove, "Less", tint = Text2, modifier = Modifier.size(16.dp))
+        }
+        Text(value, fontFamily = Mono, fontSize = 18.sp, color = Text1, modifier = Modifier.width(30.dp), textAlign = TextAlign.Center)
+        Box(Modifier.size(32.dp).clickable(onClick = onPlus), contentAlignment = Alignment.Center) {
+            Icon(Icons.Rounded.Add, "More", tint = Text2, modifier = Modifier.size(16.dp))
+        }
+    }
+}
+
+/** Says in plain words whether the chosen time is a good one for a demanding moment. */
+@Composable
+private fun TimingHint(kind: WindowKind, at: String) {
+    val (good, text) = when (kind) {
+        WindowKind.PEAK -> true to "Good timing. Around $at your focus is usually at its sharpest of the day."
+        WindowKind.SECOND_PEAK -> true to "Good timing. $at is usually your second wind, when focus comes back."
+        WindowKind.STEADY -> true to "Fine timing. Around $at your focus is usually steady."
+        WindowKind.WARMUP -> false to "A bit early. At $at your brain is usually still waking up; late morning is sharper."
+        WindowKind.DIP -> false to "Tricky timing. $at usually falls in the afternoon dip; the morning is sharper."
+        WindowKind.EVENING, WindowKind.LATE -> false to "Late. By $at focus usually drops; earlier in the day is sharper."
+    }
+    Row(verticalAlignment = Alignment.Top) {
+        Box(Modifier.padding(top = 6.dp).size(width = 10.dp, height = 4.dp).background(kind.color))
+        HSpace(8.dp)
+        Text(text, style = MaterialTheme.typography.bodySmall, color = if (good) Text1 else Text2)
+    }
 }
 
 // ------------------------------------------------------------------ event detail

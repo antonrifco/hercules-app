@@ -297,7 +297,7 @@ private fun HomeScreen(onSensors: () -> Unit) {
                 item { SyncLine(sync, pending, now) }
 
                 // 3 · Planned moments
-                item { SectionLabel("Big moments") }
+                item { SectionLabel("Big moments ahead") }
                 if (schedule.isEmpty()) {
                     item {
                         Text(
