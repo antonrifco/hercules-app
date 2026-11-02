@@ -15,6 +15,8 @@ object WearProtocol {
     const val SENSOR_CONFIG_PATH = "/hercules/sensors/config"
     /** Written by the watch: supported + active sensors ([com.hercules.shared.sensors.SensorReport] JSON). */
     const val SENSOR_REPORT_PATH = "/hercules/sensors/report"
+    /** A check-in made on the watch ([com.hercules.shared.cognitive.CheckIn] JSON), picked up by the phone. */
+    const val CHECKIN_PATH = "/hercules/checkin"
 }
 
 object DeviceId {

@@ -24,7 +24,24 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- "Continue on phone" from the watch: hercules://open?target=EVENT&event=ID -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="hercules" android:host="open" />
+            </intent-filter>
         </activity>
+
+        <service
+            android:name=".sync.CheckInListenerService"
+            android:exported="true"
+            tools:ignore="ExportedService">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/hercules/checkin" />
+            </intent-filter>
+        </service>
 
         <!-- Receives sync batches from the watch (MessageClient.sendRequest). Bound only by
              Google Play services; only apps signed with our key + same applicationId can reach it. -->

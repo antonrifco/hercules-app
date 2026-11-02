@@ -221,4 +221,8 @@ data class WatchState(
     val sleepMinutes: Int? = null,
     /** The phone's message and next step, so both screens always say the same thing. */
     val brief: DailyBrief? = null,
+    /** Events already rated on the phone, so the watch doesn't ask again. */
+    val reflectedIds: Set<String> = emptySet(),
+    /** Which reminders the user turned on (set on the phone), so the watch follows the same choices. */
+    val reminders: NudgePrefs = NudgePrefs(),
 )

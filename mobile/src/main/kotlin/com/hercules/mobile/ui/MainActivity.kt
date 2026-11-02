@@ -94,8 +94,9 @@ private fun HerculesApp(loadDemoOnStart: Boolean, launch: android.content.Intent
     var adding by remember { mutableStateOf(false) }
     var todayRequest by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(launch) {
-        val target = launch?.getStringExtra(com.hercules.mobile.notify.Notifier.EXTRA_TARGET) ?: return@LaunchedEffect
-        val ev = launch.getStringExtra(com.hercules.mobile.notify.Notifier.EXTRA_EVENT)
+        val i = launch ?: return@LaunchedEffect
+        val target = i.getStringExtra(com.hercules.mobile.notify.Notifier.EXTRA_TARGET) ?: i.data?.getQueryParameter("target") ?: return@LaunchedEffect
+        val ev = i.getStringExtra(com.hercules.mobile.notify.Notifier.EXTRA_EVENT) ?: i.data?.getQueryParameter("event")
         when (target) {
             "EVENT", "REFLECT" -> if (ev != null) openEventId = ev else tab = Tab.TODAY
             "CHECK_IN" -> { openEventId = null; tab = Tab.TODAY; todayRequest = "checkin" }

@@ -116,7 +116,7 @@ fun DataScreen(g: MobileGraph, today: String, padding: PaddingValues, onLoadDemo
             }
         }
         item { StatusBlock(watches, report, sleepLast, lastSync) }
-        item { RemindersBlock() }
+        item { RemindersBlock(g) }
         item { Link(watches, lastSync, pending) }
         item {
             SensorGrid(config, report) { kind, on ->
@@ -291,12 +291,13 @@ private fun StatusBlock(watches: List<String>?, report: SensorReport?, sleep: Sl
 
 /** Reminders are useful or they are noise, so each one can be switched off. */
 @Composable
-private fun RemindersBlock() {
+private fun RemindersBlock(g: MobileGraph) {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     var prefs by remember { mutableStateOf(ReminderSettings.load(ctx)) }
     var allowed by remember { mutableStateOf(Notifier.canPost(ctx)) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed = Notifier.canPost(ctx) }
-    fun update(next: NudgePrefs) { prefs = next; ReminderSettings.save(ctx, next) }
+    fun update(next: NudgePrefs) { prefs = next; ReminderSettings.save(ctx, next); scope.launch { g.pushToWatch() } }
     Section("Reminders") {
         if (!allowed) {
             Row(

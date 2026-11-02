@@ -58,7 +58,7 @@ class MobileGraph(private val context: Context) {
     /** Sends the current readiness + next event to the watch (DataClient, delivered when connected). */
     suspend fun pushToWatch() {
         runCatching {
-            val json = cognitive.encodeWatchState(cognitive.watchState())
+            val json = cognitive.encodeWatchState(cognitive.watchState().copy(reminders = com.hercules.mobile.notify.ReminderSettings.load(context)))
             val req = PutDataMapRequest.create(WearProtocol.STATE_PATH).apply {
                 dataMap.putString(WearProtocol.STATE_KEY, json)
             }.asPutDataRequest().setUrgent()

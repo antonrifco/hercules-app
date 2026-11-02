@@ -1,6 +1,7 @@
 package com.hercules.shared.cognitive
 
 import com.hercules.shared.insights.DayKeys
+import kotlinx.serialization.Serializable
 
 /** Where a notification should land when tapped. Phone and watch map these to their own screens. */
 enum class NudgeTarget { TODAY, CHECK_IN, EVENT, REFLECT, SLEEP }
@@ -18,6 +19,7 @@ data class Nudge(
 )
 
 /** Which reminders the user wants. Focus reminders are off by default to avoid noise. */
+@Serializable
 data class NudgePrefs(
     val morning: Boolean = true,
     val event: Boolean = true,

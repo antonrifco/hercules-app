@@ -244,7 +244,21 @@ class CognitiveService(
             checkIn = store.checkIn(today),
             sleepMinutes = store.sleep(today)?.asleepMinutes,
             brief = brief(),
+            reflectedIds = store.reflections().map { it.eventId }.toSet(),
         )
+    }
+
+    fun encodeCheckIn(c: CheckIn): String = cognitiveJson.encodeToString(CheckIn.serializer(), c)
+
+    /** A check-in made on the other device. Newest wins; returns true if it changed anything. */
+    suspend fun applyRemoteCheckIn(json: String): Boolean {
+        val c = runCatching { cognitiveJson.decodeFromString(CheckIn.serializer(), json) }.getOrNull() ?: return false
+        if (c.dayKey != today()) return false
+        val mine = store.checkIn(c.dayKey)
+        if (mine != null && mine.createdMs >= c.createdMs) return false
+        store.upsertCheckIn(c)
+        refresh()
+        return true
     }
 
     fun encodeWatchState(s: WatchState): String = cognitiveJson.encodeToString(WatchState.serializer(), s)

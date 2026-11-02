@@ -32,7 +32,7 @@ class WearGraph(context: Context) {
     )
 }
 
-class HerculesWearApp : Application() {
+open class HerculesWearApp : Application() {
     lateinit var graph: WearGraph
         private set
 
@@ -40,6 +40,7 @@ class HerculesWearApp : Application() {
         super.onCreate()
         graph = WearGraph(this)
         SyncWorker.schedulePeriodic(this)
+        com.hercules.wear.notify.WatchReminderWorker.schedule(this)
     }
 }
 
