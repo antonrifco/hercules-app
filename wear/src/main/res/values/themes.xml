@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Hercules" parent="android:Theme.DeviceDefault">
+        <item name="android:windowBackground">@color/splash_background</item>
+    </style>
+
+    <!-- System splash (Android 12+ API, backported): the Hercules mark on the brand background. -->
+    <style name="Theme.Hercules.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_mark</item>
+        <item name="postSplashScreenTheme">@style/Theme.Hercules</item>
+    </style>
+</resources>

@@ -25,3 +25,19 @@ replay_pid*
 
 # Kotlin Gradle plugin data, see https://kotlinlang.org/docs/whatsnew20.html#new-directory-for-kotlin-data-in-gradle-projects
 .kotlin/
+
+# Android / Gradle / IDE
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.DS_Store
+.kotlin/
+captures/
+*.apk
+*.aab
+.lavish/
+
+# The Gradle wrapper must be committed (overrides *.jar above)
+!gradle/wrapper/gradle-wrapper.jar

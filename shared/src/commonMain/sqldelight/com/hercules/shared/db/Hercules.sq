@@ -1,0 +1,225 @@
+-- Raw readings. `synced` = delivered upstream (watch: to phone, phone: to server).
+CREATE TABLE sample (
+    id TEXT NOT NULL PRIMARY KEY,
+    type TEXT NOT NULL,
+    value REAL NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    session_id TEXT,
+    synced INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX sample_start ON sample(start_ms);
+CREATE INDEX sample_synced ON sample(synced);
+
+CREATE TABLE workout_session (
+    id TEXT NOT NULL PRIMARY KEY,
+    kind TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER,
+    day_key TEXT,
+    distance_m REAL,
+    avg_hr REAL,
+    max_hr INTEGER,
+    hr_recovery_60s INTEGER,
+    summarized INTEGER NOT NULL DEFAULT 0,
+    synced INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE daily_summary (
+    day_key TEXT NOT NULL PRIMARY KEY,
+    steps INTEGER NOT NULL,
+    calories REAL NOT NULL,
+    distance_m REAL NOT NULL,
+    floors INTEGER NOT NULL,
+    resting_hr INTEGER,
+    max_hr INTEGER,
+    avg_hr REAL,
+    hr_sample_count INTEGER NOT NULL,
+    hrv_rmssd REAL
+);
+
+CREATE TABLE personal_record (
+    kind TEXT NOT NULL PRIMARY KEY,
+    value REAL NOT NULL,
+    day_key TEXT NOT NULL,
+    ref_id TEXT
+);
+
+-- samples ---------------------------------------------------------------
+insertSample:
+INSERT OR IGNORE INTO sample(id, type, value, start_ms, end_ms, source, device_id, session_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+samplesBetween:
+SELECT * FROM sample WHERE start_ms >= :fromMs AND start_ms < :toMs ORDER BY start_ms, id;
+
+pendingSamples:
+SELECT * FROM sample WHERE synced = 0 ORDER BY start_ms, id LIMIT :limit;
+
+latestOfType:
+SELECT * FROM sample WHERE type = ? ORDER BY start_ms DESC LIMIT 1;
+
+countPendingSamples:
+SELECT COUNT(*) FROM sample WHERE synced = 0;
+
+countSamples:
+SELECT COUNT(*) FROM sample;
+
+markSamplesSynced:
+UPDATE sample SET synced = 1 WHERE id IN ?;
+
+deleteSyncedBefore:
+DELETE FROM sample WHERE start_ms < :cutoff AND synced = 1;
+
+deleteAllBefore:
+DELETE FROM sample WHERE start_ms < :cutoff;
+
+changes:
+SELECT changes();
+
+-- sessions --------------------------------------------------------------
+startSession:
+INSERT OR IGNORE INTO workout_session(id, kind, device_id, start_ms) VALUES (?, ?, ?, ?);
+
+endSession:
+UPDATE workout_session SET end_ms = :endMs WHERE id = :id AND end_ms IS NULL;
+
+endedUnsummarized:
+SELECT * FROM workout_session WHERE end_ms IS NOT NULL AND summarized = 0 AND end_ms < :beforeMs;
+
+saveSummary:
+UPDATE workout_session
+SET day_key = ?, distance_m = ?, avg_hr = ?, max_hr = ?, hr_recovery_60s = ?, summarized = 1
+WHERE id = ?;
+
+upsertSummarizedSession:
+INSERT OR REPLACE INTO workout_session(id, kind, device_id, start_ms, end_ms, day_key, distance_m, avg_hr, max_hr, hr_recovery_60s, summarized, synced)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0);
+
+summarizedSessions:
+SELECT * FROM workout_session WHERE summarized = 1 ORDER BY start_ms;
+
+recentSessions:
+SELECT * FROM workout_session WHERE summarized = 1 ORDER BY start_ms DESC LIMIT :limit;
+
+pendingSessions:
+SELECT * FROM workout_session WHERE summarized = 1 AND synced = 0 ORDER BY start_ms LIMIT :limit;
+
+markSessionsSynced:
+UPDATE workout_session SET synced = 1 WHERE id IN ?;
+
+-- daily summaries -------------------------------------------------------
+upsertDaily:
+INSERT OR REPLACE INTO daily_summary VALUES ?;
+
+dailyByKey:
+SELECT * FROM daily_summary WHERE day_key = ?;
+
+allDaily:
+SELECT * FROM daily_summary ORDER BY day_key;
+
+recentDaily:
+SELECT * FROM daily_summary ORDER BY day_key DESC LIMIT :limit;
+
+-- records ---------------------------------------------------------------
+upsertRecord:
+INSERT OR REPLACE INTO personal_record VALUES ?;
+
+allRecords:
+SELECT * FROM personal_record;
+
+-- cognitive -------------------------------------------------------------
+CREATE TABLE sleep_night (
+    day_key TEXT NOT NULL PRIMARY KEY,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    asleep_min INTEGER NOT NULL,
+    hr_avg REAL,
+    hr_low REAL,
+    source TEXT NOT NULL
+);
+
+CREATE TABLE checkin (
+    day_key TEXT NOT NULL PRIMARY KEY,
+    sleep_hours REAL,
+    energy INTEGER NOT NULL,
+    stress INTEGER NOT NULL,
+    created_ms INTEGER NOT NULL
+);
+
+-- Computed readiness per day (JSON of Readiness), kept for trends.
+CREATE TABLE readiness_day (
+    day_key TEXT NOT NULL PRIMARY KEY,
+    score INTEGER NOT NULL,
+    json TEXT NOT NULL
+);
+
+CREATE TABLE plan_event (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    type TEXT NOT NULL,
+    start_ms INTEGER NOT NULL,
+    importance TEXT NOT NULL,
+    notes TEXT NOT NULL,
+    created_ms INTEGER NOT NULL
+);
+
+CREATE TABLE prep_task_done (
+    event_id TEXT NOT NULL,
+    day_key TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    done_ms INTEGER NOT NULL,
+    PRIMARY KEY (event_id, day_key, task_id)
+);
+
+upsertSleep:
+INSERT OR REPLACE INTO sleep_night VALUES ?;
+
+sleepByKey:
+SELECT * FROM sleep_night WHERE day_key = ?;
+
+sleepRange:
+SELECT * FROM sleep_night WHERE day_key >= :fromKey AND day_key <= :toKey ORDER BY day_key;
+
+upsertCheckIn:
+INSERT OR REPLACE INTO checkin VALUES ?;
+
+checkInByKey:
+SELECT * FROM checkin WHERE day_key = ?;
+
+upsertReadiness:
+INSERT OR REPLACE INTO readiness_day VALUES ?;
+
+readinessByKey:
+SELECT * FROM readiness_day WHERE day_key = ?;
+
+readinessRange:
+SELECT * FROM readiness_day WHERE day_key >= :fromKey AND day_key <= :toKey ORDER BY day_key;
+
+upsertEvent:
+INSERT OR REPLACE INTO plan_event VALUES ?;
+
+deleteEvent:
+DELETE FROM plan_event WHERE id = ?;
+
+deleteEventTasks:
+DELETE FROM prep_task_done WHERE event_id = ?;
+
+eventsFrom:
+SELECT * FROM plan_event WHERE start_ms >= :fromMs ORDER BY start_ms;
+
+eventById:
+SELECT * FROM plan_event WHERE id = ?;
+
+setTaskDone:
+INSERT OR REPLACE INTO prep_task_done VALUES ?;
+
+setTaskUndone:
+DELETE FROM prep_task_done WHERE event_id = ? AND day_key = ? AND task_id = ?;
+
+tasksDone:
+SELECT * FROM prep_task_done WHERE event_id = ?;

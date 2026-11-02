@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hercules.app/contracts/sample-batch.v1.json",
+  "title": "SyncBatch v1 (watch → phone today, phone → server later)",
+  "type": "object",
+  "required": ["schemaVersion", "batchId", "deviceId", "sentAt", "samples"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "batchId": {"type": "string"},
+    "deviceId": {"type": "string"},
+    "sentAt": {"type": "string", "format": "date-time"},
+    "samples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "value", "unit", "start", "end", "source", "deviceId"],
+        "properties": {
+          "id": {"type": "string", "description": "Deterministic: type|source|startMs|endMs|sessionId. Server must upsert by id."},
+          "type": {"enum": ["heart_rate", "steps", "calories", "distance", "floors", "speed", "ibi", "spo2", "skin_temp", "hrv_sdnn", "vo2_max"]},
+          "value": {"type": "number"},
+          "unit": {"type": "string"},
+          "start": {"type": "string", "format": "date-time"},
+          "end": {"type": "string", "format": "date-time"},
+          "source": {"enum": ["passive", "exercise", "measure", "samsung_sdk", "healthkit"]},
+          "deviceId": {"type": "string"},
+          "sessionId": {"type": "string"}
+        }
+      }
+    },
+    "sessions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "deviceId", "dayKey", "start", "end", "distanceMeters"],
+        "properties": {
+          "id": {"type": "string"},
+          "kind": {"type": "string"},
+          "deviceId": {"type": "string"},
+          "dayKey": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+          "start": {"type": "string", "format": "date-time"},
+          "end": {"type": "string", "format": "date-time"},
+          "distanceMeters": {"type": "number"},
+          "avgHr": {"type": "number"},
+          "maxHr": {"type": "integer"},
+          "hrRecovery60s": {"type": "integer"}
+        }
+      }
+    }
+  }
+}

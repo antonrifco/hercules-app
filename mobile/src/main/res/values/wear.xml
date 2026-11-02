@@ -1,0 +1,6 @@
+<resources xmlns:tools="http://schemas.android.com/tools" tools:keep="@array/android_wear_capabilities">
+    <!-- The watch looks for this capability to find the phone app. Keep in sync with WearProtocol.PHONE_CAPABILITY. -->
+    <string-array name="android_wear_capabilities" translatable="false">
+        <item>hercules_phone</item>
+    </string-array>
+</resources>
