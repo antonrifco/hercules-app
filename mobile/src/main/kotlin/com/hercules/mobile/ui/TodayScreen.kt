@@ -206,17 +206,19 @@ private fun DayStrip(g: MobileGraph, data: TodayData, r: Readiness?, nowMs: Long
     val canvasH = pinZone + sleepH + gap + bandH + 6.dp + tickH + 4.dp
 
     Section("Your day", trailing = { peak?.let { Eyebrow("peak ${clockOf(it.startMs)}", color = Cyan) } }) {
-        if (current != null) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(8.dp).clip(CircleShape).background(Cyan))
-                HSpace(8.dp)
-                Text(
-                    "Right now: ${current.kind.label.lowercase(UiLocale)} until ${clockOf(current.endMs)}",
-                    style = MaterialTheme.typography.bodyMedium, color = Text1,
-                )
-            }
-            VSpace(12.dp)
+        val upcoming = r?.windows?.filter { it.startMs > nowMs }?.minByOrNull { it.startMs }
+        val caption = when {
+            current != null -> "Right now: ${current.kind.label.lowercase(UiLocale)} until ${clockOf(current.endMs)}"
+            upcoming != null -> "Next up: ${upcoming.kind.label.lowercase(UiLocale)} from ${clockOf(upcoming.startMs)}"
+            r != null -> "Your focus windows for today are over."
+            else -> "Focus windows appear once your sleep or a check-in is logged."
         }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(8.dp).clip(CircleShape).background(if (current != null) Cyan else Text2))
+            HSpace(8.dp)
+            Text(caption, style = MaterialTheme.typography.bodyMedium, color = Text1)
+        }
+        VSpace(12.dp)
         Canvas(Modifier.fillMaxWidth().height(canvasH)) {
             val span = (end - start).toFloat()
             fun x(t: Long) = ((t - start) / span).coerceIn(0f, 1f) * size.width
@@ -245,7 +247,10 @@ private fun DayStrip(g: MobileGraph, data: TodayData, r: Readiness?, nowMs: Long
                 val txt = measurer.measure(formatDuration(sleep.asleepMinutes), tickStyle.copy(color = Text1))
                 if (txt.size.width < x1 - x0 - 12.dp.toPx()) drawText(txt, topLeft = Offset(x0 + 6.dp.toPx(), top + (sleepPx - txt.size.height) / 2))
             } else {
-                drawRoundRect(Hairline, Offset(0f, top), Size(x(dayStart), sleepPx), CornerRadius(4.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
+                val w = maxOf(x(dayStart + 7 * HOUR), 0f)
+                drawRoundRect(Hairline, Offset(0f, top), Size(w, sleepPx), CornerRadius(4.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
+                val txt = measurer.measure("No sleep tracked", tickStyle)
+                if (txt.size.width < w - 12.dp.toPx()) drawText(txt, topLeft = Offset(6.dp.toPx(), top + (sleepPx - txt.size.height) / 2))
             }
             // Focus windows on a visible track, so dim phases (dip, evening) still read.
             drawRoundRect(Hairline, Offset(0f, bandY), Size(size.width, bandPx), CornerRadius(3.dp.toPx()))
