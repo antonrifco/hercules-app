@@ -18,13 +18,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.DirectionsWalk
-import androidx.compose.material.icons.rounded.Favorite
-import androidx.compose.material.icons.rounded.LocalFireDepartment
-import androidx.compose.material.icons.rounded.MonitorHeart
-import androidx.compose.material.icons.rounded.Stairs
-import androidx.compose.material.icons.rounded.Straighten
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -39,7 +32,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -50,7 +42,6 @@ import com.hercules.mobile.BuildConfig
 import com.hercules.mobile.MobileGraph
 import com.hercules.mobile.R
 import com.hercules.mobile.SERVER_SYNC_ENABLED
-import com.hercules.shared.model.DailySummary
 import com.hercules.shared.model.RecordText
 import com.hercules.shared.sensors.SensorConfig
 import com.hercules.shared.sensors.SensorKind
@@ -58,13 +49,11 @@ import com.hercules.shared.sensors.SensorReport
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import kotlin.math.roundToInt
 
-/** Sensors, raw body data, personal bests and sync status. */
+/** Setup: watch link, sensor toggles, personal bests and server sync. Today's stats live on the home screen. */
 @Composable
 fun DataScreen(g: MobileGraph, today: String, padding: PaddingValues, onLoadDemo: () -> Unit) {
     val ctx = LocalContext.current
-    val summary by remember(today) { g.repo.observeDaily(today) }.collectAsStateWithLifecycle(null)
     val records by remember { g.repo.observeRecords() }.collectAsStateWithLifecycle(emptyList())
     val pending by remember { g.repo.observePendingSampleCount() }.collectAsStateWithLifecycle(0L)
     val lastSync by g.lastWatchSync.collectAsStateWithLifecycle()
@@ -92,9 +81,9 @@ fun DataScreen(g: MobileGraph, today: String, padding: PaddingValues, onLoadDemo
     ) {
         item {
             Column {
-                Eyebrow("Signals")
+                Eyebrow("Watch, sensors & sync")
                 VSpace(6.dp)
-                Text("Body data", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Light, color = Text1)
+                Text("Setup", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Light, color = Text1)
             }
         }
         item { Link(watches, lastSync, pending) }
@@ -105,7 +94,6 @@ fun DataScreen(g: MobileGraph, today: String, padding: PaddingValues, onLoadDemo
                 scope.launch { runCatching { g.setSensors(next) } }
             }
         }
-        item { TodayStats(summary) }
         item {
             Section("Personal bests") {
                 if (records.isEmpty()) Muted("None yet")
@@ -218,52 +206,5 @@ private fun SensorGrid(config: SensorConfig, report: SensorReport?, onToggle: (S
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun TodayStats(s: DailySummary?) {
-    val stats = listOf(
-        Stat(Icons.AutoMirrored.Rounded.DirectionsWalk, "Steps", s?.steps?.let { "%,d".format(UiLocale, it) } ?: "--", "", "Movement today"),
-        Stat(Icons.Rounded.Straighten, "Distance", s?.let { "%.1f".format(UiLocale, it.distanceMeters / 1000) } ?: "--", "km", "Walked and run"),
-        Stat(Icons.Rounded.Favorite, "Resting pulse", s?.restingHr?.toString() ?: "--", "bpm", "Lower means better recovered"),
-        Stat(Icons.Rounded.MonitorHeart, "Peak heart rate", s?.maxHr?.toString() ?: "--", "bpm", "Highest reading today"),
-        Stat(Icons.Rounded.LocalFireDepartment, "Energy burned", s?.calories?.roundToInt()?.toString() ?: "--", "kcal", "Calories from activity"),
-        Stat(Icons.Rounded.Stairs, "Floors climbed", s?.floors?.toString() ?: "--", "", "Flights of stairs"),
-    )
-    Section("Today") {
-        stats.chunked(2).forEachIndexed { row, pair ->
-            if (row > 0) VSpace(10.dp)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                pair.forEach { StatTile(it, Modifier.weight(1f)) }
-            }
-        }
-    }
-}
-
-private data class Stat(val icon: ImageVector, val title: String, val value: String, val unit: String, val hint: String)
-
-/** A stat that explains itself: what it is, the number with its unit, and what it means. */
-@Composable
-private fun StatTile(st: Stat, modifier: Modifier) {
-    Column(
-        modifier.clip(RoundedCornerShape(6.dp)).background(Panel)
-            .border(BorderStroke(1.dp, Hairline), RoundedCornerShape(6.dp)).padding(14.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(st.icon, null, tint = Cyan, modifier = Modifier.size(16.dp))
-            HSpace(8.dp)
-            Text(st.title, style = MaterialTheme.typography.labelMedium, color = Text2, maxLines = 1)
-        }
-        VSpace(10.dp)
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(st.value, fontFamily = Mono, fontSize = 22.sp, color = Text1)
-            if (st.unit.isNotEmpty()) {
-                HSpace(4.dp)
-                Text(st.unit, fontSize = 12.sp, color = Text2, modifier = Modifier.padding(bottom = 3.dp))
-            }
-        }
-        VSpace(4.dp)
-        Text(st.hint, style = MaterialTheme.typography.bodySmall, color = Text2, minLines = 2, maxLines = 2)
     }
 }

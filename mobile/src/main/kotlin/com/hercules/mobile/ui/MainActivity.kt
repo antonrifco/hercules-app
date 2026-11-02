@@ -16,7 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.automirrored.rounded.EventNote
-import androidx.compose.material.icons.rounded.Insights
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -51,7 +51,7 @@ import com.hercules.shared.demo.DemoData
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private enum class Tab(val label: String) { TODAY("Today"), PLAN("Plan"), DATA("Data") }
+private enum class Tab(val label: String) { TODAY("Today"), PLAN("Plan"), DATA("Setup") }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -138,7 +138,7 @@ private fun HerculesApp(loadDemoOnStart: Boolean) {
                         when (it) {
                             Tab.TODAY -> Icons.Rounded.Speed
                             Tab.PLAN -> Icons.AutoMirrored.Rounded.EventNote
-                            Tab.DATA -> Icons.Rounded.Insights
+                            Tab.DATA -> Icons.Rounded.Tune
                         }
                     },
                     label = { it.label },

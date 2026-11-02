@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,7 +19,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.automirrored.rounded.DirectionsWalk
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.LocalFireDepartment
+import androidx.compose.material.icons.rounded.MonitorHeart
+import androidx.compose.material.icons.rounded.Stairs
+import androidx.compose.material.icons.rounded.Straighten
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.Bolt
@@ -50,6 +61,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.hercules.shared.model.DailySummary
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -102,6 +115,7 @@ fun TodayScreen(
     onOpenGuide: () -> Unit,
 ) {
     val r = data.readiness
+    val summary by remember(data.today) { g.repo.observeDaily(data.today) }.collectAsStateWithLifecycle(null)
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()),
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = padding.calculateBottomPadding() + 32.dp),
@@ -110,6 +124,7 @@ fun TodayScreen(
         item { TopLine(nowMs, onOpenGuide) }
         item { if (r != null) Hero(r) else EmptyHero() }
         item { DayStrip(g, data, r, nowMs, onOpenEvent) }
+        item { TodayStats(summary) }
         if (r != null) item { Readouts(r) }
         data.nextEvent?.let { ev -> item { NextEvent(ev, onOpenEvent) } }
         if (r != null) item { Tips(r.suggestions) }
@@ -164,7 +179,11 @@ private fun EmptyHero() {
 /**
  * The signature view: one line for the whole day. Last night's sleep, focus windows,
  * the current moment and today's events, on a single time axis.
+ *
+ * Built for narrow phones and large system font sizes: the canvas draws shapes plus a few short
+ * numerals only; anything wordy (event titles, legend, "right now") is normal layout that wraps.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DayStrip(g: MobileGraph, data: TodayData, r: Readiness?, nowMs: Long, onOpenEvent: (String) -> Unit) {
     val dk = g.cognitive.dayKeys
@@ -172,87 +191,124 @@ private fun DayStrip(g: MobileGraph, data: TodayData, r: Readiness?, nowMs: Long
     val start = minOf(data.sleep?.startMs ?: (dayStart - 2 * HOUR), dayStart - HOUR)
     val end = dayStart + 24 * HOUR
     val measurer = rememberTextMeasurer()
-    val events = data.todayEvents.filter { it.event.startMs in start..end }
-    val label = TextStyle(color = Text2, fontSize = 9.sp, letterSpacing = 1.sp)
-    val eventLabel = TextStyle(color = Text1, fontSize = 10.sp)
+    val density = LocalDensity.current
+    val events = data.todayEvents.filter { it.event.startMs in start..end }.sortedBy { it.event.startMs }
+    val tickStyle = TextStyle(color = Text2, fontSize = 10.sp)
+    val pinStyle = TextStyle(color = Ink, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    val peak = r?.windows?.firstOrNull { it.kind == WindowKind.PEAK }
+    val current = r?.windows?.firstOrNull { nowMs >= it.startMs && nowMs < it.endMs }
 
-    Section("Your day", trailing = { r?.let { Eyebrow("peak ${clockOf(it.windows.first { w -> w.kind == WindowKind.PEAK }.startMs)}", color = Cyan) } }) {
-        Canvas(Modifier.fillMaxWidth().height(if (events.isEmpty()) 92.dp else 120.dp)) {
+    val tickH = with(density) { measurer.measure("00:00", tickStyle).size.height.toDp() }
+    val pinZone = if (events.isEmpty()) 0.dp else 26.dp
+    val sleepH = 28.dp
+    val bandH = 12.dp
+    val gap = 8.dp
+    val canvasH = pinZone + sleepH + gap + bandH + 6.dp + tickH + 4.dp
+
+    Section("Your day", trailing = { peak?.let { Eyebrow("peak ${clockOf(it.startMs)}", color = Cyan) } }) {
+        if (current != null) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(8.dp).clip(CircleShape).background(Cyan))
+                HSpace(8.dp)
+                Text(
+                    "Right now: ${current.kind.label.lowercase(UiLocale)} until ${clockOf(current.endMs)}",
+                    style = MaterialTheme.typography.bodyMedium, color = Text1,
+                )
+            }
+            VSpace(12.dp)
+        }
+        Canvas(Modifier.fillMaxWidth().height(canvasH)) {
             val span = (end - start).toFloat()
             fun x(t: Long) = ((t - start) / span).coerceIn(0f, 1f) * size.width
-            val top = if (events.isEmpty()) 8.dp.toPx() else 36.dp.toPx()
-            val sleepH = 26.dp.toPx()
-            val bandY = top + sleepH + 8.dp.toPx()
-            val bandH = 8.dp.toPx()
+            val top = pinZone.toPx()
+            val sleepPx = sleepH.toPx()
+            val bandY = top + sleepPx + gap.toPx()
+            val bandPx = bandH.toPx()
+            val axisY = bandY + bandPx + 6.dp.toPx()
 
-            // hour grid
+            // Hour grid: a faint line through the lanes and a label under the axis, every 6 hours.
             var t = dayStart - 6 * HOUR
             while (t <= end) {
                 if (t >= start) {
                     val gx = x(t)
-                    drawLine(Hairline, Offset(gx, top - 4.dp.toPx()), Offset(gx, bandY + bandH + 6.dp.toPx()), 1f)
-                    val txt = measurer.measure(clockOf(t).take(2), label)
-                    drawText(txt, topLeft = Offset((gx - txt.size.width / 2).coerceIn(0f, size.width - txt.size.width), bandY + bandH + 10.dp.toPx()))
+                    drawLine(Hairline, Offset(gx, top), Offset(gx, axisY), 1f)
+                    val txt = measurer.measure(clockOf(t), tickStyle)
+                    drawText(txt, topLeft = Offset((gx - txt.size.width / 2f).coerceIn(0f, size.width - txt.size.width), axisY + 2.dp.toPx()))
                 }
                 t += 6 * HOUR
             }
-            // sleep block
+            // Sleep lane
             data.sleep?.let { s ->
                 val x0 = x(s.startMs); val x1 = x(s.endMs)
-                drawRoundRect(Brand.copy(alpha = 0.35f), Offset(x0, top), Size(x1 - x0, sleepH), androidx.compose.ui.geometry.CornerRadius(4.dp.toPx()))
-                val txt = measurer.measure("SLEEP ${formatDuration(s.asleepMinutes)}", label.copy(color = Text1))
-                if (txt.size.width < x1 - x0 - 8) drawText(txt, topLeft = Offset(x0 + 6.dp.toPx(), top + (sleepH - txt.size.height) / 2))
+                drawRoundRect(Brand.copy(alpha = 0.4f), Offset(x0, top), Size(x1 - x0, sleepPx), CornerRadius(4.dp.toPx()))
+                val txt = measurer.measure(formatDuration(s.asleepMinutes), tickStyle.copy(color = Text1))
+                if (txt.size.width < x1 - x0 - 12.dp.toPx()) drawText(txt, topLeft = Offset(x0 + 6.dp.toPx(), top + (sleepPx - txt.size.height) / 2))
+            } ?: run {
+                drawRoundRect(Hairline, Offset(0f, top), Size(x(dayStart), sleepPx), CornerRadius(4.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
             }
-            // focus windows
+            // Focus windows on a visible track, so dim phases (dip, evening) still read.
+            drawRoundRect(Hairline, Offset(0f, bandY), Size(size.width, bandPx), CornerRadius(3.dp.toPx()))
             r?.windows?.forEach { w ->
                 val x0 = x(w.startMs); val x1 = x(w.endMs)
-                if (x1 > x0) drawRect(w.kind.color, Offset(x0, bandY), Size(x1 - x0 - 1f, bandH))
+                if (x1 > x0) drawRect(w.kind.color, Offset(x0, bandY), Size(x1 - x0 - 1f, bandPx))
             }
-            // events: diamond pins with labels
-            events.forEach { e ->
+            // Events: numbered pins on a stem; the matching list sits below.
+            events.forEachIndexed { i, e ->
                 val ex = x(e.event.startMs)
-                val d = 5.dp.toPx()
-                val y = top - 14.dp.toPx()
-                drawPath(Path().apply { moveTo(ex, y - d); lineTo(ex + d, y); lineTo(ex, y + d); lineTo(ex - d, y); close() }, e.advice?.verdict?.color ?: Cyan)
-                drawLine(Text2, Offset(ex, y + d), Offset(ex, bandY + bandH), 1f)
-                // Up to 27 title characters, then "…"; and never wider than the strip (ellipsized by width too).
-                val txt = measurer.measure(
-                    "${clockOf(e.event.startMs)} ${e.event.title.clip(27)}",
-                    eventLabel,
-                    overflow = TextOverflow.Ellipsis,
-                    maxLines = 1,
-                    constraints = Constraints(maxWidth = size.width.toInt()),
-                )
-                val lx = (ex + 8.dp.toPx()).coerceAtMost(size.width - txt.size.width).coerceAtLeast(0f)
-                drawText(txt, topLeft = Offset(lx, y - txt.size.height / 2 - 12.dp.toPx()))
+                val col = e.advice?.verdict?.color ?: Cyan
+                val rad = 9.dp.toPx()
+                val cx = ex.coerceIn(rad, size.width - rad)
+                val cy = rad + 1.dp.toPx()
+                drawLine(Text2, Offset(ex, cy + rad), Offset(ex, bandY + bandPx), 1f)
+                drawCircle(col, rad, Offset(cx, cy))
+                val n = measurer.measure("${i + 1}", pinStyle)
+                drawText(n, topLeft = Offset(cx - n.size.width / 2f, cy - n.size.height / 2f))
             }
-            // now
+            // Now marker
             if (nowMs in start..end) {
                 val nx = x(nowMs)
-                drawLine(Cyan, Offset(nx, top - 6.dp.toPx()), Offset(nx, bandY + bandH + 4.dp.toPx()), 2.dp.toPx())
-                drawCircle(Cyan, 4.dp.toPx(), Offset(nx, bandY + bandH + 4.dp.toPx()))
+                drawLine(Cyan, Offset(nx, top - 2.dp.toPx()), Offset(nx, axisY), 2.dp.toPx())
+                drawCircle(Cyan, 4.dp.toPx(), Offset(nx, axisY))
             }
         }
         if (events.isNotEmpty()) {
-            Row(Modifier.fillMaxWidth().padding(top = 2.dp)) {
-                events.forEach { e -> TextButton(onClick = { onOpenEvent(e.event.id) }) { Text("Open ${e.event.title.clip(27)}", fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) } }
+            VSpace(8.dp)
+            events.forEachIndexed { i, e ->
+                val col = e.advice?.verdict?.color ?: Cyan
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).clickable { onOpenEvent(e.event.id) }.padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(20.dp).clip(CircleShape).background(col), contentAlignment = Alignment.Center) {
+                        Text("${i + 1}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Ink)
+                    }
+                    HSpace(10.dp)
+                    Text(clockOf(e.event.startMs), fontFamily = Mono, fontSize = 13.sp, color = Text2)
+                    HSpace(10.dp)
+                    Text(e.event.title, style = MaterialTheme.typography.bodyMedium, color = Text1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, "Open", tint = Text2, modifier = Modifier.size(18.dp))
+                }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        VSpace(10.dp)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Legend(Brand.copy(alpha = 0.6f), "Sleep")
             Legend(WindowKind.PEAK.color, "Peak")
             Legend(WindowKind.SECOND_PEAK.color, "2nd wind")
             Legend(WindowKind.DIP.color, "Dip")
+            Legend(Cyan, "Now")
         }
+        VSpace(6.dp)
+        Muted("Bright bars are when your focus is strongest. Tap an event to see how ready you'll be.")
     }
 }
 
 @Composable
 private fun Legend(color: Color, text: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(width = 10.dp, height = 4.dp).background(color))
+        Box(Modifier.size(width = 12.dp, height = 6.dp).background(color))
         HSpace(6.dp)
-        Text(text.uppercase(UiLocale), fontSize = 9.sp, letterSpacing = 1.sp, color = Text2)
+        Text(text.uppercase(UiLocale), fontSize = 10.sp, letterSpacing = 1.sp, color = Text2)
     }
 }
 
@@ -517,3 +573,50 @@ private fun TrendBlock(trend: List<Readiness>, g: MobileGraph) {
 /** The nearest event that isn't over yet. */
 fun List<EventStatus>.nextRelevant(nowMs: Long): EventStatus? =
     firstOrNull { it.phase != PrepPhase.DONE && it.event.startMs > nowMs - 2 * 3_600_000L }
+
+@Composable
+private fun TodayStats(s: DailySummary?) {
+    val stats = listOf(
+        Stat(Icons.AutoMirrored.Rounded.DirectionsWalk, "Steps", s?.steps?.let { "%,d".format(UiLocale, it) } ?: "--", "", "Movement today"),
+        Stat(Icons.Rounded.Straighten, "Distance", s?.let { "%.1f".format(UiLocale, it.distanceMeters / 1000) } ?: "--", "km", "Walked and run"),
+        Stat(Icons.Rounded.Favorite, "Resting pulse", s?.restingHr?.toString() ?: "--", "bpm", "Lower means better recovered"),
+        Stat(Icons.Rounded.MonitorHeart, "Peak heart rate", s?.maxHr?.toString() ?: "--", "bpm", "Highest reading today"),
+        Stat(Icons.Rounded.LocalFireDepartment, "Energy burned", s?.calories?.roundToInt()?.toString() ?: "--", "kcal", "Calories from activity"),
+        Stat(Icons.Rounded.Stairs, "Floors climbed", s?.floors?.toString() ?: "--", "", "Flights of stairs"),
+    )
+    Section("Today") {
+        stats.chunked(2).forEachIndexed { row, pair ->
+            if (row > 0) VSpace(10.dp)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                pair.forEach { StatTile(it, Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+private data class Stat(val icon: ImageVector, val title: String, val value: String, val unit: String, val hint: String)
+
+/** A stat that explains itself: what it is, the number with its unit, and what it means. */
+@Composable
+private fun StatTile(st: Stat, modifier: Modifier) {
+    Column(
+        modifier.clip(RoundedCornerShape(6.dp)).background(Panel)
+            .border(BorderStroke(1.dp, Hairline), RoundedCornerShape(6.dp)).padding(14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(st.icon, null, tint = Cyan, modifier = Modifier.size(16.dp))
+            HSpace(8.dp)
+            Text(st.title, style = MaterialTheme.typography.labelMedium, color = Text2, maxLines = 1)
+        }
+        VSpace(10.dp)
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(st.value, fontFamily = Mono, fontSize = 22.sp, color = Text1)
+            if (st.unit.isNotEmpty()) {
+                HSpace(4.dp)
+                Text(st.unit, fontSize = 12.sp, color = Text2, modifier = Modifier.padding(bottom = 3.dp))
+            }
+        }
+        VSpace(4.dp)
+        Text(st.hint, style = MaterialTheme.typography.bodySmall, color = Text2, minLines = 2, maxLines = 2)
+    }
+}
