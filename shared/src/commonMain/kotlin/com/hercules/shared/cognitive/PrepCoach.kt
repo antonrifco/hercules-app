@@ -111,10 +111,10 @@ class PrepCoach(private val dayKeys: DayKeys, private val engine: ReadinessEngin
             expected >= 45 -> if (high) Verdict.CONSIDER_RESCHEDULE else Verdict.GO_WITH_PREP
             else -> if (high) Verdict.RESCHEDULE else Verdict.CONSIDER_RESCHEDULE
         }
-        val what = if (event.type == EventType.OTHER) "moment" else event.type.label.lowercase()
+        val what = if (event.type == EventType.OTHER) "event" else event.type.label.lowercase()
         val headline = when (verdict) {
             Verdict.GO -> "You're in good shape for this $what. Go ahead with confidence."
-            Verdict.GO_WITH_PREP -> "Fine to proceed. Have a game plan to keep performance high."
+            Verdict.GO_WITH_PREP -> "Fine to go ahead. Follow today's prep to stay sharp."
             Verdict.CONSIDER_RESCHEDULE -> "Not ideal today. If it can move without a big cost, consider rescheduling."
             Verdict.RESCHEDULE -> "You're running on empty. If at all possible, reschedule to another day."
         }

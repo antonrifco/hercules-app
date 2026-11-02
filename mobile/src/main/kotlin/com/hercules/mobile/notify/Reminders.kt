@@ -106,7 +106,6 @@ object Notifier {
     const val EXTRA_EVENT = "event_id"
 
     fun ensureChannel(ctx: Context) {
-        if (Build.VERSION.SDK_INT < 26) return
         val m = ctx.getSystemService(NotificationManager::class.java)
         if (m.getNotificationChannel(CHANNEL) == null) {
             m.createNotificationChannel(NotificationChannel(CHANNEL, "Reminders", NotificationManager.IMPORTANCE_DEFAULT).apply {
@@ -119,7 +118,8 @@ object Notifier {
         (Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) &&
             NotificationManagerCompat.from(ctx).areNotificationsEnabled()
 
-    /** @return true if it was shown (so it is not retried). */
+    /** @return true if it was shown (so it is not retried). Permission is checked by [canPost]; a late revoke is caught. */
+    @android.annotation.SuppressLint("MissingPermission")
     fun post(ctx: Context, n: Nudge): Boolean {
         if (!canPost(ctx)) return false
         ensureChannel(ctx)

@@ -27,7 +27,6 @@ import androidx.compose.material.icons.automirrored.rounded.TrendingDown
 import androidx.compose.material.icons.automirrored.rounded.TrendingUp
 import androidx.compose.material.icons.rounded.Insights
 import androidx.compose.material.icons.rounded.Star
-import androidx.compose.material.icons.rounded.Event
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.LaunchedEffect
@@ -35,11 +34,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hercules.shared.cognitive.ActionKind
 import com.hercules.shared.cognitive.DailyBrief
-import com.hercules.shared.cognitive.Level
+import com.hercules.shared.cognitive.ReadinessBand
 import com.hercules.shared.cognitive.EventReflection
 import com.hercules.shared.cognitive.Moment
 import com.hercules.shared.cognitive.learningNote
-import com.hercules.shared.cognitive.level
 import com.hercules.shared.cognitive.provenance
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -88,21 +86,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Constraints
+import androidx.core.content.edit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hercules.mobile.MobileGraph
 import com.hercules.mobile.R
 import com.hercules.shared.cognitive.CheckIn
-import com.hercules.shared.cognitive.Confidence
 import com.hercules.shared.cognitive.EventStatus
 import com.hercules.shared.cognitive.PrepPhase
 import com.hercules.shared.cognitive.Readiness
@@ -141,7 +136,6 @@ fun TodayScreen(
     padding: PaddingValues,
     onOpenEvent: (String) -> Unit,
     onOpenGuide: () -> Unit,
-    onPlanEvent: () -> Unit = {},
     onOpenSetup: () -> Unit = {},
     request: String? = null,
     onRequestHandled: () -> Unit = {},
@@ -156,7 +150,6 @@ fun TodayScreen(
     var reflectId by remember { mutableStateOf<String?>(null) }
     val watchDone = stickyFlag("start_watch", lastSync != null)
     val checkInDone = stickyFlag("start_checkin", data.checkIn != null)
-    val eventDone = stickyFlag("start_event", data.allEvents.isNotEmpty())
     val moment = g.cognitive.daily.moment(nowMs)
     val hour = g.cognitive.dayKeys.minuteOfDay(nowMs) / 60
     val showTonight = brief?.sleep != null && (moment == Moment.EVENING || moment == Moment.NIGHT || hour >= 16)
@@ -164,17 +157,22 @@ fun TodayScreen(
     var scrollTo by remember { mutableStateOf<String?>(null) }
 
     val sections = buildList<Pair<String, @Composable () -> Unit>> {
-        add("top" to { TopLine(nowMs, r?.band?.level, r?.score, onOpenGuide) })
-        add("hero" to { if (r != null && brief != null) Briefing(r, brief) { sheet = Sheet.LEARN } else NoScoreCard { sheet = Sheet.CHECK_IN } })
+        add("top" to { TopLine(nowMs, r?.band, onOpenGuide) })
+        add("hero" to {
+            when {
+                brief == null -> Box(Modifier.fillMaxWidth().height(320.dp)) // first brief still computing: no "no score" flash
+                r != null -> Briefing(r, brief) { sheet = Sheet.LEARN }
+                else -> NoScoreCard { sheet = Sheet.CHECK_IN }
+            }
+        })
         if (brief != null) {
             add("action" to {
-                ActionCard(brief.action, r?.band?.level.mood(), (r?.score ?: 0) / 100f) { a ->
+                ActionCard(brief.action, r?.band.mood()) { a ->
                     when (a.kind) {
                         ActionKind.CHECK_IN -> sheet = Sheet.CHECK_IN
                         ActionKind.PREPARE -> a.eventId?.let(onOpenEvent)
                         ActionKind.REFLECT -> { reflectId = a.eventId; sheet = Sheet.REFLECT }
                         ActionKind.SLEEP -> scrollTo = "tonight"
-                        ActionKind.PLAN_EVENT -> onPlanEvent()
                         ActionKind.FOCUS -> scrollTo = "day"
                     }
                 }
@@ -183,9 +181,9 @@ fun TodayScreen(
         }
         data.nextEvent?.takeIf { it.event.id != actionEvent }?.let { ev -> add("next" to { NextEvent(ev, onOpenEvent) }) }
         add("day" to { DayStrip(g.cognitive.dayKeys, data, r, nowMs, onOpenEvent) })
-        if (!(watchDone && checkInDone && eventDone)) {
+        if (!(watchDone && checkInDone)) {
             add("start" to {
-                GettingStarted(watchDone, checkInDone, eventDone, onWatch = onOpenSetup, onCheckIn = { sheet = Sheet.CHECK_IN }, onEvent = onPlanEvent)
+                GettingStarted(watchDone, checkInDone, onWatch = onOpenSetup, onCheckIn = { sheet = Sheet.CHECK_IN })
             })
         }
         if (showTonight) add("tonight" to { TonightCard(brief!!.sleep!!, r) })
@@ -193,7 +191,6 @@ fun TodayScreen(
         if (r != null) add("tips" to { Tips(r.suggestions) })
         add("stats" to { TodayStats(summary) })
         add("sleep" to { SleepBlock(data.sleep, data.sleepWeek, data.today, g) })
-        data.checkIn?.let { ci -> add("checkin" to { CheckInSummary(ci) { sheet = Sheet.CHECK_IN } }) }
         if (data.trend.size >= 2) add("week" to { WeekBlock(data.trend, data.sleepWeek, g) })
     }
     LaunchedEffect(request) {
@@ -241,7 +238,7 @@ private fun stickyFlag(key: String, now: Boolean): Boolean {
     val ctx = LocalContext.current
     val prefs = remember { ctx.getSharedPreferences("hercules_ui", android.content.Context.MODE_PRIVATE) }
     var saved by remember { mutableStateOf(prefs.getBoolean(key, false)) }
-    if (now && !saved) { prefs.edit().putBoolean(key, true).apply(); saved = true }
+    if (now && !saved) { prefs.edit { putBoolean(key, true) }; saved = true }
     return saved || now
 }
 
@@ -258,9 +255,9 @@ private fun LearnContent(r: Readiness?) {
 }
 
 @Composable
-private fun TopLine(nowMs: Long, level: Level?, score: Int?, onOpenGuide: () -> Unit) {
+private fun TopLine(nowMs: Long, band: ReadinessBand?, onOpenGuide: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Herc(level.mood(), size = 40.dp, lit = (score ?: 0) / 100f)
+        Herc(band.mood(), size = 40.dp)
         HSpace(8.dp)
         Text("HERCULES", color = Text1, fontSize = 13.sp, letterSpacing = 5.sp, fontWeight = FontWeight.Medium)
         HSpace(12.dp)
@@ -305,11 +302,11 @@ internal fun DayStrip(dk: DayKeys, data: TodayData, r: Readiness?, nowMs: Long, 
         val caption = when {
             current != null -> "Right now: ${current.kind.label.lowercase(UiLocale)} until ${clockOf(current.endMs)}"
             upcoming != null -> "Next up: ${upcoming.kind.label.lowercase(UiLocale)} from ${clockOf(upcoming.startMs)}"
-            r != null -> "Your focus windows for today are over."
-            else -> "Focus windows appear once your sleep or a check-in is logged."
+            r != null -> "Your best hours are over for today."
+            else -> "Your day fills in once sleep or a check-in is recorded."
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(8.dp).clip(CircleShape).background(if (current != null) Cyan else Text2))
+            Box(Modifier.size(8.dp).clip(CircleShape).background(current?.kind?.color ?: Text2))
             HSpace(8.dp)
             Text(caption, style = MaterialTheme.typography.bodyMedium, color = Text1)
         }
@@ -353,7 +350,7 @@ internal fun DayStrip(dk: DayKeys, data: TodayData, r: Readiness?, nowMs: Long, 
             drawRoundRect(Hairline, Offset(0f, bandY), Size(size.width, bandPx), CornerRadius(3.dp.toPx()))
             r?.windows?.forEach { w ->
                 val x0 = x(w.startMs); val x1 = x(w.endMs)
-                if (x1 > x0) drawRect(w.kind.color, Offset(x0, bandY), Size(x1 - x0 - 1f, bandPx))
+                if (x1 > x0) drawRect(w.kind.color, Offset(x0, bandY), Size(x1 - x0 - 2f, bandPx))
             }
             // Events: numbered pins on a stem; the matching list sits below.
             var lastPin = -1e9f
@@ -373,8 +370,9 @@ internal fun DayStrip(dk: DayKeys, data: TodayData, r: Readiness?, nowMs: Long, 
             // Now marker
             if (nowMs in start..end) {
                 val nx = x(nowMs)
-                drawLine(Cyan, Offset(nx, top - 2.dp.toPx()), Offset(nx, axisY), 2.dp.toPx())
-                drawCircle(Cyan, 4.dp.toPx(), Offset(nx, axisY))
+                drawLine(Ink, Offset(nx, top - 2.dp.toPx()), Offset(nx, axisY), 4.dp.toPx())
+                drawLine(NowColor, Offset(nx, top - 2.dp.toPx()), Offset(nx, axisY), 2.dp.toPx())
+                drawCircle(NowColor, 4.dp.toPx(), Offset(nx, axisY))
             }
         }
         if (events.isNotEmpty()) {
@@ -400,13 +398,12 @@ internal fun DayStrip(dk: DayKeys, data: TodayData, r: Readiness?, nowMs: Long, 
         VSpace(10.dp)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Legend(Brand.copy(alpha = 0.6f), "Sleep")
-            Legend(WindowKind.PEAK.color, "Peak")
-            Legend(WindowKind.SECOND_PEAK.color, "2nd wind")
-            Legend(WindowKind.DIP.color, "Dip")
-            Legend(Cyan, "Now")
+            // Only the parts of the day that are actually on the strip, in time order.
+            r?.windows?.map { it.kind }?.distinct()?.forEach { Legend(it.color, it.label) }
+            Legend(NowColor, "Now")
         }
         VSpace(6.dp)
-        Muted("Bright bars are when your focus is strongest. Tap an event to see how ready you'll be.")
+        Muted("Each colour is a part of your day. Save demanding work for peak focus. Tap an event to see how ready you'll be.")
     }
 }
 
@@ -578,7 +575,7 @@ private fun CorrectSleepDialog(g: MobileGraph, today: String, sleep: SleepNight?
         title = { Text(if (sleep == null) "Add last night" else "Correct last night", fontWeight = FontWeight.Light) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                Muted("Your watch tracks sleep on its own. Fix the times only if they look wrong.")
+                Muted("Your watch records sleep on its own. Only fix the times if they look wrong.")
                 VSpace(14.dp)
                 Eyebrow("Went to sleep")
                 VSpace(6.dp)
@@ -611,7 +608,7 @@ private fun CorrectSleepDialog(g: MobileGraph, today: String, sleep: SleepNight?
 
 /** The two-tap check-in: used from the action button and from "Edit". */
 @Composable
-private fun CheckInForm(g: MobileGraph, existing: CheckIn?, onDone: () -> Unit) {
+internal fun CheckInForm(g: MobileGraph, existing: CheckIn?, onDone: () -> Unit) {
     val scope = rememberCoroutineScope()
     var energy by remember(existing) { mutableIntStateOf(existing?.energy ?: 3) }
     var stress by remember(existing) { mutableIntStateOf(existing?.stress ?: 3) }
@@ -644,8 +641,8 @@ private fun CheckInForm(g: MobileGraph, existing: CheckIn?, onDone: () -> Unit) 
 
 /** Today's check-in, once done: two numbers and an edit button. */
 @Composable
-private fun CheckInSummary(c: CheckIn, onEdit: () -> Unit) {
-    Section("Check-in", trailing = { TextButton(onClick = onEdit) { Text("Edit", fontSize = 12.sp) } }) {
+internal fun CheckInSummary(c: CheckIn, onEdit: () -> Unit) {
+    Section("Today's check-in", trailing = { TextButton(onClick = onEdit) { Text("Edit", fontSize = 12.sp) } }) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Illustration(R.drawable.ill_checkin, Modifier.size(80.dp))
             HSpace(12.dp)

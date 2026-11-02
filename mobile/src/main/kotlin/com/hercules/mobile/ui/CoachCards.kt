@@ -12,17 +12,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
-import androidx.compose.material.icons.rounded.AddCircleOutline
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Event
 import androidx.compose.material.icons.rounded.Flag
-import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.RateReview
 import androidx.compose.material.icons.rounded.SentimentDissatisfied
@@ -41,7 +37,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -56,7 +51,6 @@ import com.hercules.shared.cognitive.Readiness
 import com.hercules.shared.cognitive.SleepAdvice
 import com.hercules.shared.cognitive.TimeWindow
 import com.hercules.shared.cognitive.learningNote
-import com.hercules.shared.cognitive.level
 
 /** What a recommendation looks like: icon + the verb on its button. Short, action-oriented labels. */
 private val ActionKind.icon: ImageVector
@@ -65,18 +59,16 @@ private val ActionKind.icon: ImageVector
         ActionKind.PREPARE -> Icons.Rounded.Flag
         ActionKind.REFLECT -> Icons.Rounded.RateReview
         ActionKind.SLEEP -> Icons.Rounded.Bedtime
-        ActionKind.PLAN_EVENT -> Icons.Rounded.Event
         ActionKind.FOCUS -> Icons.Rounded.Timer
     }
 
 private val ActionKind.button: String
     get() = when (this) {
         ActionKind.CHECK_IN -> "CHECK IN"
-        ActionKind.PREPARE -> "OPEN PREP"
+        ActionKind.PREPARE -> "GET READY"
         ActionKind.REFLECT -> "RATE IT"
         ActionKind.SLEEP -> "TONIGHT'S PLAN"
-        ActionKind.PLAN_EVENT -> "ADD AN EVENT"
-        ActionKind.FOCUS -> "VIEW TODAY'S PLAN"
+        ActionKind.FOCUS -> "SEE YOUR DAY"
     }
 
 /** Answers "how am I doing?" in three seconds: the dial, one word, one sentence, one reason. */
@@ -88,7 +80,7 @@ fun Briefing(r: Readiness, brief: DailyBrief, onLearnMore: () -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(r.band.icon, null, tint = c, modifier = Modifier.size(16.dp))
             HSpace(8.dp)
-            Text(r.band.level.label.uppercase(UiLocale), color = c, fontSize = 15.sp, letterSpacing = 3.sp, fontWeight = FontWeight.SemiBold)
+            Text(r.band.label.uppercase(UiLocale), color = c, fontSize = 15.sp, letterSpacing = 3.sp, fontWeight = FontWeight.SemiBold)
         }
         VSpace(8.dp)
         Text(brief.headline, style = MaterialTheme.typography.headlineSmall, color = Text1, textAlign = TextAlign.Center)
@@ -136,11 +128,11 @@ private fun minutesLeft(ms: Long): String {
 
 /** The one thing to do next. This is the primary button on the screen. */
 @Composable
-fun ActionCard(action: RecommendedAction, mood: HercMood = HercMood.HAPPY, lit: Float = 0.78f, onAct: (RecommendedAction) -> Unit) {
+fun ActionCard(action: RecommendedAction, mood: HercMood = HercMood.GOOD, onAct: (RecommendedAction) -> Unit) {
     PanelBox(Modifier.clickable { onAct(action) }, accent = Cyan) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Herc(mood, size = 56.dp, lit = lit)
+                Herc(mood, size = 56.dp)
                 HSpace(8.dp)
                 Column(Modifier.weight(1f)) {
                     Eyebrow("Herc suggests", color = Cyan)
@@ -167,10 +159,10 @@ fun ActionCard(action: RecommendedAction, mood: HercMood = HercMood.HAPPY, lit: 
 @Composable
 fun NoScoreCard(onCheckIn: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-        Herc(HercMood.SLEEPING, size = 170.dp, lit = 0f)
+        Herc(HercMood.SLEEPING, size = 170.dp)
         Eyebrow("No score yet", color = Cyan)
         VSpace(8.dp)
-        Text("Sleep sets the dial", style = MaterialTheme.typography.headlineSmall, color = Text1)
+        Text("Your score starts with sleep", style = MaterialTheme.typography.headlineSmall, color = Text1)
         VSpace(14.dp)
         EmptyStep(Icons.Rounded.Watch, "Wear your watch to bed", "Sleep is recorded automatically.")
         EmptyStep(Icons.Rounded.Bolt, "Or check in now", "Two taps give you a first score.")
@@ -198,7 +190,7 @@ fun TonightCard(advice: SleepAdvice, r: Readiness?) {
             HSpace(14.dp)
             Column(Modifier.weight(1f)) {
                 Text("Bed by ${clockOf(advice.bedtimeMs)}", fontFamily = Mono, fontSize = 24.sp, color = Text1)
-                Muted(advice.shiftEarlierMinutes?.let { "Try sleeping $it min earlier." } ?: "Same as usual works well.")
+                Muted(advice.shiftEarlierMinutes?.let { "Try sleeping $it min earlier." } ?: "Your usual bedtime works well.")
             }
         }
         advice.tomorrowNote?.let { VSpace(8.dp); Muted(it) }
@@ -226,12 +218,11 @@ private fun ProjectionBar(label: String, score: Int) {
 
 /** First-week checklist. Shows what is still missing and takes you there. Disappears when done. */
 @Composable
-fun GettingStarted(watchLinked: Boolean, checkedIn: Boolean, hasEvent: Boolean, onWatch: () -> Unit, onCheckIn: () -> Unit, onEvent: () -> Unit) {
-    val done = listOf(watchLinked, checkedIn, hasEvent).count { it }
-    Section("Get started", trailing = { Text("$done/3", fontFamily = Mono, fontSize = 12.sp, color = Cyan) }) {
+fun GettingStarted(watchLinked: Boolean, checkedIn: Boolean, onWatch: () -> Unit, onCheckIn: () -> Unit) {
+    val done = listOf(watchLinked, checkedIn).count { it }
+    Section("Get started", trailing = { Text("$done/2", fontFamily = Mono, fontSize = 12.sp, color = Cyan) }) {
         StartRow(watchLinked, Icons.Rounded.Watch, "Connect your watch", "So sleep is tracked for you.", onWatch)
         StartRow(checkedIn, Icons.Rounded.Bolt, "Do your first check-in", "Takes 10 seconds.", onCheckIn)
-        StartRow(hasEvent, Icons.Rounded.Event, "Add a big moment", "An interview, pitch or exam.", onEvent)
     }
 }
 
@@ -262,7 +253,7 @@ fun ReflectContent(title: String, readinessThatDay: Int?, current: Int?, onRate:
                 Text("How did it go?", style = MaterialTheme.typography.headlineSmall, color = Text1)
                 Muted(title)
             }
-            Herc(HercMood.CALM, size = 64.dp, lit = 0.78f)
+            Herc(HercMood.FAIR, size = 64.dp)
         }
         VSpace(20.dp)
         FacesRow(current, onRate)

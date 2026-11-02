@@ -292,7 +292,7 @@ class ReadinessEngine(private val dayKeys: DayKeys) {
             }
         }
         if (input.checkIn == null) {
-            out += Suggestion("Do your morning check-in", "Takes 30 seconds. How energetic and stressed you feel makes the score more accurate.", Tone.ACTION)
+            out += Suggestion("Do your morning check-in", "Takes 10 seconds. Your energy and stress make the score more accurate.", Tone.ACTION)
         }
         return out
     }

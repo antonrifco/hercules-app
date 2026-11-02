@@ -62,7 +62,6 @@ class WatchReminderWorker(context: Context, params: WorkerParameters) : Coroutin
         }
 
         private fun ensureChannel(ctx: Context) {
-            if (Build.VERSION.SDK_INT < 26) return
             val m = ctx.getSystemService(NotificationManager::class.java)
             if (m.getNotificationChannel(CHANNEL) == null) {
                 m.createNotificationChannel(NotificationChannel(CHANNEL, "Reminders", NotificationManager.IMPORTANCE_DEFAULT))

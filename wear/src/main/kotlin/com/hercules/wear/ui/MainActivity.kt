@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Event
 import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.PhoneAndroid
@@ -115,7 +114,6 @@ import com.hercules.shared.cognitive.EventStatus
 import com.hercules.shared.cognitive.ReadinessBand
 import com.hercules.shared.cognitive.Verdict
 import com.hercules.shared.cognitive.WatchState
-import com.hercules.shared.cognitive.WindowKind
 import com.hercules.shared.cognitive.formatDuration
 import com.hercules.shared.demo.DemoData
 import com.hercules.shared.model.MetricType
@@ -254,7 +252,6 @@ private fun HerculesWearNav(launch: Intent?, onLaunchHandled: () -> Unit) {
                         ActionKind.PREPARE -> { eventId = a.eventId; nav.navigate("event") }
                         ActionKind.REFLECT -> { eventId = a.eventId; nav.navigate("event") }
                         ActionKind.SLEEP -> nav.navigate("tonight")
-                        ActionKind.PLAN_EVENT -> scope.launch { openOnPhone(ctx, "TODAY", null) }
                         ActionKind.FOCUS -> Unit
                     }
                 },
@@ -294,7 +291,7 @@ internal fun PermissionScreen(onResult: () -> Unit) {
     val listState = rememberScalingLazyListState()
     ScreenScaffold(scrollState = listState) { padding ->
         ScalingLazyColumn(state = listState, contentPadding = padding, modifier = Modifier.fillMaxSize()) {
-            item { Herc(HercMood.HAPPY, size = 60.dp) }
+            item { Herc(HercMood.GOOD, size = 60.dp) }
             item { Text("Allow access", style = MaterialTheme.typography.titleSmall, color = Color.White) }
             item { WhyRow(Icons.Rounded.Favorite, "Heart rate", "to score your recovery") }
             item { WhyRow(Icons.Rounded.Bedtime, "Sleep & motion", "to track your nights") }
@@ -359,13 +356,14 @@ internal fun HomeScreen(
                 item {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(top = 6.dp)) {
                         if (r == null) {
-                            Herc(HercMood.SLEEPING, size = 52.dp, lit = 0f)
+                            Herc(HercMood.SLEEPING, size = 52.dp)
                             WEyebrow("No score yet", WCyan)
                         } else {
+                            Herc(r.band.mood(), size = 40.dp)
                             CountUp(r.score)
                             Text(
-                                level!!.label.uppercase(), color = color, fontSize = 13.sp, letterSpacing = 3.sp, fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.semantics { contentDescription = "Readiness ${r.score}, ${level.label}" },
+                                r.band.label.uppercase(), color = color, fontSize = 13.sp, letterSpacing = 3.sp, fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.semantics { contentDescription = "Readiness ${r.score}, ${r.band.label}" },
                             )
                         }
                         brief?.focus?.let { w ->
@@ -411,7 +409,6 @@ private fun ActionButton(a: RecommendedAction, onAction: (RecommendedAction) -> 
         ActionKind.PREPARE -> Icons.Rounded.Flag
         ActionKind.REFLECT -> Icons.Rounded.RateReview
         ActionKind.SLEEP -> Icons.Rounded.Bedtime
-        ActionKind.PLAN_EVENT -> Icons.Rounded.Event
         ActionKind.FOCUS -> Icons.Rounded.Timer
     }
     val tappable = a.kind != ActionKind.FOCUS
@@ -519,7 +516,7 @@ internal fun CheckInScreen(existing: CheckIn?, onSave: suspend (Int, Int) -> Uni
         Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
             when {
                 saved -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Herc(HercMood.HAPPY, size = 76.dp, lit = 0.8f)
+                    Herc(HercMood.GOOD, size = 76.dp)
                     Text("Saved", style = MaterialTheme.typography.titleMedium, color = Color.White)
                     WEyebrow("Score updated", WText2)
                 }
@@ -626,7 +623,7 @@ internal fun TonightScreen(advice: SleepAdvice?, hasScore: Boolean) {
     val dk = LocalContext.current.graph.cognitive.dayKeys
     ScreenScaffold(scrollState = listState) { padding ->
         ScalingLazyColumn(state = listState, contentPadding = padding, modifier = Modifier.fillMaxSize()) {
-            item { Herc(HercMood.SLEEPING, size = 44.dp, lit = 0.3f) }
+            item { Herc(HercMood.SLEEPING, size = 44.dp) }
             if (advice == null) {
                 item { Text("Sleep plan appears once your day is scored.", fontSize = 12.sp, color = WText2, textAlign = TextAlign.Center) }
                 return@ScalingLazyColumn

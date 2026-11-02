@@ -99,14 +99,20 @@ val Tone.color: Color
         Tone.ACTION -> Cyan
     }
 
+/** One clearly different hue per part of the day, so the Your day strip reads at a glance. */
 val WindowKind.color: Color
     get() = when (this) {
-        WindowKind.PEAK -> Cyan
-        WindowKind.SECOND_PEAK -> Color(0xFF2AA7C9)
-        WindowKind.STEADY -> Color(0xFF2B3A5C)
-        WindowKind.WARMUP, WindowKind.DIP, WindowKind.EVENING -> Color(0xFF3A2F55)
-        WindowKind.LATE -> Color(0xFF1A1B2A)
+        WindowKind.WARMUP -> Color(0xFFFFD166)      // sunrise yellow
+        WindowKind.PEAK -> Cyan                     // the brightest: your best hours
+        WindowKind.STEADY -> Color(0xFF3D7BFF)      // blue
+        WindowKind.DIP -> Color(0xFFA35CFF)         // violet
+        WindowKind.SECOND_PEAK -> Color(0xFFFF7A59) // coral
+        WindowKind.EVENING -> Color(0xFFE2557F)     // rose
+        WindowKind.LATE -> Color(0xFF5A5F80)        // grey
     }
+
+/** The "now" marker: white, so it never looks like a part of the day. */
+val NowColor = Color(0xFFFFFFFF)
 
 /** Numerals: monospace = instrument readout. */
 val Mono = FontFamily.Monospace
@@ -349,12 +355,13 @@ fun ScoreRing(score: Int, label: String, size: Dp = 68.dp, color: Color = scoreC
 /** Icon + monospace value + eyebrow label. */
 @Composable
 fun FactTile(icon: ImageVector, value: String, label: String, modifier: Modifier = Modifier, tint: Color = Cyan) {
-    Column(modifier) {
+    Column(modifier.padding(end = 6.dp)) {
         Icon(icon, null, tint = tint, modifier = Modifier.size(18.dp))
         VSpace(8.dp)
-        Text(value, fontFamily = Mono, fontSize = 17.sp, color = Text1)
+        Text(value, fontFamily = Mono, fontSize = 17.sp, color = Text1, maxLines = 1)
         VSpace(2.dp)
-        Eyebrow(label)
+        // Wraps instead of running into the next tile on narrow screens and large font sizes.
+        Text(label.uppercase(UiLocale), color = Text2, fontSize = 10.sp, letterSpacing = 1.sp, lineHeight = 13.sp, fontWeight = FontWeight.Medium, maxLines = 2, modifier = Modifier.fillMaxWidth())
     }
 }
 

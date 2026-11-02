@@ -4,7 +4,7 @@
 
 ![Hercules — Know when your brain is ready.](docs/images/hercules-hero.jpg)
 
-**Know when your brain is ready.** Hercules turns the body signals your smartwatch already collects (sleep, heart rate, activity) into a daily **cognitive readiness score from 1 to 100%**. It tells you what that means for today's important moments, and it coaches you through the days leading up to them.
+**Know when your brain is ready.** Hercules turns the body signals your smartwatch already collects (sleep, heart rate, activity) into a daily **cognitive readiness score from 1 to 100%**. It tells you what that means for today's important events, and it coaches you through the days leading up to them.
 
 Android phone and Wear OS watch today (Kotlin Multiplatform), built so iOS and watchOS can follow with the same core logic.
 
@@ -14,7 +14,7 @@ Android phone and Wear OS watch today (Kotlin Multiplatform), built so iOS and w
 
 ## 1. The idea
 
-High-stakes moments like a job interview, a negotiation, a pitch or a big decision depend on focus, working memory and emotional control. Those depend heavily on how you slept and how recovered your body is. Most people walk into those moments blind to their own condition.
+High-stakes events like a job interview, a negotiation, a pitch or a big decision depend on focus, working memory and emotional control. Those depend heavily on how you slept and how recovered your body is. Most people walk into those events blind to their own condition.
 
 Hercules answers three questions every day:
 
@@ -37,22 +37,22 @@ Hercules answers three questions every day:
 2. **Morning check-in (optional, 30 seconds).** Tap two 1–5 scales: energy and stress. Sleep is never asked: it always comes from the watch. If the detected times look wrong (or the watch missed the night), tap **Correct** in the Sleep section and set when you fell asleep and woke up. A corrected night is marked "Corrected by you" and automatic detection never overwrites it.
 3. **The score appears**, with a band, a one-line meaning, and your **best hours** for demanding work.
 4. **Tips** are short headlines; tap one to see the detail.
-5. **The watch is kept simple:** today's score and peak hours, what it is tracking (sleep, heart, steps) and whether that data reached the phone, and a readiness forecast ring for each big moment in the next 7 days. Small animations (the bezel sweeping up to the score, a heart beating at your pulse, a breathing moon while calibrating) make it feel alive without extra battery-heavy assets.
+5. **The watch is kept simple:** today's score and peak hours, what it is tracking (sleep, heart, steps) and whether that data reached the phone, and a readiness forecast ring for each big event in the next 7 days. Small animations (the bezel sweeping up to the score, a heart beating at your pulse, a breathing moon while calibrating) make it feel alive without extra battery-heavy assets.
 
-## 2b. Four moments, one next step
+## 2b. Four times of day, one next step
 
 Hercules is built around one question: *what should I do next?* The Today screen shows the score in plain words (Good, Moderate, Low), the main reason, your best focus hours and **one** recommended action. The same coach (`Coach.kt`) runs on phone and watch, so both always say the same thing.
 
-| Moment | What Hercules offers |
+| Time of day | What Hercules offers |
 |---|---|
 | Morning | Score, best focus time, a 10-second check-in |
 | Before important work | "Get ready" with the countdown and the steps left |
 | After important work | One tap to say how it went, shown next to that day's readiness (never claimed as cause) |
 | Evening | Bedtime, "try sleeping 40 min earlier", and an *estimate* of tomorrow's readiness at 6 h vs. the target |
 
-**Meet Herc.** The mascot is a round cub whose mane is the readiness dial: the ticks light up to your score and his face follows how you are doing (happy, calm, tired, or asleep when there is no score yet). He is the launcher icon on phone and watch, the splash, and the face of the next-step card. One script, `tools/mascot/mascot.py`, draws him and writes the launcher, splash and notification vector drawables for both apps, so the icon and the in-app character stay the same drawing.
+**Meet Herc.** The mascot is the head of an adult male lion, designed with Higgsfield (Recraft V4.1, vector) and kept in its original geometric style with a bright golden mane. **Only his eyes change: they take the colour of today's band**, green for Prime, lime for Good, amber for Fair, orange for Low, red for Drained, and dim, narrowed slits while there is no score yet. He is the launcher icon on phone and watch, the splash (he opens his eyes as the app starts), the corner of Today, the next-step card and the watch home. `tools/mascot/mascot.py` reads the Higgsfield file (`tools/mascot/herc_lion_higgsfield.svg`) and writes `HercArt.kt` for both apps plus the launcher, splash and notification vector drawables, so the icon and the in-app character are the same drawing.
 
-![Herc: good, moderate, low, no score](docs/images/hercules-mascot.png)
+![Herc: Prime, Good, Fair, Low, Drained, no score](docs/images/hercules-mascot.png)
 
 **Reminders** (all optional, set in Setup): morning score, event prep (evening before and 2 h ahead), bedtime, after an event, and focus start (off by default). Each is tied to your data, none are generic. **Only one device delivers each reminder:** the watch while it is worn (it has a fresh heart-rate reading), the phone otherwise. Tapping one opens the matching screen on that device.
 
@@ -95,12 +95,12 @@ If an ingredient is missing (for example no check-in, or the heart-rate sensor i
 
 So an interview at 10:00 can score noticeably better than the same interview at 14:00.
 
-## 5. Planning a big moment (up to 7 days ahead)
+## 5. Planning a big event (up to 7 days ahead)
 
 **Example:** "Job Interview with Google", 6 days from now at 10:00.
 
 1. **Add it** in the Plan tab: title, stakes (normal, important, critical), day (up to 7 days out) and time. The app shows which daily phase that time usually falls in.
-2. **Every day until then** you get a short checklist for the current phase. It only covers what Hercules can measure or influence: **sleep, recovery, activity and stress**. It never tells you how to prepare the content (research, rehearsal, outfit); that is your job, and the same for every kind of moment.
+2. **Every day until then** you get a short checklist for the current phase. It only covers what Hercules can measure or influence: **sleep, recovery, activity and stress**. It never tells you how to prepare the content (research, rehearsal, outfit); that is your job, and the same for every kind of event.
 
 | Days to go | Phase | Focus | Example tasks |
 |---|---|---|---|
@@ -146,7 +146,7 @@ Phone **Data → Sensors** (or watch **Sensors**) lists every background sensor 
 │  HR, steps, calories, distance, floors      │ batch  │  store samples → insights → readiness refresh      │
 │  + user activity state (asleep/awake) ──────┼───────►│  → push WatchState back to the watch               │
 │ Sync status: "Sent to phone · 2m ago"       │MessageC│ Compose UI: Today · Plan · Data(+Sensors)          │
-│ Home: score, tracking, big-moment forecasts │◄───────┤ DataClient: /hercules/state, /hercules/sensors/*   │
+│ Home: score, tracking, big-event forecasts │◄───────┤ DataClient: /hercules/state, /hercules/sensors/*   │
 │ Sensors screen ◄──── /hercules/sensors ────►│DataCli.│ NoopRemoteSink → (future) HttpRemoteSink → backend │
 └──────────────────────┬──────────────────────┘        └──────────────────────────┬─────────────────────────┘
                        └───────────── shared (Kotlin Multiplatform) ──────────────┘
@@ -249,10 +249,10 @@ The UI is designed as a **precision instrument**, not a wellness toy: matte blac
 
 **User journeys and illustrations** (generated with Higgsfield, GPT Image 2.5, in one blueprint style; `mobile/src/main/res/drawable-nodpi/ill_*.webp`):
 
-| Journey moment | Illustration |
+| Journey step | Illustration |
 |---|---|
 | Onboarding 1: "Your brain has a readiness level" | `ill_score`: head profile inside a precision dial |
-| Onboarding 2: "Sleep sets the dial", and Today with no reading yet | `ill_sleep`: sleep wave flowing into a watch |
+| Onboarding 2: "Your score starts with sleep", and Today with no reading yet | `ill_sleep`: sleep wave flowing into a watch |
 | Onboarding 3: "Aim for the big day", and empty Plan | `ill_plan`: seven ascending platforms to a diamond |
 | Check-in logged | `ill_checkin`: rings aligning, calibration done |
 | Event day: go | `ill_go`: a doorway of light |

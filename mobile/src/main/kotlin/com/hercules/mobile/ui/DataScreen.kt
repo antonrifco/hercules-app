@@ -57,6 +57,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.Gavel
+import androidx.compose.material.icons.rounded.PrivacyTip
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -80,7 +83,7 @@ import kotlinx.coroutines.tasks.await
 
 /** Setup: watch link, sensor toggles, personal bests and server sync. Today's stats live on the home screen. */
 @Composable
-fun DataScreen(g: MobileGraph, today: String, padding: PaddingValues, onLoadDemo: () -> Unit) {
+fun DataScreen(g: MobileGraph, today: String, padding: PaddingValues, onLoadDemo: () -> Unit, onOpenLegal: (LegalDoc) -> Unit = {}) {
     val ctx = LocalContext.current
     val records by remember { g.repo.observeRecords() }.collectAsStateWithLifecycle(emptyList())
     val pending by remember { g.repo.observePendingSampleCount() }.collectAsStateWithLifecycle(0L)
@@ -127,7 +130,7 @@ fun DataScreen(g: MobileGraph, today: String, padding: PaddingValues, onLoadDemo
         }
         item {
             Section("Personal bests") {
-                if (records.isEmpty()) Muted("None yet")
+                if (records.isEmpty()) Muted("None yet. They appear as your watch records more days.")
                 records.forEachIndexed { i, r ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(RecordText.label(r.kind), style = MaterialTheme.typography.bodyMedium, color = Text1, modifier = Modifier.weight(1f))
@@ -137,7 +140,8 @@ fun DataScreen(g: MobileGraph, today: String, padding: PaddingValues, onLoadDemo
                 }
             }
         }
-        item {
+        // Cloud sync isn't live yet; only developers see the upload queue.
+        if (SERVER_SYNC_ENABLED || BuildConfig.DEBUG) item {
             Section("Server") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("$pending", fontFamily = Mono, fontSize = 22.sp, color = Text1)
@@ -161,6 +165,15 @@ fun DataScreen(g: MobileGraph, today: String, padding: PaddingValues, onLoadDemo
                 serverMessage?.let { VSpace(6.dp); Muted(it) }
             }
         }
+        item {
+            Section("About") {
+                LegalRow(Icons.Rounded.PrivacyTip, "Privacy Policy", "What Hercules collects and where it stays") { onOpenLegal(LegalDoc.PRIVACY) }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
+                LegalRow(Icons.Rounded.Gavel, "Terms & Conditions", "The rules for using the app") { onOpenLegal(LegalDoc.TERMS) }
+                VSpace(10.dp)
+                Muted("Hercules ${BuildConfig.VERSION_NAME}")
+            }
+        }
         if (BuildConfig.DEBUG) {
             item {
                 Section("Developer") {
@@ -170,6 +183,22 @@ fun DataScreen(g: MobileGraph, today: String, padding: PaddingValues, onLoadDemo
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun LegalRow(icon: ImageVector, title: String, hint: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).clickable(onClick = onClick).padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = Cyan, modifier = Modifier.size(20.dp))
+        HSpace(14.dp)
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, color = Text1)
+            Muted(hint)
+        }
+        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, "Open", tint = Text2, modifier = Modifier.size(20.dp))
     }
 }
 

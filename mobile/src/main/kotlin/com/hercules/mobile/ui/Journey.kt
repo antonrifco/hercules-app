@@ -1,12 +1,12 @@
 package com.hercules.mobile.ui
 
-import android.graphics.ImageDecoder
-import android.graphics.drawable.AnimatedImageDrawable
-import android.widget.ImageView
 import androidx.core.content.edit
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -36,19 +36,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import com.hercules.mobile.R
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -56,28 +55,36 @@ import kotlinx.coroutines.launch
 // ------------------------------------------------------------------ animated launch
 
 /**
- * Picks up where the system splash ends (same Herc, same black): the mane lights up, he blinks, the name
- * fades in, then it all fades into the app.
+ * Picks up where the system splash ends (same lion, same place, same black, eyes still narrowed): Herc opens his
+ * eyes in Prime green, the head surges forward a touch and settles, then the name rises in and it all fades into
+ * the app. Tap to skip.
  */
 @Composable
-fun LaunchArt(show: Boolean, durationMs: Long = 2_600) {
+fun LaunchArt(show: Boolean, durationMs: Long = 2_400) {
     var visible by remember { mutableStateOf(show) }
-    var lit by remember { mutableFloatStateOf(0f) }
+    var awake by remember { mutableStateOf(false) }
+    val surge = remember { Animatable(1f) }
+    val words = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
-        delay(300)
-        lit = 0.78f
-        delay(durationMs - 300)
+        if (!show) return@LaunchedEffect
+        delay(250)
+        awake = true
+        surge.animateTo(1.06f, tween(220, easing = FastOutSlowInEasing))
+        surge.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 300f))
+        words.animateTo(1f, tween(520, easing = FastOutSlowInEasing))
+        delay((durationMs - 1_300).coerceAtLeast(300))
         visible = false
     }
-    AnimatedVisibility(visible, enter = EnterTransition.None, exit = fadeOut(tween(500))) {
+    AnimatedVisibility(visible, enter = EnterTransition.None, exit = fadeOut(tween(450))) {
         Box(Modifier.fillMaxSize().background(Ink).clickable { visible = false }, contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                // Same size as the system splash icon, so the hand-over is seamless.
-                Herc(HercMood.HAPPY, size = 288.dp, lit = lit, crop = false)
-                Text(
-                    "HERCULES", color = Text1, fontSize = 15.sp, letterSpacing = 8.sp, fontWeight = FontWeight.Medium,
-                    modifier = Modifier.offset(y = (-52).dp).alpha(if (lit > 0f) 1f else 0f),
-                )
+            // Same size and framing as the system splash icon, so the hand-over is seamless.
+            Herc(if (awake) HercMood.PRIME else HercMood.SLEEPING, size = 288.dp, pose = HercPose.ICON, mane = surge.value)
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.offset { androidx.compose.ui.unit.IntOffset(0, (128.dp + 16.dp * (1f - words.value)).roundToPx()) }.graphicsLayer { alpha = words.value },
+            ) {
+                Text("HERCULES", color = Text1, fontSize = 18.sp, letterSpacing = 8.sp, fontWeight = FontWeight.Medium)
+                Text("Know when your mind is ready", color = Text2, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
             }
         }
     }
@@ -88,10 +95,10 @@ fun LaunchArt(show: Boolean, durationMs: Long = 2_600) {
 private class Step(val image: Int, val eyebrow: String, val title: String, val body: String, val herc: HercMood? = null)
 
 private val Steps = listOf(
-    Step(R.drawable.ill_score, "01 · Meet Herc", "Know when your brain is ready", "Herc turns your sleep and heart into a daily score from 1 to 100. His mane is the dial.", HercMood.HAPPY),
+    Step(R.drawable.ill_score, "01 · Meet Herc", "Know when your brain is ready", "Herc turns your sleep and heart rate into a daily score from 1 to 100. His eyes change colour with it, from Prime to Drained.", HercMood.PRIME),
     Step(R.drawable.ill_no_watch, "02 · The watch", "Wear it to bed", "Install Hercules on your watch and open it once. It asks to read heart rate and sleep, only to score your nights. Your data stays on your devices."),
     Step(R.drawable.ill_sleep, "03 · Sleep", "Nothing to log", "Sleep is tracked for you. The first week, Herc learns what normal looks like for you.", HercMood.SLEEPING),
-    Step(R.drawable.ill_plan, "04 · The plan", "Aim for the big day", "Add an interview or pitch. Get a daily run-up and a clear go or wait call."),
+    Step(R.drawable.ill_plan, "04 · The plan", "Aim for the big day", "Add an interview, exam or pitch. Get a short daily checklist and, on the day, a clear go or wait."),
     Step(R.drawable.ill_checkin, "05 · Reminders", "At most three a day", "Morning score, event prep and bedtime. Switch each off any time in Setup."),
 )
 
@@ -109,6 +116,14 @@ fun rememberOnboarded(): Pair<Boolean, () -> Unit> {
 @Composable
 fun Onboarding(onDone: () -> Unit) {
     val pager = rememberPagerState { Steps.size }
+    // On "Meet Herc" he walks through the five bands so the colours explain themselves.
+    var cycling by remember { mutableStateOf(HercMood.PRIME) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_400)
+            cycling = HercMood.entries[(cycling.ordinal + 1) % HercMood.DRAINED.ordinal.plus(1)]
+        }
+    }
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
     val askNotifications = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { onDone() }
@@ -123,7 +138,14 @@ fun Onboarding(onDone: () -> Unit) {
             Column(Modifier.fillMaxSize().alpha(shown), verticalArrangement = Arrangement.Center) {
                 if (s.herc != null) {
                     Box(Modifier.fillMaxWidth().aspectRatio(1f), contentAlignment = Alignment.Center) {
-                        Herc(s.herc, size = 280.dp, lit = if (pager.currentPage == page && s.herc == HercMood.HAPPY) 0.8f else 0f)
+                        val m = if (s.herc == HercMood.PRIME) cycling else s.herc
+                        Herc(m, size = 260.dp, pose = HercPose.HEAD)
+                        if (s.herc == HercMood.PRIME) {
+                            Text(
+                                m.label.uppercase(), color = m.eyes, fontSize = 12.sp, letterSpacing = 3.sp, fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.align(Alignment.BottomCenter),
+                            )
+                        }
                     }
                 } else {
                     Illustration(s.image, Modifier.fillMaxWidth().aspectRatio(1f))

@@ -92,9 +92,11 @@ private fun HerculesApp(loadDemoOnStart: Boolean, launch: android.content.Intent
     var tab by rememberSaveable { mutableStateOf(Tab.TODAY) }
     var openEventId by rememberSaveable { mutableStateOf<String?>(null) }
     var adding by remember { mutableStateOf(false) }
+    var legal by rememberSaveable { mutableStateOf<LegalDoc?>(null) }
     var todayRequest by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(launch) {
         val i = launch ?: return@LaunchedEffect
+        legal = null
         val target = i.getStringExtra(com.hercules.mobile.notify.Notifier.EXTRA_TARGET) ?: i.data?.getQueryParameter("target") ?: return@LaunchedEffect
         val ev = i.getStringExtra(com.hercules.mobile.notify.Notifier.EXTRA_EVENT) ?: i.data?.getQueryParameter("event")
         when (target) {
@@ -142,24 +144,28 @@ private fun HerculesApp(loadDemoOnStart: Boolean, launch: android.content.Intent
 
     val reflections by remember { store.observeReflections() }.collectAsStateWithLifecycle(emptyList())
     val brief by produceState<DailyBrief?>(null, readiness, checkIn, sleep, statuses, reflections, nowMs) {
-        value = runCatching { g.cognitive.brief(nowMs) }.getOrNull()
+        value = runCatching { g.cognitive.brief(nowMs) }.onFailure { android.util.Log.w("Hercules", "brief failed", it) }.getOrNull()
     }
 
     val detail = openEventId?.let { id -> statuses.firstOrNull { it.event.id == id } }
-    BackHandler(enabled = openEventId != null) { openEventId = null }
+    BackHandler(enabled = openEventId != null || legal != null) { if (legal != null) legal = null else openEventId = null }
+    // A notification can point at an event that has since been deleted: don't leave an empty page.
+    LaunchedEffect(openEventId, detail == null) {
+        if (openEventId != null && detail == null) { delay(2_000); if (statuses.none { it.event.id == openEventId }) openEventId = null }
+    }
 
     Scaffold(
         topBar = {
-            if (openEventId != null) {
+            if (openEventId != null || legal != null) {
                 TopAppBar(
-                    title = { Eyebrow("Countdown", color = Text1) },
-                    navigationIcon = { IconButton(onClick = { openEventId = null }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Text1) } },
+                    title = { Eyebrow(if (legal != null) "Setup" else "Event", color = Text1) },
+                    navigationIcon = { IconButton(onClick = { if (legal != null) legal = null else openEventId = null }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Text1) } },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = Ink),
                 )
             }
         },
         bottomBar = {
-            if (openEventId == null) {
+            if (openEventId == null && legal == null) {
                 HerculesNavBar(
                     items = Tab.entries,
                     selected = tab,
@@ -176,11 +182,11 @@ private fun HerculesApp(loadDemoOnStart: Boolean, launch: android.content.Intent
             }
         },
         floatingActionButton = {
-            if (openEventId == null && tab == Tab.PLAN) {
+            if (openEventId == null && legal == null && tab == Tab.PLAN) {
                 ExtendedFloatingActionButton(
                     onClick = { adding = true },
                     icon = { Icon(Icons.Filled.Add, null) },
-                    text = { Text("NEW MOMENT", letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold) },
+                    text = { Text("NEW EVENT", letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold) },
                     shape = RoundedCornerShape(6.dp),
                     containerColor = Cyan,
                     contentColor = Ink,
@@ -190,6 +196,7 @@ private fun HerculesApp(loadDemoOnStart: Boolean, launch: android.content.Intent
         containerColor = MaterialTheme.colorScheme.background,
     ) { inner ->
         when {
+            legal != null -> LegalScreen(legal!!, inner)
             openEventId != null && detail != null -> EventDetail(
                 g, detail, inner,
                 onChanged = { tick++ },
@@ -205,13 +212,12 @@ private fun HerculesApp(loadDemoOnStart: Boolean, launch: android.content.Intent
                 nowMs, inner,
                 onOpenEvent = { openEventId = it },
                 onOpenGuide = { guide = true },
-                onPlanEvent = { tab = Tab.PLAN; adding = true },
                 onOpenSetup = { tab = Tab.DATA },
                 request = todayRequest,
                 onRequestHandled = { todayRequest = null },
             )
-            tab == Tab.PLAN -> PlanScreen(statuses, inner, onAdd = { adding = true }) { openEventId = it }
-            else -> DataScreen(g, today, inner, onLoadDemo = { loadDemo() })
+            tab == Tab.PLAN -> PlanScreen(g, checkIn, statuses, inner, onAdd = { adding = true }) { openEventId = it }
+            else -> DataScreen(g, today, inner, onLoadDemo = { loadDemo() }, onOpenLegal = { legal = it })
         }
     }
 

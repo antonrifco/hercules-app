@@ -34,7 +34,7 @@ val ComponentKind.provenance: Provenance
 
 enum class Moment { MORNING, DAYTIME, EVENING, NIGHT }
 
-enum class ActionKind { CHECK_IN, PREPARE, REFLECT, SLEEP, PLAN_EVENT, FOCUS }
+enum class ActionKind { CHECK_IN, PREPARE, REFLECT, SLEEP, FOCUS }
 
 /** The one thing to do next. [eventId] opens that event; null kinds open their own sheet or tab. */
 @Serializable
@@ -83,7 +83,7 @@ class Coach(private val dayKeys: DayKeys, private val engine: ReadinessEngine) {
     fun headline(band: ReadinessBand): String = when (band) {
         ReadinessBand.PRIMA -> "Great day for deep work."
         ReadinessBand.BAIK -> "Good day for deep work."
-        ReadinessBand.CUKUP -> "Okay day. Use your best hours."
+        ReadinessBand.CUKUP -> "Fair day. Use your best hours."
         ReadinessBand.RENDAH -> "Go easy. Delay big decisions."
         ReadinessBand.TERKURAS -> "Recovery day. Keep it light."
     }
@@ -160,7 +160,7 @@ class Coach(private val dayKeys: DayKeys, private val engine: ReadinessEngine) {
 
     /**
      * One recommendation, in priority order: finish today's check-in, get ready for what is about to happen,
-     * reflect on what just happened, wind down at night, keep preparing, plan something, or use your best hours.
+     * reflect on what just happened, wind down at night, keep preparing, or use your best hours.
      */
     fun action(
         nowMs: Long,
@@ -200,9 +200,6 @@ class Coach(private val dayKeys: DayKeys, private val engine: ReadinessEngine) {
             return RecommendedAction(
                 ActionKind.PREPARE, "Continue preparation", "${prep.event.title} · ${prep.doneTaskIds.size}/${prep.todayTasks.size} done today", prep.event.id,
             )
-        }
-        if (events.none { it.phase != PrepPhase.DONE } && r != null && r.band.level != Level.LOW) {
-            return RecommendedAction(ActionKind.PLAN_EVENT, "Plan a big moment", "Get a daily run-up and a go / wait call.")
         }
         val f = r?.let { focus(it, nowMs) }
         return if (f != null) {

@@ -51,12 +51,12 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TimeInput
-import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -75,6 +75,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hercules.mobile.MobileGraph
 import com.hercules.mobile.R
+import com.hercules.shared.cognitive.CheckIn
 import com.hercules.shared.cognitive.ComponentKind
 import com.hercules.shared.cognitive.EventStatus
 import com.hercules.shared.cognitive.EventType
@@ -90,33 +91,70 @@ import java.util.UUID
 private const val HOUR = 3_600_000L
 private const val MAX_DAYS_AHEAD = 7
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PlanScreen(statuses: List<EventStatus>, padding: PaddingValues, onAdd: () -> Unit, onOpen: (String) -> Unit) {
+fun PlanScreen(
+    g: MobileGraph,
+    checkIn: CheckIn?,
+    statuses: List<EventStatus>,
+    padding: PaddingValues,
+    onAdd: () -> Unit,
+    onOpen: (String) -> Unit,
+) {
+    var checkingIn by remember { mutableStateOf(false) }
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()),
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = padding.calculateBottomPadding() + 96.dp),
     ) {
         item {
-            Eyebrow("Countdown")
+            Eyebrow("Plan")
             VSpace(6.dp)
-            Text("Big moments ahead", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Light, color = Text1)
+            Text("Get ready for what's ahead", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Light, color = Text1)
             VSpace(20.dp)
+        }
+        item {
+            if (checkIn != null) CheckInSummary(checkIn) { checkingIn = true }
+            else CheckInPrompt { checkingIn = true }
+            VSpace(28.dp)
+            Eyebrow("Upcoming events", color = Text1)
+            VSpace(14.dp)
         }
         if (statuses.isEmpty()) {
             item {
                 Illustration(R.drawable.ill_plan, Modifier.fillMaxWidth().height(220.dp))
                 VSpace(8.dp)
-                Text("Nothing planned", style = MaterialTheme.typography.titleLarge, color = Text1)
+                Text("No events yet", style = MaterialTheme.typography.titleLarge, color = Text1)
                 VSpace(4.dp)
-                Muted("Add an interview, pitch or exam. Hercules plans your sleep and prep, then tells you if you're ready.")
+                Muted("Add an interview, pitch or exam in the next 7 days. Hercules helps you sleep and recover for it, then tells you whether you're ready.")
                 VSpace(16.dp)
                 Button(
                     onClick = onAdd, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(6.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Ink),
-                ) { Text("ADD A BIG MOMENT", letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold) }
+                ) { Text("ADD AN EVENT", letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold) }
             }
         }
         itemsIndexed(statuses, key = { _, s -> s.event.id }) { i, s -> RailRow(s, first = i == 0, last = i == statuses.lastIndex, primary = i == 0) { onOpen(s.event.id) } }
+    }
+    if (checkingIn) {
+        ModalBottomSheet(onDismissRequest = { checkingIn = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = Panel) {
+            CheckInForm(g, checkIn) { checkingIn = false }
+        }
+    }
+}
+
+/** Before today's check-in: what it is and one button. */
+@Composable
+private fun CheckInPrompt(onCheckIn: () -> Unit) {
+    Section("Today's check-in") {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Illustration(R.drawable.ill_checkin, Modifier.size(72.dp))
+            HSpace(12.dp)
+            Muted("Rate your energy and stress. It takes 10 seconds and makes today's score more accurate.", Modifier.weight(1f))
+        }
+        VSpace(12.dp)
+        OutlinedButton(onClick = onCheckIn, modifier = Modifier.fillMaxWidth().height(44.dp), shape = RoundedCornerShape(6.dp), border = BorderStroke(1.dp, Cyan)) {
+            Text("CHECK IN", letterSpacing = 1.5.sp, color = Cyan, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 
@@ -182,7 +220,7 @@ private fun RailRow(s: EventStatus, first: Boolean, last: Boolean, primary: Bool
     }
 }
 
-private fun daysLeft(d: Int) = when (d) { 0 -> "Today"; 1 -> "Tomorrow"; else -> "$d days remaining" }
+private fun daysLeft(d: Int) = when (d) { 0 -> "Today"; 1 -> "Tomorrow"; else -> "In $d days" }
 
 @Composable private fun Spacer6() = HSpace(6.dp)
 
@@ -217,7 +255,7 @@ fun AddEventDialog(g: MobileGraph, nowMs: Long, onDismiss: () -> Unit) {
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         containerColor = Panel,
         shape = RoundedCornerShape(8.dp),
-        title = { Text("New big moment", fontWeight = FontWeight.Light) },
+        title = { Text("New event", fontWeight = FontWeight.Light) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
@@ -228,7 +266,7 @@ fun AddEventDialog(g: MobileGraph, nowMs: Long, onDismiss: () -> Unit) {
                     modifier = Modifier.fillMaxWidth().focusRequester(titleFocus),
                 )
                 VSpace(14.dp)
-                Eyebrow("Stakes")
+                Eyebrow("How important")
                 VSpace(6.dp)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Importance.entries.forEach { i ->
@@ -251,7 +289,7 @@ fun AddEventDialog(g: MobileGraph, nowMs: Long, onDismiss: () -> Unit) {
                     Icon(Icons.Rounded.TrackChanges, null, tint = Cyan, modifier = Modifier.size(18.dp))
                     HSpace(10.dp)
                     Text(
-                        "Pick a day in the next 7. Hercules guides your sleep and prep until then.",
+                        "Pick a day within the next week. Until then, Hercules guides your sleep and recovery.",
                         style = MaterialTheme.typography.bodySmall, color = Text1,
                     )
                 }
@@ -312,7 +350,7 @@ private fun Stepper(value: String, onMinus: () -> Unit, onPlus: () -> Unit) {
     }
 }
 
-/** Says in plain words whether the chosen time is a good one for a demanding moment. */
+/** Says in plain words whether the chosen time is a good one for a demanding event. */
 @Composable
 private fun TimingHint(kind: WindowKind, at: String) {
     val (good, text) = when (kind) {
@@ -355,7 +393,7 @@ fun EventDetail(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(s.event.type.icon, null, tint = Cyan, modifier = Modifier.size(16.dp))
                     HSpace(8.dp)
-                    Eyebrow("Stakes · ${s.event.importance.label}", color = Cyan)
+                    Eyebrow(s.event.importance.label, color = Cyan)
                 }
                 VSpace(8.dp)
                 Text(s.event.title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Light, color = Text1)
@@ -380,7 +418,7 @@ fun EventDetail(
         }
         s.advice?.let { a ->
             item {
-                Section("Event-day call") {
+                Section("Go or wait?") {
                     Illustration(if (a.verdict == Verdict.GO || a.verdict == Verdict.GO_WITH_PREP) R.drawable.ill_go else R.drawable.ill_wait, Modifier.fillMaxWidth().height(180.dp))
                     VSpace(8.dp)
                     PanelBox(accent = a.verdict.color) {
@@ -420,14 +458,14 @@ fun EventDetail(
                             "You rated it ${rf.rating}/5" + (score?.let { " · readiness that day $it" } ?: ""),
                             style = MaterialTheme.typography.bodyMedium, color = Text1,
                         )
-                        Muted("Compare over time. This can't tell what caused what.")
+                        Muted("Over time you'll see how readiness and results line up. It shows a pattern, not the cause.")
                     }
                 }
             }
         }
         if (s.todayTasks.isNotEmpty()) {
             item {
-                Section("Prepare today", trailing = { Text("${s.doneTaskIds.size}/${s.todayTasks.size}", fontFamily = Mono, fontSize = 12.sp, color = Cyan) }) {
+                Section("Today's prep", trailing = { Text("${s.doneTaskIds.size}/${s.todayTasks.size}", fontFamily = Mono, fontSize = 12.sp, color = Cyan) }) {
                     s.todayTasks.forEachIndexed { i, t ->
                         val done = t.id in s.doneTaskIds
                         var open by remember(t.id) { mutableStateOf(false) }
@@ -483,7 +521,7 @@ fun EventDetail(
             onDismissRequest = { confirmDelete = false },
             containerColor = Panel,
             title = { Text("Delete \"${s.event.title}\"?") },
-            text = { Text("Its checklist progress is deleted too.") },
+            text = { Text("Its prep checklist is deleted too.") },
             confirmButton = {
                 TextButton(onClick = {
                     scope.launch {
@@ -505,7 +543,7 @@ fun GuideContent() {
     Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp).verticalScroll(rememberScrollState())) {
         Eyebrow("Guide")
         VSpace(6.dp)
-        Text("Reading the dial", style = MaterialTheme.typography.headlineSmall, color = Text1)
+        Text("Reading your score", style = MaterialTheme.typography.headlineSmall, color = Text1)
         Muted("How ready your brain is for focus and judgement today, against your own normal.")
         VSpace(18.dp)
         ReadinessBand.entries.forEachIndexed { i, b ->
@@ -547,7 +585,7 @@ fun GuideContent() {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Rounded.Info, null, tint = Text2, modifier = Modifier.size(14.dp))
             HSpace(8.dp)
-            Muted("A heuristic guide, not a medical device. The first 7 days are calibration.")
+            Muted("An estimate, not a medical device. The first 7 nights are for learning your normal.")
         }
     }
 }

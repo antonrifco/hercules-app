@@ -42,12 +42,12 @@ enum class ReadinessBand(val label: String, val minScore: Int, val headline: Str
     BAIK(
         "Good", 70,
         "Good condition for important work",
-        "Ready for important activities. A short warm-up and picking the right hour will get the most out of today.",
+        "Ready for important work. A short warm-up and the right hour get the most out of today.",
     ),
     CUKUP(
         "Fair", 55,
-        "Fair, so choose your timing",
-        "You can still perform well if it's scheduled in your peak window. Best kept to your peak window.",
+        "Fair: choose your timing",
+        "You can still do well if you schedule important work in your peak window.",
     ),
     RENDAH(
         "Low", 40,
@@ -169,7 +169,7 @@ enum class PrepPhase(val label: String, val description: String) {
     SHARPEN("Sharpen", "Protect your sleep and cut anything that hurts recovery."),
     EVE("The day before", "Wind down early and protect tonight's sleep."),
     DAY("Event day", "Wake up body and brain, then perform at your best hour."),
-    DONE("Done", "The event has passed. Hope it went great!"),
+    DONE("Done", "This event is over."),
 }
 
 @Serializable
@@ -178,7 +178,7 @@ data class PrepTask(val id: String, val title: String, val detail: String)
 @Serializable
 enum class Verdict(val label: String) {
     GO("Go ahead"),
-    GO_WITH_PREP("Go, with a game plan"),
+    GO_WITH_PREP("Go, with prep"),
     CONSIDER_RESCHEDULE("Consider rescheduling"),
     RESCHEDULE("Postpone if you can"),
 }
