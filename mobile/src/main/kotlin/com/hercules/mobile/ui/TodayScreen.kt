@@ -430,8 +430,6 @@ internal fun DayStrip(dk: DayKeys, data: TodayData, r: Readiness?, nowMs: Long, 
             r?.windows?.map { it.kind }?.distinct()?.forEach { Legend(it.color, it.label) }
             Legend(NowColor, "Now")
         }
-        VSpace(6.dp)
-        Muted("Each colour is a part of your day. Save demanding work for peak focus. Tap a moment to see how ready you'll be.")
     }
 }
 
