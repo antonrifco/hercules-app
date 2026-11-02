@@ -29,7 +29,7 @@ enum class LegalDoc(val title: String, val updated: String, val intro: String, v
             ),
             "What Hercules collects" to listOf(
                 "From your watch, with your permission: heart rate, sleep and wake times, steps, distance, floors, calories and motion. You can switch each sensor off in Setup.",
-                "What you enter: check-ins (energy and stress), events you plan, the steps you tick off, ratings after an event, and sleep times you correct.",
+                "What you enter: check-ins (energy and stress), moments you plan, the steps you tick off, ratings after a moment, and sleep times you correct.",
                 "What Hercules works out from these: your daily readiness score, focus windows, sleep advice and personal bests.",
             ),
             "How it is used" to listOf(
@@ -43,7 +43,7 @@ enum class LegalDoc(val title: String, val updated: String, val intro: String, v
             ),
             "How long it is kept" to listOf(
                 "Raw sensor readings are deleted after 30 days, and after 90 days at most.",
-                "Daily summaries, scores, check-ins, events and personal bests are kept on your device so you can see your history, until you delete the app or its data.",
+                "Daily summaries, scores, check-ins, moments and personal bests are kept on your device so you can see your history, until you delete the app or its data.",
             ),
             "Permissions" to listOf(
                 "Body sensors, activity recognition and background sensor access (watch): to measure heart rate, sleep and movement.",
@@ -51,7 +51,7 @@ enum class LegalDoc(val title: String, val updated: String, val intro: String, v
             ),
             "Your control" to listOf(
                 "Turn sensors and reminders on or off at any time in Setup.",
-                "Delete an event and its checklist from the event page.",
+                "Delete a moment and its checklist from the moment's page.",
                 "Delete all data with Android Settings > Apps > Hercules > Storage > Clear storage, on the phone and on the watch, or by uninstalling.",
             ),
             "Children" to listOf(
@@ -73,8 +73,8 @@ enum class LegalDoc(val title: String, val updated: String, val intro: String, v
                 "Watch sensors can be wrong or miss data. The app does its best with what it receives, but cannot guarantee accuracy.",
             ),
             "Your decisions" to listOf(
-                "Hercules may suggest moving a demanding task or event to a better time. Whether and how you act on that is your decision.",
-                "Hercules is not responsible for the outcome of interviews, exams, negotiations or any other event.",
+                "Hercules may suggest moving a demanding task or moment to a better time. Whether and how you act on that is your decision.",
+                "Hercules is not responsible for the outcome of interviews, exams, negotiations or any other moment.",
             ),
             "Using the app" to listOf(
                 "You need a compatible Android phone and, for automatic tracking, a Wear OS watch.",

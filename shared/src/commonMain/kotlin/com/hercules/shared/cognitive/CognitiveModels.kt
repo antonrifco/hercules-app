@@ -168,8 +168,8 @@ enum class PrepPhase(val label: String, val description: String) {
     FOUNDATION("Build the foundation", "Lock in a consistent sleep pattern."),
     SHARPEN("Sharpen", "Protect your sleep and cut anything that hurts recovery."),
     EVE("The day before", "Wind down early and protect tonight's sleep."),
-    DAY("Event day", "Wake up body and brain, then perform at your best hour."),
-    DONE("Done", "This event is over."),
+    DAY("The big day", "Wake up body and brain, then perform at your best hour."),
+    DONE("Done", "This moment is over."),
 }
 
 @Serializable

@@ -76,7 +76,7 @@ private val ActionKind.button: String
 fun Briefing(r: Readiness, brief: DailyBrief, onLearnMore: () -> Unit) {
     val c = r.band.color
     Column(Modifier.fillMaxWidth().background(glow(c)), horizontalAlignment = Alignment.CenterHorizontally) {
-        ScoreGauge(r.score, c, size = 208.dp, caption = "readiness")
+        ScoreGauge(r.score, c, size = 208.dp, caption = "Your cognitive state")
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(r.band.icon, null, tint = c, modifier = Modifier.size(16.dp))
             HSpace(8.dp)
@@ -248,7 +248,7 @@ fun ReflectContent(title: String, readinessThatDay: Int?, current: Int?, onRate:
     Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Eyebrow("After the event")
+                Eyebrow("After the moment")
                 VSpace(6.dp)
                 Text("How did it go?", style = MaterialTheme.typography.headlineSmall, color = Text1)
                 Muted(title)

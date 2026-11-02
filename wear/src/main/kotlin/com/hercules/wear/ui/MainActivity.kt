@@ -179,8 +179,13 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
+        val splash = installSplashScreen() // Herc wakes up (splash_anim)
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) {
+            // Let the wake-up animation finish before the app draws over it.
+            val until = android.os.SystemClock.uptimeMillis() + 900
+            splash.setKeepOnScreenCondition { android.os.SystemClock.uptimeMillis() < until }
+        }
         if (savedInstanceState == null) launch = intent
         // Debug only: `adb shell am start -n com.hercules.app/com.hercules.wear.ui.MainActivity --ez demo true`
         // loads the same 14-day demo as the phone, so the watch UI can be checked without pairing.
@@ -363,7 +368,7 @@ internal fun HomeScreen(
                             CountUp(r.score)
                             Text(
                                 r.band.label.uppercase(), color = color, fontSize = 13.sp, letterSpacing = 3.sp, fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.semantics { contentDescription = "Readiness ${r.score}, ${r.band.label}" },
+                                modifier = Modifier.semantics { contentDescription = "Your cognitive state ${r.score}, ${r.band.label}" },
                             )
                         }
                         brief?.focus?.let { w ->
@@ -381,7 +386,9 @@ internal fun HomeScreen(
                     if (brief != null) ActionButton(brief.action, onAction)
                     else Button(onClick = onCheckIn, modifier = Modifier.fillMaxWidth(), icon = { Icon(Icons.Rounded.Bolt, null) }) { Text("Check in") }
                 }
-                // 3 · Am I ready for what is coming?
+                // A tracking problem blocks tomorrow's score, so it comes before everything else below.
+                if (sync?.problem != null) item { SyncLine(sync, pending, now, onClick = onStatus) }
+                // 3 · Am I ready for what is coming? The next moment, then the rest of the week's.
                 schedule.firstOrNull()?.let { ev -> item { MomentRow(ev, r?.score, now, onClick = { onEvent(ev.event.id) }) } }
                 // Quick actions
                 item {
@@ -395,7 +402,7 @@ internal fun HomeScreen(
                     item { SectionLabel("Later") }
                     items(schedule.drop(1)) { ev -> MomentRow(ev, r?.score, now, onClick = { onEvent(ev.event.id) }) }
                 }
-                item { SyncLine(sync, pending, now, onClick = onStatus) }
+                if (sync?.problem == null) item { SyncLine(sync, pending, now, onClick = onStatus) }
             }
         }
     }
@@ -565,7 +572,7 @@ internal fun EventScreen(ev: EventStatus?) {
     ScreenScaffold(scrollState = listState) { padding ->
         ScalingLazyColumn(state = listState, contentPadding = padding, modifier = Modifier.fillMaxSize()) {
             if (ev == null) {
-                item { Text("Open the event on your phone to see it here.", fontSize = 12.sp, color = WText2, textAlign = TextAlign.Center) }
+                item { Text("Open the moment on your phone to see it here.", fontSize = 12.sp, color = WText2, textAlign = TextAlign.Center) }
                 return@ScalingLazyColumn
             }
             val forecast = ev.advice?.expectedScore ?: ev.projectedScore
@@ -672,46 +679,53 @@ internal fun StatusScreen(state: WatchState?, onSensors: () -> Unit, onPermissio
     ScreenScaffold(scrollState = listState) { padding ->
         ScalingLazyColumn(state = listState, contentPadding = padding, modifier = Modifier.fillMaxSize()) {
             item { ListHeader { Text("Tracking") } }
-            item {
-                StatusLine(
-                    ok = tracking && hrFresh, icon = Icons.Rounded.Favorite,
-                    title = if (tracking && hrFresh) "Heart rate on" else if (!tracking) "Tracking is off" else "No heart reading yet",
-                    hint = when {
-                        !tracking -> "Tap Turn on below."
-                        !hrFresh -> "Wear the watch snugly."
-                        else -> "${latestHr!!.value.toInt()} bpm · ${ago(now - latestHr!!.startMs)}"
-                    },
-                )
-            }
-            if (!tracking) item {
-                Button(onClick = { scope.launch { runCatching { PassiveRegistrar.enable(ctx) }; onPermissions() } }, modifier = Modifier.fillMaxWidth()) { Text("Turn on") }
-            }
-            item {
-                val mins = state?.sleepMinutes
-                StatusLine(
-                    ok = mins != null, icon = Icons.Rounded.Bedtime,
-                    title = if (mins != null) "Last night ${formatDuration(mins)}" else "No sleep yet",
-                    hint = if (mins != null) "Measured by this watch." else "Sleep with the watch on.",
-                )
-            }
-            if (bg != null && !perms.background) {
-                item {
-                    StatusLine(ok = false, icon = Icons.Rounded.Lock, title = "Nights may be missed", hint = "Allow \"all the time\".")
-                }
-                item { Button(onClick = { backgroundLauncher.launch(bg) }, modifier = Modifier.fillMaxWidth()) { Text("Fix") } }
-            }
-            item {
-                val problem = sync?.problem
-                StatusLine(
-                    ok = problem == null && sync?.lastOkMs != null, icon = if (problem == null) Icons.Rounded.CloudDone else Icons.Rounded.CloudOff,
-                    title = when {
-                        problem != null -> "Phone out of reach"
-                        sync?.lastOkMs != null -> "Synced ${ago(now - sync!!.lastOkMs!!)}"
-                        else -> "Not synced yet"
-                    },
-                    hint = if (problem != null) "Bring your phone close and open Hercules." else "Sends to your phone about every 15 min.",
-                )
-            }
+            val problem = sync?.problem
+            val heartOk = tracking && hrFresh
+            val mins = state?.sleepMinutes
+            val bgMissing = bg != null && !perms.background
+            val lines = listOf<Pair<Boolean, @Composable () -> Unit>>(
+                heartOk to {
+                    StatusLine(
+                        ok = heartOk, icon = Icons.Rounded.Favorite,
+                        title = if (heartOk) "Heart rate on" else if (!tracking) "Tracking is off" else "No heart reading yet",
+                        hint = when {
+                            !tracking -> "Tap Turn on below."
+                            !hrFresh -> "Wear the watch snugly."
+                            else -> "${latestHr!!.value.toInt()} bpm · ${ago(now - latestHr!!.startMs)}"
+                        },
+                    )
+                    if (!tracking) {
+                        Button(onClick = { scope.launch { runCatching { PassiveRegistrar.enable(ctx) }; onPermissions() } }, modifier = Modifier.fillMaxWidth()) { Text("Turn on") }
+                    }
+                },
+                !bgMissing to {
+                    StatusLine(
+                        ok = !bgMissing, icon = Icons.Rounded.Lock,
+                        title = if (bgMissing) "Nights may be missed" else "Night tracking on",
+                        hint = if (bgMissing) "Allow \"all the time\"." else "Hercules can read sensors while you sleep.",
+                    )
+                    if (bgMissing && bg != null) Button(onClick = { backgroundLauncher.launch(bg) }, modifier = Modifier.fillMaxWidth()) { Text("Fix") }
+                },
+                (problem == null && sync?.lastOkMs != null) to {
+                    StatusLine(
+                        ok = problem == null && sync?.lastOkMs != null, icon = if (problem == null) Icons.Rounded.CloudDone else Icons.Rounded.CloudOff,
+                        title = when {
+                            problem != null -> "Phone out of reach"
+                            sync?.lastOkMs != null -> "Synced ${ago(now - sync!!.lastOkMs!!)}"
+                            else -> "Not synced yet"
+                        },
+                        hint = if (problem != null) "Bring your phone close and open Hercules." else "Sends to your phone about every 15 min.",
+                    )
+                },
+                (mins != null) to {
+                    StatusLine(
+                        ok = mins != null, icon = Icons.Rounded.Bedtime,
+                        title = if (mins != null) "Last night ${formatDuration(mins)}" else "No sleep yet",
+                        hint = if (mins != null) "Measured by this watch." else "Sleep with the watch on.",
+                    )
+                },
+            ).sortedBy { it.first } // false (needs attention) first; stable, so the order above holds within each group
+            items(lines.size) { i -> Column { lines[i].second() } }
             item { WAction("Sensors", onSensors) }
         }
     }

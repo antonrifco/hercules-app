@@ -46,6 +46,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -118,8 +119,8 @@ fun DataScreen(g: MobileGraph, today: String, padding: PaddingValues, onLoadDemo
                 Text("Setup", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Light, color = Text1)
             }
         }
+        // Is it working? first, then the things people change (sensors, reminders), then results and the fine print.
         item { StatusBlock(watches, report, sleepLast, lastSync) }
-        item { RemindersBlock(g) }
         item { Link(watches, lastSync, pending) }
         item {
             SensorGrid(config, report) { kind, on ->
@@ -128,6 +129,7 @@ fun DataScreen(g: MobileGraph, today: String, padding: PaddingValues, onLoadDemo
                 scope.launch { runCatching { g.setSensors(next) } }
             }
         }
+        item { RemindersBlock(g) }
         item {
             Section("Personal bests") {
                 if (records.isEmpty()) Muted("None yet. They appear as your watch records more days.")
@@ -138,6 +140,15 @@ fun DataScreen(g: MobileGraph, today: String, padding: PaddingValues, onLoadDemo
                     }
                     if (i < records.lastIndex) Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
                 }
+            }
+        }
+        item {
+            Section("About") {
+                LegalRow(Icons.Rounded.PrivacyTip, "Privacy Policy", "What Hercules collects and where it stays") { onOpenLegal(LegalDoc.PRIVACY) }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
+                LegalRow(Icons.Rounded.Gavel, "Terms & Conditions", "The rules for using the app") { onOpenLegal(LegalDoc.TERMS) }
+                VSpace(10.dp)
+                Muted("Hercules ${BuildConfig.VERSION_NAME}")
             }
         }
         // Cloud sync isn't live yet; only developers see the upload queue.
@@ -163,15 +174,6 @@ fun DataScreen(g: MobileGraph, today: String, padding: PaddingValues, onLoadDemo
                     ) { Text("UPLOAD", letterSpacing = 1.5.sp, color = Text1, fontSize = 12.sp) }
                 }
                 serverMessage?.let { VSpace(6.dp); Muted(it) }
-            }
-        }
-        item {
-            Section("About") {
-                LegalRow(Icons.Rounded.PrivacyTip, "Privacy Policy", "What Hercules collects and where it stays") { onOpenLegal(LegalDoc.PRIVACY) }
-                Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
-                LegalRow(Icons.Rounded.Gavel, "Terms & Conditions", "The rules for using the app") { onOpenLegal(LegalDoc.TERMS) }
-                VSpace(10.dp)
-                Muted("Hercules ${BuildConfig.VERSION_NAME}")
             }
         }
         if (BuildConfig.DEBUG) {
@@ -222,6 +224,17 @@ private fun Link(watches: List<String>?, lastSync: Long?, pending: Long) {
 @Composable
 private fun SensorGrid(config: SensorConfig, report: SensorReport?, onToggle: (SensorKind, Boolean) -> Unit) {
     val active = report?.active
+    var confirmOff by remember { mutableStateOf<SensorKind?>(null) }
+    confirmOff?.let { k ->
+        AlertDialog(
+            onDismissRequest = { confirmOff = null },
+            containerColor = Panel,
+            title = { Text("Turn off ${k.label.lowercase()}?", color = Text1) },
+            text = { Text(sensorOffEffect(k), color = Text2) },
+            confirmButton = { TextButton(onClick = { onToggle(k, false); confirmOff = null }) { Text("TURN OFF", color = Color(0xFFFF8C4C), letterSpacing = 1.sp) } },
+            dismissButton = { TextButton(onClick = { confirmOff = null }) { Text("KEEP ON", color = Cyan, letterSpacing = 1.sp) } },
+        )
+    }
     Section("Sensors", trailing = {
         Text(
             when {
@@ -243,7 +256,7 @@ private fun SensorGrid(config: SensorConfig, report: SensorReport?, onToggle: (S
                         Modifier.weight(1f).padding(bottom = 10.dp).clip(RoundedCornerShape(6.dp))
                             .background(if (on) Cyan.copy(alpha = 0.07f) else Panel)
                             .border(BorderStroke(1.dp, if (on) Cyan.copy(alpha = 0.5f) else Hairline), RoundedCornerShape(6.dp))
-                            .clickable(enabled = supported) { onToggle(k, !on) }
+                            .clickable(enabled = supported) { if (on) confirmOff = k else onToggle(k, true) }
                             .padding(14.dp),
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -268,6 +281,14 @@ private fun SensorGrid(config: SensorConfig, report: SensorReport?, onToggle: (S
         }
     }
 }
+
+/** What switching a sensor off costs, said before it happens. */
+private fun sensorOffEffect(k: SensorKind): String = when (k) {
+    SensorKind.HEART_RATE -> "Hercules stops reading your heart rate. Recovery drops out of your score, so it becomes less accurate."
+    SensorKind.SLEEP -> "Hercules stops tracking your sleep. Sleep is the biggest part of your score, so most days you won't get one."
+    SensorKind.STEPS -> "Hercules stops counting steps. Activity drops out of your score."
+    else -> "Hercules stops recording ${k.label.lowercase()}. Only your daily stats lose it; your score is not affected."
+} + " You can turn it back on at any time."
 
 /** One honest row: green when working, amber with the fix when not. */
 @Composable
@@ -348,9 +369,9 @@ private fun RemindersBlock(g: MobileGraph) {
             VSpace(8.dp)
         }
         ReminderRow(Icons.Rounded.WbSunny, "Morning score", "Your readiness and best focus time.", prefs.morning) { update(prefs.copy(morning = it)) }
-        ReminderRow(Icons.Rounded.Flag, "Event prep", "The evening before, and 2 hours ahead.", prefs.event) { update(prefs.copy(event = it)) }
+        ReminderRow(Icons.Rounded.Flag, "Moment prep", "The evening before, and 2 hours ahead.", prefs.event) { update(prefs.copy(event = it)) }
         ReminderRow(Icons.Rounded.Bedtime, "Bedtime", "An hour before you should be in bed.", prefs.evening) { update(prefs.copy(evening = it)) }
-        ReminderRow(Icons.Rounded.RateReview, "After an event", "One tap to say how it went.", prefs.reflect) { update(prefs.copy(reflect = it)) }
+        ReminderRow(Icons.Rounded.RateReview, "After a moment", "One tap to say how it went.", prefs.reflect) { update(prefs.copy(reflect = it)) }
         ReminderRow(Icons.Rounded.Timer, "Focus time", "When your best hours start.", prefs.focus) { update(prefs.copy(focus = it)) }
         VSpace(6.dp)
         Muted("If you wear your watch, reminders come to your wrist instead of your phone.")

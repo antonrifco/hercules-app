@@ -4,7 +4,7 @@
 
 ![Hercules — Know when your brain is ready.](docs/images/hercules-hero.jpg)
 
-**Know when your brain is ready.** Hercules turns the body signals your smartwatch already collects (sleep, heart rate, activity) into a daily **cognitive readiness score from 1 to 100%**. It tells you what that means for today's important events, and it coaches you through the days leading up to them.
+**Know when your brain is ready.** Hercules turns the body signals your smartwatch already collects (sleep, heart rate, activity) into a daily **cognitive readiness score from 1 to 100%**. It tells you what that means for today's important moments, and it coaches you through the days leading up to them.
 
 Android phone and Wear OS watch today (Kotlin Multiplatform), built so iOS and watchOS can follow with the same core logic.
 
@@ -14,14 +14,14 @@ Android phone and Wear OS watch today (Kotlin Multiplatform), built so iOS and w
 
 ## 1. The idea
 
-High-stakes events like a job interview, a negotiation, a pitch or a big decision depend on focus, working memory and emotional control. Those depend heavily on how you slept and how recovered your body is. Most people walk into those events blind to their own condition.
+High-stakes moments like a job interview, a negotiation, a pitch or a big decision depend on focus, working memory and emotional control. Those depend heavily on how you slept and how recovered your body is. Most people walk into those moments blind to their own condition.
 
 Hercules answers three questions every day:
 
 | Question | Where in the app |
 |---|---|
 | *How ready am I today?* | **Today** tab: score, level, best hours, next step |
-| *Should I do that important thing today, or move it?* | Event card and **Go / reschedule** advice |
+| *Should I do that important thing today, or move it?* | Moment card and **Go / reschedule** advice |
 | *How do I arrive at my big day in top shape?* | **Plan** tab: 7-day run-up with a daily checklist |
 
 ## 2. Daily flow
@@ -37,7 +37,7 @@ Hercules answers three questions every day:
 2. **Morning check-in (optional, 30 seconds).** Tap two 1–5 scales: energy and stress. Sleep is never asked: it always comes from the watch. If the detected times look wrong (or the watch missed the night), tap **Correct** in the Sleep section and set when you fell asleep and woke up. A corrected night is marked "Corrected by you" and automatic detection never overwrites it.
 3. **The score appears**, with a band, a one-line meaning, and your **best hours** for demanding work.
 4. **Tips** are short headlines; tap one to see the detail.
-5. **The watch is kept simple:** today's score and peak hours, what it is tracking (sleep, heart, steps) and whether that data reached the phone, and a readiness forecast ring for each big event in the next 7 days. Small animations (the bezel sweeping up to the score, a heart beating at your pulse, a breathing moon while calibrating) make it feel alive without extra battery-heavy assets.
+5. **The watch is kept simple:** today's score and peak hours, what it is tracking (sleep, heart, steps) and whether that data reached the phone, and a readiness forecast ring for each big moment in the next 7 days. Small animations (the bezel sweeping up to the score, a heart beating at your pulse, a breathing moon while calibrating) make it feel alive without extra battery-heavy assets.
 
 ## 2b. Four times of day, one next step
 
@@ -50,13 +50,13 @@ Hercules is built around one question: *what should I do next?* The Today screen
 | After important work | One tap to say how it went, shown next to that day's readiness (never claimed as cause) |
 | Evening | Bedtime, "try sleeping 40 min earlier", and an *estimate* of tomorrow's readiness at 6 h vs. the target |
 
-**Meet Herc.** The mascot is the head of an adult male lion, designed with Higgsfield (Recraft V4.1, vector) and kept in its original geometric style with a bright golden mane. **Only his eyes change: they take the colour of today's band**, green for Prime, lime for Good, amber for Fair, orange for Low, red for Drained, and dim, narrowed slits while there is no score yet. He is the launcher icon on phone and watch, the splash (he opens his eyes as the app starts), the corner of Today, the next-step card and the watch home. `tools/mascot/mascot.py` reads the Higgsfield file (`tools/mascot/herc_lion_higgsfield.svg`) and writes `HercArt.kt` for both apps plus the launcher, splash and notification vector drawables, so the icon and the in-app character are the same drawing.
+**Meet Herc.** The mascot is the head of an adult male lion with a bright golden mane, designed with Higgsfield. **Each band has its own expression and eye colour**: fierce and focused with green eyes for Prime, calm and assured with lime eyes for Good, neutral with amber eyes for Fair, weary with orange eyes for Low, and worn down with red eyes for Drained. With no score yet he shows the Fair face with dim, narrowed eyes. He is the launcher icon on phone and watch, the animated splash (he opens his eyes, they light up green and he gives a short surge), the corner of Today, the next-step card and the watch home. The base lion came from Recraft V4.1 (vector). Nano Banana Pro redrew it once per expression, and Ideogram Vector traced each one back to vector (`tools/mascot/lion/*.svg`). `tools/mascot/mascot.py` reads those files and writes `HercArt.kt` for both apps, plus the launcher, notification and animated-splash (`splash_anim.xml`) drawables, so the icon and the in-app character are the same drawing.
 
 ![Herc: Prime, Good, Fair, Low, Drained, no score](docs/images/hercules-mascot.png)
 
-**Reminders** (all optional, set in Setup): morning score, event prep (evening before and 2 h ahead), bedtime, after an event, and focus start (off by default). Each is tied to your data, none are generic. **Only one device delivers each reminder:** the watch while it is worn (it has a fresh heart-rate reading), the phone otherwise. Tapping one opens the matching screen on that device.
+**Reminders** (all optional, set in Setup): morning score, moment prep (evening before and 2 h ahead), bedtime, after a moment, and focus start (off by default). Each is tied to your data, none are generic. **Only one device delivers each reminder:** the watch while it is worn (it has a fresh heart-rate reading), the phone otherwise. Tapping one opens the matching screen on that device.
 
-**Watch:** glanceable home (score, level, focus time, one next step), a two-tap check-in that syncs to the phone, event and tonight screens, a tracking-status screen that says what to fix, and "Continue on phone".
+**Watch:** glanceable home (score, level, focus time, one next step), a two-tap check-in that syncs to the phone, moment and tonight screens, a tracking-status screen that says what to fix, and "Continue on phone".
 
 Readings are labelled by origin: *measured by your watch*, *you reported*, *estimate*, or *general advice*.
 
@@ -95,27 +95,27 @@ If an ingredient is missing (for example no check-in, or the heart-rate sensor i
 
 So an interview at 10:00 can score noticeably better than the same interview at 14:00.
 
-## 5. Planning a big event (up to 7 days ahead)
+## 5. Planning a big moment (up to 7 days ahead)
 
 **Example:** "Job Interview with Google", 6 days from now at 10:00.
 
 1. **Add it** in the Plan tab: title, stakes (normal, important, critical), day (up to 7 days out) and time. The app shows which daily phase that time usually falls in.
-2. **Every day until then** you get a short checklist for the current phase. It only covers what Hercules can measure or influence: **sleep, recovery, activity and stress**. It never tells you how to prepare the content (research, rehearsal, outfit); that is your job, and the same for every kind of event.
+2. **Every day until then** you get a short checklist for the current phase. It only covers what Hercules can measure or influence: **sleep, recovery, activity and stress**. It never tells you how to prepare the content (research, rehearsal, outfit); that is your job, and the same for every kind of moment.
 
 | Days to go | Phase | Focus | Example tasks |
 |---|---|---|---|
 | D-7 … D-3 | Build the foundation | Consistent sleep | Sleep/wake at fixed times, light exercise, limit alcohol, wear the watch to bed |
 | D-2 | Sharpen | Protect recovery | Keep bed and wake times steady, no alcohol, skip hard training |
-| D-1 | The day before | Protect tonight's sleep | No caffeine after 14:00, finish eating 2–3 h before bed, no screens the last hour, *in bed by 23:15* (calculated from the event time) |
-| D | Event day | Activate | Morning light, brisk walk, box breathing |
+| D-1 | The day before | Protect tonight's sleep | No caffeine after 14:00, finish eating 2–3 h before bed, no screens the last hour, *in bed by 23:15* (calculated from the moment time) |
+| D | The big day | Activate | Morning light, brisk walk, box breathing |
 
 3. **Progress is visible:**
    - **Prep score** = recent readiness (45%) + sleep consistency (35%) + checklist completion (20%)
-   - **Forecast**: expected readiness at the event hour if your current habits continue
+   - **Forecast**: expected readiness at the moment hour if your current habits continue
    - **Run-up dots**: your daily score for each day from D-7 to D
-4. **On the day** the app gives a verdict from your actual readiness *at the event hour*:
+4. **On the day** the app gives a verdict from your actual readiness *at the moment hour*:
 
-| Expected score at event time | Normal importance | Important / Critical |
+| Expected score at moment time | Normal importance | Important / Critical |
 |---|---|---|
 | ≥ 75 | Go ahead | Go ahead |
 | 60–74 | Go, with a game plan | Go, with a game plan |
@@ -162,7 +162,7 @@ All scoring and coaching logic is in `shared`, so the watch can compute a score 
 |---|---|
 | `shared/` | `model/` samples and summaries · `insights/` day keys, daily aggregation, personal records, HRV · `cognitive/` `SleepAnalyzer`, `Baseline`, `ReadinessEngine`, `PrepCoach`, `CognitiveService` + `CognitiveStore` · `sensors/` `SensorKind`, `SensorConfig`, `SensorReport` · `sync/` batch sync + wire format · `demo/` synthetic data · `sqldelight/` schema |
 | `wear/` | `health/` passive monitoring, sleep (activity state), sensor settings + listener · `sync/` phone sink, periodic worker, `SyncStatus`, `WatchStateSource` · `ui/` Wear Compose M3 |
-| `mobile/` | `sync/` receives watch batches · `HerculesMobileApp` graph (state + sensor push) · `ui/` Today, Plan, event detail, guide, Data/Sensors |
+| `mobile/` | `sync/` receives watch batches · `HerculesMobileApp` graph (state + sensor push) · `ui/` Today, Plan, moment detail, guide, Data/Sensors |
 
 ## Sensors and what they're used for
 
@@ -178,7 +178,7 @@ Only sensors that are **enabled** (`SensorConfig`) and **supported** by the watc
 
 - **Storage:** SQLDelight (`HerculesDatabase`). Tables: `sample`, `workout_session`, `daily_summary`, `personal_record`, `sleep_night`, `checkin`, `readiness_day` (JSON), `plan_event`, `prep_task_done`.
 - **Watch → phone:** every 15 minutes (WorkManager) and while the app is open. Batches go over `MessageClient` on `/hercules/sync/v1`. The phone acks the stored IDs, and only acked rows are marked synced. Sample IDs are deterministic, so retries are idempotent.
-- **Phone → watch:** after each batch the phone recomputes readiness and writes `WatchState` (score + next event) to DataClient `/hercules/state`. The watch uses it when it is less than 6 hours old and from today; otherwise it computes locally.
+- **Phone → watch:** after each batch the phone recomputes readiness and writes `WatchState` (score + next moment) to DataClient `/hercules/state`. The watch uses it when it is less than 6 hours old and from today; otherwise it computes locally.
 - **Sensor choice:** `/hercules/sensors/config`, written by either side; the newest `updatedMs` wins. The watch reports back on `/hercules/sensors/report`.
 - **Backend (future):** the phone keeps everything queued (`synced = 0`). Swap `NoopRemoteSink` for an HTTP sink and set `SERVER_SYNC_ENABLED`. The wire contract is in `docs/contracts/sample-batch.v1.schema.json`.
 
@@ -204,7 +204,7 @@ adb -s <watch> install -r wear/build/outputs/apk/debug/wear-debug.apk
 
 Both apps share the `applicationId` `com.hercules.app`, which the Wearable Data Layer requires.
 
-**Try it without a watch (debug builds only):** load 14 days of synthetic sleep, HR and steps plus two sample events ("Job Interview with Google" in 6 days and "Pitching to Y Combinator" later today):
+**Try it without a watch (debug builds only):** load 14 days of synthetic sleep, HR and steps plus two sample moments ("Job Interview with Google" in 6 days and "Pitching to Y Combinator" later today):
 
 ```bash
 adb shell am start -n com.hercules.app/com.hercules.mobile.ui.MainActivity --ez demo true
@@ -243,8 +243,8 @@ The UI is designed as a **precision instrument**, not a wellness toy: matte blac
 | Element | Where |
 |---|---|
 | Bezel dial: 100 ticks lit up to the score | Phone Today hero; watch home (follows the round screen edge) |
-| Day strip: last night's sleep, focus windows, *now*, today's events on one time axis | Phone Today |
-| Countdown rail: events as stops on a vertical line | Phone Plan |
+| Day strip: last night's sleep, focus windows, *now*, today's moments on one time axis | Phone Today |
+| Countdown rail: moments as stops on a vertical line | Phone Plan |
 | Sensor tiles: lit = recording | Phone Data |
 
 **User journeys and illustrations** (generated with Higgsfield, GPT Image 2.5, in one blueprint style; `mobile/src/main/res/drawable-nodpi/ill_*.webp`):
@@ -255,8 +255,8 @@ The UI is designed as a **precision instrument**, not a wellness toy: matte blac
 | Onboarding 2: "Your score starts with sleep", and Today with no reading yet | `ill_sleep`: sleep wave flowing into a watch |
 | Onboarding 3: "Aim for the big day", and empty Plan | `ill_plan`: seven ascending platforms to a diamond |
 | Check-in logged | `ill_checkin`: rings aligning, calibration done |
-| Event day: go | `ill_go`: a doorway of light |
-| Event day: postpone | `ill_wait`: hourglass and calendar |
+| The big day: go | `ill_go`: a doorway of light |
+| The big day: postpone | `ill_wait`: hourglass and calendar |
 | Watch not connected | `ill_no_watch`: broken signal arc |
 
 **Launch.** The system splash (Android 12+ API, backported) shows the mark on the brand black. On a cold start it hands off to an **animated splash**: Kling 3.0 via Higgsfield, converted to an animated WebP in `res/raw/splash_anim.webp` and played with `AnimatedImageDrawable`. Tap to skip.
@@ -273,4 +273,4 @@ The UI is designed as a **precision instrument**, not a wellness toy: matte blac
 - Sleep stages (deep/REM) and HRV need the Samsung Health Sensor SDK (partner approval). `Hrv.rmssd` is ready for it.
 - Score weights are heuristic and not personalised beyond the 14-day baseline.
 - No backend or login yet; no notifications or reminders for checklist items yet.
-- Events are limited to 7 days ahead and are not linked to the device calendar.
+- Moments are limited to 7 days ahead and are not linked to the device calendar.

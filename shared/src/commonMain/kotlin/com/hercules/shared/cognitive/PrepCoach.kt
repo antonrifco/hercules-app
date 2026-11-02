@@ -47,7 +47,7 @@ class PrepCoach(private val dayKeys: DayKeys, private val engine: ReadinessEngin
                 PrepTask("caffeine_cut", "No caffeine after 14:00", "Caffeine lingers 5–6 hours and delays sleep."),
                 PrepTask("late_meal", "Finish eating 2–3 hours before bed", "A late meal raises your heart rate during sleep."),
                 PrepTask("screens", "No screens for the last hour before bed", "Helps you fall asleep faster."),
-                PrepTask("bedtime", "In bed by $bedtime", "Gets you ~8 hours of sleep and up 2.5 hours before the event."),
+                PrepTask("bedtime", "In bed by $bedtime", "Gets you ~8 hours of sleep and up 2.5 hours before the moment."),
                 wearWatch,
             )
             PrepPhase.DAY -> listOf(
@@ -111,7 +111,7 @@ class PrepCoach(private val dayKeys: DayKeys, private val engine: ReadinessEngin
             expected >= 45 -> if (high) Verdict.CONSIDER_RESCHEDULE else Verdict.GO_WITH_PREP
             else -> if (high) Verdict.RESCHEDULE else Verdict.CONSIDER_RESCHEDULE
         }
-        val what = if (event.type == EventType.OTHER) "event" else event.type.label.lowercase()
+        val what = if (event.type == EventType.OTHER) "moment" else event.type.label.lowercase()
         val headline = when (verdict) {
             Verdict.GO -> "You're in good shape for this $what. Go ahead with confidence."
             Verdict.GO_WITH_PREP -> "Fine to go ahead. Follow today's prep to stay sharp."

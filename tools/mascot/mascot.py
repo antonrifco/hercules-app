@@ -1,80 +1,103 @@
 #!/usr/bin/env python3
 """
-Herc, the Hercules mascot: the head of an adult male lion. His eyes take the colour of today's readiness band
-(Prime, Good, Fair, Low, Drained) and dim to grey slits while there is no score yet.
+Herc, the Hercules mascot: the head of an adult male lion with a different, masculine expression for each
+readiness band, and eyes in that band's colour.
 
-The lion was designed with Higgsfield (Recraft V4.1, vector output). `herc_lion_higgsfield.svg` is that file; this
-script reads its shapes, drops specks, scales them onto the 108 x 108 adaptive-icon canvas and tags each shape with a
-colour role. Running it writes:
-  * `HercArt.kt` for the phone and the watch (path data + colour role per shape; `Herc` in Mascot.kt draws them);
-  * Android vector drawables: launcher icon, monochrome icon, splash mark and notification glyph;
+  Prime    fierce and focused      green eyes
+  Good     calm, assured           lime eyes
+  Fair     neutral, watchful       amber eyes
+  Low      weary, heavy lids       orange eyes
+  Drained  worn down, head low     red eyes
+  No score the Fair face with dim, narrowed eyes
+
+All art comes from Higgsfield: the base lion was drawn with Recraft V4.1 (vector), the five expressions were
+redrawn from it with Nano Banana Pro, and each was vectorized with Ideogram Vector. Those SVGs live in
+`tools/mascot/lion/<band>.svg`. This script reads them, tags every shape with a colour role (mane, face, eye...),
+maps them onto the 108 x 108 adaptive-icon canvas and writes:
+  * `HercArt.kt` for the phone and the watch (shapes per band; `Herc` in Mascot.kt draws them and colours the eyes);
+  * Android vector drawables: launcher icon, monochrome icon, animated splash and notification glyph;
   * docs/images/hercules-icon.png and docs/images/hercules-mascot.png (previews, rendered with headless Chrome).
 """
 import os, re, shutil, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SOURCE = os.path.join(HERE, "herc_lion_higgsfield.svg")
+LION = os.path.join(HERE, "lion")
 
-# Concept colour -> role. Everything not listed (tiny tracing specks) is dropped.
-ROLES = {
-    (87, 57, 231): "MANE",
-    (66, 44, 172): "MANE_DARK",
-    (149, 133, 130): "FACE",
-    (115, 93, 77): "FACE_DARK",
-    (54, 48, 47): "NOSE",
-    (14, 240, 201): "EYE",
-}
-PALETTE = {"MANE": "#FFB627", "MANE_DARK": "#E8871E", "FACE": "#FFE3B0", "FACE_DARK": "#F5C77E", "NOSE": "#3B2414"}
-EYE_RIM = "#2A1608"  # a dark rim under the eyes keeps every band colour readable on the light face
 BANDS = [  # same colours as ReadinessBand.color in the apps
     ("prime", "Prime", "#2EE6A0"),
     ("good", "Good", "#9BE35A"),
     ("fair", "Fair", "#FFC857"),
     ("low", "Low", "#FF8C4C"),
     ("drained", "Drained", "#FF4D6D"),
-    ("sleeping", "No score", "#8A7A66"),
 ]
-ICON_EYES = BANDS[0][2]
+FACES = [b[0] for b in BANDS]
+SLEEPING_EYES = "#8A7A66"
+ICON_FACE, ICON_EYES = "prime", BANDS[0][2]
 INK = "#05050E"
+EYE_RIM = "#2A1608"
 
-# The concept head spans about x 415..1632, y 294..1755 on a 2048 canvas. Scale it so it fits the icon's
-# 66-unit safe circle, centred on (54, 54).
-SRC_CX, SRC_CY, SCALE = 1023.5, 1024.5, 64.0 / 1461.0
+# Reference colours of the Higgsfield art; every shape is snapped to the nearest one.
+PALETTE = {"MANE": "#FEB221", "MANE_DARK": "#E5841B", "FACE": "#FEE1AD", "FACE_DARK": "#F3C378", "NOSE": "#1A0F08"}
+
+# The expressions were drawn on a 1024 px render of the 80-unit box at (14, 14) of the icon canvas.
+SRC_PX, BOX0, BOX = 1024.0, 14.0, 80.0
 
 
 def f(v):
     return ("%.2f" % v).rstrip("0").rstrip(".")
 
 
+def rgb(h):
+    h = h.lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def role_of(col):
+    r, g, b = col
+    if g > 150 and g - r > 60:
+        return "EYE"
+    if max(col) < 60:
+        return "NOSE"
+    return min(PALETTE, key=lambda k: sum((a - c) ** 2 for a, c in zip(rgb(PALETTE[k]), col)))
+
+
 def transform(d):
-    """All commands in the concept are absolute (M, L, C, z), so every number pair is a point."""
+    """Vectorized paths use absolute M, L, Q, C, Z only, so every number pair is a point."""
     out, nums = [], []
-    for tok in re.findall(r"[MLCZmlcz]|-?\d+(?:\.\d+)?", d):
+    for tok in re.findall(r"[A-Za-z]|-?\d+(?:\.\d+)?", d):
         if tok.isalpha():
-            out.append(tok.upper())
+            assert tok in "MLQCZ", tok
+            out.append(tok)
         else:
             nums.append(float(tok))
             if len(nums) == 2:
-                x, y = nums
-                out.append(f"{f(54 + (x - SRC_CX) * SCALE)},{f(54 + (y - SRC_CY) * SCALE)}")
+                x, y = (BOX0 + v / SRC_PX * BOX for v in nums)
+                out.append(f"{f(x)},{f(y)}")
                 nums = []
     return " ".join(out).replace(" Z", "Z")
 
 
-def load():
-    s = open(SOURCE).read()
-    parts = []
-    for m in re.finditer(r'<path[^>]*fill="rgb\((\d+),(\d+),(\d+)\)"[^>]*\sd="([^"]+)"', s):
-        rgb = tuple(int(m[i]) for i in (1, 2, 3))
-        role = ROLES.get(rgb)
-        nums = [float(v) for v in re.findall(r"-?\d+(?:\.\d+)?", m[4])]
+def load(face):
+    s = open(os.path.join(LION, f"{face}.svg")).read()
+    grads = {}
+    for g in re.finditer(r'<(linear|radial)Gradient[^>]*\bid="([^"]+)".*?</\1Gradient>', s, re.S):
+        stops = [rgb(c) for c in re.findall(r'stop-color="(#[0-9a-fA-F]+)"', g[0])]
+        grads[g[2]] = tuple(sum(c[i] for c in stops) // len(stops) for i in range(3))
+    body, eyes = [], []
+    for m in re.finditer(r'<path fill="([^"]+)" d="([^"]+)"', s):
+        fill, d = m[1], m[2]
+        col = grads[re.match(r"url\(#([^)]+)\)", fill)[1]] if fill.startswith("url(") else rgb(fill)
+        nums = [float(v) for v in re.findall(r"-?\d+(?:\.\d+)?", d)]
         w, h = max(nums[0::2]) - min(nums[0::2]), max(nums[1::2]) - min(nums[1::2])
-        if role is None or (role != "EYE" and w * h < 40 * 40):
-            continue
-        parts.append((transform(m[4]), role))
-    body = [p for p in parts if p[1] != "EYE"]
-    eyes = [p for p in parts if p[1] == "EYE"]
-    assert len(eyes) == 2, eyes
+        if w > 1000 and h > 1000:
+            continue  # the background square
+        role = role_of(col)
+        if role != "EYE" and w * h < 12 * 12:
+            continue  # tracing specks
+        (eyes if role == "EYE" else body).append((transform(d), role))
+    assert len(eyes) >= 2, (face, len(eyes))
     return body, eyes
 
 
@@ -85,65 +108,121 @@ def eye_y(eyes):
 
 # ------------------------------------------------------------------ outputs
 
-def kotlin(package, body, eyes):
-    def parts(ps):
-        return "".join(f'        HercPart("{d}", HercInk.{r}),\n' for d, r in ps)
+def kotlin(package, art):
+    def parts(ps, ind):
+        return "".join(f'{ind}HercPart("{d}", HercInk.{r}),\n' for d, r in ps)
+    heads = "".join(f"        // {face}\n        listOf(\n" + parts(art[face][0], "            ") + "        ),\n" for face in FACES)
+    eyes = "".join(f"        // {face}\n        listOf(\n" + parts(art[face][1], "            ") + "        ),\n" for face in FACES)
+    eye_ys = ", ".join(f(eye_y(art[face][1])) + "f" for face in FACES)
     return (
         "// Generated by tools/mascot/mascot.py from the Higgsfield lion. Do not edit by hand: change the script and rerun it.\n"
         f"package {package}\n\n"
         "internal enum class HercInk { MANE, MANE_DARK, FACE, FACE_DARK, NOSE, EYE }\n\n"
-        "/** One shape: SVG path data on the 108 x 108 canvas and the colour role it uses. */\n"
+        "/** One shape: SVG path data on the 108 x 108 canvas and its colour role. */\n"
         "internal class HercPart(val d: String, val ink: HercInk)\n\n"
+        "/** One face per band, indexed PRIME, GOOD, FAIR, LOW, DRAINED. */\n"
         "internal object HercArt {\n"
-        f"    /** Vertical centre of the eyes, the pivot for blinking. */\n    const val EYE_Y = {f(eye_y(eyes))}f\n"
         "    /** Box around the head (left, top, right, bottom), used to crop the in-app character. */\n"
-        "    val HEAD_BOX = floatArrayOf(20f, 20f, 88f, 88f)\n"
-        "    val HEAD = listOf(\n" + parts(body) + "    )\n"
-        "    val EYES = listOf(\n" + parts(eyes) + "    )\n"
+        "    val HEAD_BOX = floatArrayOf(18f, 18f, 90f, 90f)\n"
+        f"    /** Vertical centre of the eyes per face, the pivot for blinking. */\n    val EYE_Y = floatArrayOf({eye_ys})\n"
+        "    val HEADS = listOf(\n" + heads + "    )\n"
+        "    val EYES = listOf(\n" + eyes + "    )\n"
         "}\n"
     )
 
 
-def vector_xml(body, eyes, eye_col, size_dp=108, ink=None, slit=False):
+def vector_xml(body, eyes, eye_col, size_dp=108, slit=False):
     out = ['<?xml version="1.0" encoding="utf-8"?>\n<!-- Generated by tools/mascot/mascot.py -->\n',
            '<vector xmlns:android="http://schemas.android.com/apk/res/android"\n',
            f'    android:width="{size_dp}dp" android:height="{size_dp}dp" android:viewportWidth="108" android:viewportHeight="108">\n']
-    if ink:
-        out.append(f'    <path android:fillColor="{ink}" android:pathData="M0,0h108v108h-108z" />\n')
     for d, r in body:
         out.append(f'    <path android:fillColor="{PALETTE[r]}" android:pathData="{d}" />\n')
-    # Eyes in a group so the splash can show them narrowed (closed-ish) before the app opens them.
+    # Eyes in a group so the splash can show them narrowed before the app opens them.
     out.append(f'    <group android:pivotY="{f(eye_y(eyes))}" android:scaleY="{0.3 if slit else 1}">\n')
     for d, _ in eyes:
-        out.append(f'        <path android:fillColor="{EYE_RIM}" android:strokeColor="{EYE_RIM}" android:strokeWidth="1.6" android:strokeLineJoin="round" android:pathData="{d}" />\n')
+        out.append(f'        <path android:fillColor="{EYE_RIM}" android:strokeColor="{EYE_RIM}" android:strokeWidth="1.4" android:strokeLineJoin="round" android:pathData="{d}" />\n')
     for d, _ in eyes:
         out.append(f'        <path android:fillColor="{eye_col}" android:pathData="{d}" />\n')
     out.append("    </group>\n</vector>\n")
     return "".join(out)
 
 
+def bounds(d):
+    xs = [float(v) for v in re.findall(r"(-?\d+(?:\.\d+)?),", d)]
+    ys = [float(v) for v in re.findall(r",(-?\d+(?:\.\d+)?)", d)]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+SPLASH_MS = 1000  # the most Android allows for an animated splash icon
+
+
+def splash_avd(body, eyes, eye_col):
+    """Animated splash: Herc wakes. Narrowed grey eyes open, light up in the band colour with a glow, and the head
+    gives a short surge. The last frame is the in-app launch screen's first frame."""
+    ey = eye_y(eyes)
+    out = ['<?xml version="1.0" encoding="utf-8"?>\n<!-- Generated by tools/mascot/mascot.py -->\n',
+           '<animated-vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt">\n',
+           '    <aapt:attr name="android:drawable">\n',
+           '        <vector android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">\n',
+           '            <group android:name="head" android:pivotX="54" android:pivotY="54">\n']
+    for d, r in body:
+        out.append(f'                <path android:fillColor="{PALETTE[r]}" android:pathData="{d}" />\n')
+    for i, (d, _) in enumerate(eyes):  # glow, same two halos as the in-app Herc
+        x0, y0, x1, y1 = bounds(d)
+        for j, s in enumerate((2.2, 1.6)):
+            out.append(f'                <group android:name="glow{i}_{j}" android:pivotX="{f((x0 + x1) / 2)}" android:pivotY="{f((y0 + y1) / 2)}" '
+                       f'android:scaleX="1" android:scaleY="1">\n'
+                       f'                    <path android:name="halo{i}_{j}" android:fillColor="{eye_col}" android:fillAlpha="0" android:pathData="{d}" />\n'
+                       '                </group>\n')
+    out.append(f'                <group android:name="eyes" android:pivotY="{f(ey)}" android:scaleY="0.3">\n')
+    for d, _ in eyes:
+        out.append(f'                    <path android:fillColor="{EYE_RIM}" android:strokeColor="{EYE_RIM}" android:strokeWidth="1.4" android:strokeLineJoin="round" android:pathData="{d}" />\n')
+    for i, (d, _) in enumerate(eyes):
+        out.append(f'                    <path android:name="eye{i}" android:fillColor="{SLEEPING_EYES}" android:pathData="{d}" />\n')
+    out.append('                </group>\n            </group>\n        </vector>\n    </aapt:attr>\n')
+
+    def target(name, anims):
+        out.append(f'    <target android:name="{name}">\n        <aapt:attr name="android:animation">\n            <set>\n')
+        for prop, a, b, start, dur, kind in anims:
+            out.append(f'                <objectAnimator android:propertyName="{prop}" android:valueFrom="{a}" android:valueTo="{b}" '
+                       f'android:valueType="{kind}" android:startOffset="{start}" android:duration="{dur}" '
+                       'android:interpolator="@android:interpolator/fast_out_slow_in" />\n')
+        out.append('            </set>\n        </aapt:attr>\n    </target>\n')
+
+    target("eyes", [("scaleY", 0.3, 1, 250, 380, "floatType")])
+    for i in range(len(eyes)):
+        target(f"eye{i}", [("fillColor", SLEEPING_EYES, eye_col, 300, 450, "colorType")])
+        for j, (s, a) in enumerate(((2.2, 0.08), (1.6, 0.15))):
+            target(f"glow{i}_{j}", [("scaleX", 1, s, 450, 450, "floatType"), ("scaleY", 0.4, s * 1.3, 450, 450, "floatType")])
+            target(f"halo{i}_{j}", [("fillAlpha", 0, a, 450, 450, "floatType")])
+    target("head", [("scaleX", 1, 1.06, 600, 180, "floatType"), ("scaleY", 1, 1.06, 600, 180, "floatType"),
+                    ("scaleX", 1.06, 1, 780, 220, "floatType"), ("scaleY", 1.06, 1, 780, 220, "floatType")])
+    out.append("</animated-vector>\n")
+    return "".join(out)
+
+
 def mono_xml(body, eyes, size_dp):
-    """Single-colour silhouette: every shape in one even-odd path, so the eyes become holes in the face."""
-    d = "".join(p for p, _ in body + eyes)
+    """Single-colour silhouette: mane and face filled, eyes and face lines left as gaps."""
+    d = "".join(p for p, r in body if r != "NOSE")
     return ('<?xml version="1.0" encoding="utf-8"?>\n<!-- Generated by tools/mascot/mascot.py -->\n'
             '<vector xmlns:android="http://schemas.android.com/apk/res/android"\n'
             f'    android:width="{size_dp}dp" android:height="{size_dp}dp" android:viewportWidth="108" android:viewportHeight="108">\n'
-            f'    <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd" android:pathData="{d}" />\n</vector>\n')
+            f'    <path android:fillColor="#FFFFFFFF" android:pathData="{d}" />\n</vector>\n')
 
 
-def svg(body, eyes, eye_col, box=(20, 20, 88, 88), slit=False, mono=False):
+def svg(body, eyes, eye_col, box=(18, 18, 90, 90), slit=False, mono=False):
     x0, y0, x1, y1 = box
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{f(x0)} {f(y0)} {f(x1 - x0)} {f(y1 - y0)}">',
            f'<rect x="{f(x0)}" y="{f(y0)}" width="{f(x1 - x0)}" height="{f(y1 - y0)}" fill="{INK}"/>']
     if mono:
-        out.append(f'<path fill="#FFFFFF" fill-rule="evenodd" d="{"".join(p for p, _ in body + eyes)}"/>')
-    else:
-        for d, r in body:
-            out.append(f'<path fill="{PALETTE[r]}" d="{d}"/>')
-        ey = eye_y(eyes)
-        g = f'<g transform="translate(0 {f(ey)}) scale(1 0.3) translate(0 {f(-ey)})">' if slit else "<g>"
-        out.append(g + "".join(f'<path fill="{EYE_RIM}" stroke="{EYE_RIM}" stroke-width="1.6" stroke-linejoin="round" d="{d}"/>' for d, _ in eyes)
-                   + "".join(f'<path fill="{eye_col}" d="{d}"/>' for d, _ in eyes) + "</g>")
+        out.append(f'<path fill="#FFFFFF" d="{"".join(p for p, r in body if r != "NOSE")}"/>')
+        return "".join(out) + "</svg>"
+    for d, r in body:
+        out.append(f'<path fill="{PALETTE[r]}" d="{d}"/>')
+    ey = eye_y(eyes)
+    out.append(f'<g transform="translate(0 {f(ey)}) scale(1 {0.3 if slit else 1}) translate(0 {f(-ey)})">')
+    out.append("".join(f'<path fill="{EYE_RIM}" stroke="{EYE_RIM}" stroke-width="1.4" stroke-linejoin="round" d="{d}"/>' for d, _ in eyes)
+               + "".join(f'<path fill="{eye_col}" d="{d}"/>' for d, _ in eyes) + "</g>")
     return "".join(out) + "</svg>"
 
 
@@ -170,28 +249,29 @@ def write(path, text):
 
 
 def main(root):
-    body, eyes = load()
+    art = {face: load(face) for face in FACES}
+    ib, ie = art[ICON_FACE]
     for mod, pkg in (("mobile", "com.hercules.mobile.ui"), ("wear", "com.hercules.wear.ui")):
         res = f"{root}/{mod}/src/main/res"
-        icon = vector_xml(body, eyes, ICON_EYES)
-        write(f"{res}/drawable/ic_launcher_foreground.xml", icon)
-        # The splash shows Herc with narrowed, resting eyes; the launch animation in the app opens them.
-        write(f"{res}/drawable/splash_mark.xml", vector_xml(body, eyes, BANDS[-1][2], slit=True))
-        write(f"{res}/drawable/ic_launcher_monochrome.xml", mono_xml(body, eyes, 108))
-        write(f"{res}/drawable/ic_notification.xml", mono_xml(body, eyes, 24))
-        write(f"{root}/{mod}/src/main/kotlin/{pkg.replace('.', '/')}/HercArt.kt", kotlin(pkg, body, eyes))
+        write(f"{res}/drawable/ic_launcher_foreground.xml", vector_xml(ib, ie, ICON_EYES))
+        # The system splash plays Herc waking up; the in-app launch screen continues from its last frame.
+        write(f"{res}/drawable/splash_anim.xml", splash_avd(ib, ie, ICON_EYES))
+        write(f"{res}/drawable/ic_launcher_monochrome.xml", mono_xml(ib, ie, 108))
+        write(f"{res}/drawable/ic_notification.xml", mono_xml(ib, ie, 24))
+        write(f"{root}/{mod}/src/main/kotlin/{pkg.replace('.', '/')}/HercArt.kt", kotlin(pkg, art))
     docs = f"{root}/docs/images"
     os.makedirs(docs, exist_ok=True)
     tmp = tempfile.mkdtemp()
     tiles = []
-    for mood, _, col in BANDS:
-        p = f"{tmp}/{mood}.png"
-        if rasterize(svg(body, eyes, col, slit=mood == "sleeping"), p, 300):
+    for face, _, col in BANDS + [("fair", "No score", SLEEPING_EYES)]:
+        p = f"{tmp}/{len(tiles)}.png"
+        b, e = art[face]
+        if rasterize(svg(b, e, col, slit=col == SLEEPING_EYES), p, 300):
             tiles.append(p)
     if tiles:
         subprocess.run(["magick", *tiles, "+append", f"{docs}/hercules-mascot.png"], check=True)
-        rasterize(svg(body, eyes, ICON_EYES, box=(0, 0, 108, 108)), f"{docs}/hercules-icon.png", 512)
-        rasterize(svg(body, eyes, ICON_EYES, box=(0, 0, 108, 108), mono=True), f"{tmp}/mono.png", 256)
+        rasterize(svg(ib, ie, ICON_EYES, box=(0, 0, 108, 108)), f"{docs}/hercules-icon.png", 512)
+        rasterize(svg(ib, ie, ICON_EYES, box=(0, 0, 108, 108), mono=True), f"{tmp}/mono.png", 256)
         print("mono preview:", f"{tmp}/mono.png")
 
 

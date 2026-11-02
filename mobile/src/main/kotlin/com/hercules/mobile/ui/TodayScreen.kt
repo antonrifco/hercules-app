@@ -62,6 +62,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.rounded.Watch
@@ -156,6 +157,9 @@ fun TodayScreen(
     val actionEvent = brief?.action?.eventId
     var scrollTo by remember { mutableStateOf<String?>(null) }
 
+    // Order follows the questions people ask, most urgent first: How am I? (score) · What unlocks it? (setup, first
+    // week only) · What do I do now? (action, focus) · What's coming? (tonight in the evening, the next moment, the day)
+    // · Why? (score drivers, sleep, the week) · and finally general tips and activity counts.
     val sections = buildList<Pair<String, @Composable () -> Unit>> {
         add("top" to { TopLine(nowMs, r?.band, onOpenGuide) })
         add("hero" to {
@@ -165,8 +169,15 @@ fun TodayScreen(
                 else -> NoScoreCard { sheet = Sheet.CHECK_IN }
             }
         })
+        val showStart = !(watchDone && checkInDone)
+        if (showStart) {
+            add("start" to {
+                GettingStarted(watchDone, checkInDone, onWatch = onOpenSetup, onCheckIn = { sheet = Sheet.CHECK_IN })
+            })
+        }
         if (brief != null) {
-            add("action" to {
+            // Getting started already offers the first check-in; don't suggest it twice.
+            if (!(showStart && !checkInDone && brief.action.kind == ActionKind.CHECK_IN)) add("action" to {
                 ActionCard(brief.action, r?.band.mood()) { a ->
                     when (a.kind) {
                         ActionKind.CHECK_IN -> sheet = Sheet.CHECK_IN
@@ -179,19 +190,20 @@ fun TodayScreen(
             })
             if (r != null && brief.focus != null) add("focus" to { FocusCard(brief.focus, brief.focusNow, nowMs) })
         }
-        data.nextEvent?.takeIf { it.event.id != actionEvent }?.let { ev -> add("next" to { NextEvent(ev, onOpenEvent) }) }
-        add("day" to { DayStrip(g.cognitive.dayKeys, data, r, nowMs, onOpenEvent) })
-        if (!(watchDone && checkInDone)) {
-            add("start" to {
-                GettingStarted(watchDone, checkInDone, onWatch = onOpenSetup, onCheckIn = { sheet = Sheet.CHECK_IN })
-            })
+        // Today's check-in: the summary once done; the prompt only when nothing above already asks for it.
+        val askedAbove = (showStart && !checkInDone) || brief?.action?.kind == ActionKind.CHECK_IN
+        when {
+            data.checkIn != null -> add("checkin" to { CheckInSummary(data.checkIn) { sheet = Sheet.CHECK_IN } })
+            !askedAbove -> add("checkin" to { CheckInPrompt { sheet = Sheet.CHECK_IN } })
         }
         if (showTonight) add("tonight" to { TonightCard(brief!!.sleep!!, r) })
+        data.nextEvent?.takeIf { it.event.id != actionEvent }?.let { ev -> add("next" to { NextEvent(ev, onOpenEvent) }) }
+        add("day" to { DayStrip(g.cognitive.dayKeys, data, r, nowMs, onOpenEvent) })
         if (r != null) add("why" to { Readouts(r) })
-        if (r != null) add("tips" to { Tips(r.suggestions) })
-        add("stats" to { TodayStats(summary) })
         add("sleep" to { SleepBlock(data.sleep, data.sleepWeek, data.today, g) })
         if (data.trend.size >= 2) add("week" to { WeekBlock(data.trend, data.sleepWeek, g) })
+        if (r != null) add("tips" to { Tips(r.suggestions) })
+        add("stats" to { TodayStats(summary) })
     }
     LaunchedEffect(request) {
         when (request) {
@@ -221,13 +233,29 @@ fun TodayScreen(
                 Sheet.REFLECT -> {
                     val ev = data.allEvents.firstOrNull { it.event.id == reflectId }
                     var rating by remember(reflectId) { mutableStateOf(data.reflections.firstOrNull { it.eventId == reflectId }?.rating) }
-                    ReflectContent(ev?.event?.title ?: "Your event", r?.score, rating) { v ->
+                    ReflectContent(ev?.event?.title ?: "Your moment", r?.score, rating) { v ->
                         rating = v
                         reflectId?.let { id -> scope.launch { g.cognitive.store.saveReflection(EventReflection(id, v, System.currentTimeMillis())) } }
                     }
                 }
                 Sheet.LEARN -> LearnContent(r)
             }
+        }
+    }
+}
+
+/** Before today's check-in: what it is and one button. */
+@Composable
+internal fun CheckInPrompt(onCheckIn: () -> Unit) {
+    Section("Today's check-in") {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Illustration(R.drawable.ill_checkin, Modifier.size(72.dp))
+            HSpace(12.dp)
+            Muted("Rate your energy and stress. It takes 10 seconds and makes today's score more accurate.", Modifier.weight(1f))
+        }
+        VSpace(12.dp)
+        OutlinedButton(onClick = onCheckIn, modifier = Modifier.fillMaxWidth().height(44.dp), shape = RoundedCornerShape(6.dp), border = BorderStroke(1.dp, Cyan)) {
+            Text("CHECK IN", letterSpacing = 1.5.sp, color = Cyan, fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -403,7 +431,7 @@ internal fun DayStrip(dk: DayKeys, data: TodayData, r: Readiness?, nowMs: Long, 
             Legend(NowColor, "Now")
         }
         VSpace(6.dp)
-        Muted("Each colour is a part of your day. Save demanding work for peak focus. Tap an event to see how ready you'll be.")
+        Muted("Each colour is a part of your day. Save demanding work for peak focus. Tap a moment to see how ready you'll be.")
     }
 }
 

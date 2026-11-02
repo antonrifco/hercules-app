@@ -1,6 +1,15 @@
 package com.hercules.mobile.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -51,8 +60,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -75,7 +82,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hercules.mobile.MobileGraph
 import com.hercules.mobile.R
-import com.hercules.shared.cognitive.CheckIn
 import com.hercules.shared.cognitive.ComponentKind
 import com.hercules.shared.cognitive.EventStatus
 import com.hercules.shared.cognitive.EventType
@@ -95,13 +101,10 @@ private const val MAX_DAYS_AHEAD = 7
 @Composable
 fun PlanScreen(
     g: MobileGraph,
-    checkIn: CheckIn?,
     statuses: List<EventStatus>,
     padding: PaddingValues,
-    onAdd: () -> Unit,
     onOpen: (String) -> Unit,
 ) {
-    var checkingIn by remember { mutableStateOf(false) }
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()),
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = padding.calculateBottomPadding() + 96.dp),
@@ -113,48 +116,19 @@ fun PlanScreen(
             VSpace(20.dp)
         }
         item {
-            if (checkIn != null) CheckInSummary(checkIn) { checkingIn = true }
-            else CheckInPrompt { checkingIn = true }
-            VSpace(28.dp)
-            Eyebrow("Upcoming events", color = Text1)
+            Eyebrow("Upcoming moments", color = Text1)
             VSpace(14.dp)
         }
         if (statuses.isEmpty()) {
             item {
                 Illustration(R.drawable.ill_plan, Modifier.fillMaxWidth().height(220.dp))
                 VSpace(8.dp)
-                Text("No events yet", style = MaterialTheme.typography.titleLarge, color = Text1)
+                Text("No moments yet", style = MaterialTheme.typography.titleLarge, color = Text1)
                 VSpace(4.dp)
                 Muted("Add an interview, pitch or exam in the next 7 days. Hercules helps you sleep and recover for it, then tells you whether you're ready.")
-                VSpace(16.dp)
-                Button(
-                    onClick = onAdd, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(6.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Ink),
-                ) { Text("ADD AN EVENT", letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold) }
             }
         }
         itemsIndexed(statuses, key = { _, s -> s.event.id }) { i, s -> RailRow(s, first = i == 0, last = i == statuses.lastIndex, primary = i == 0) { onOpen(s.event.id) } }
-    }
-    if (checkingIn) {
-        ModalBottomSheet(onDismissRequest = { checkingIn = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = Panel) {
-            CheckInForm(g, checkIn) { checkingIn = false }
-        }
-    }
-}
-
-/** Before today's check-in: what it is and one button. */
-@Composable
-private fun CheckInPrompt(onCheckIn: () -> Unit) {
-    Section("Today's check-in") {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Illustration(R.drawable.ill_checkin, Modifier.size(72.dp))
-            HSpace(12.dp)
-            Muted("Rate your energy and stress. It takes 10 seconds and makes today's score more accurate.", Modifier.weight(1f))
-        }
-        VSpace(12.dp)
-        OutlinedButton(onClick = onCheckIn, modifier = Modifier.fillMaxWidth().height(44.dp), shape = RoundedCornerShape(6.dp), border = BorderStroke(1.dp, Cyan)) {
-            Text("CHECK IN", letterSpacing = 1.5.sp, color = Cyan, fontWeight = FontWeight.SemiBold)
-        }
     }
 }
 
@@ -255,7 +229,7 @@ fun AddEventDialog(g: MobileGraph, nowMs: Long, onDismiss: () -> Unit) {
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         containerColor = Panel,
         shape = RoundedCornerShape(8.dp),
-        title = { Text("New event", fontWeight = FontWeight.Light) },
+        title = { Text("New moment", fontWeight = FontWeight.Light) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
@@ -350,7 +324,7 @@ private fun Stepper(value: String, onMinus: () -> Unit, onPlus: () -> Unit) {
     }
 }
 
-/** Says in plain words whether the chosen time is a good one for a demanding event. */
+/** Says in plain words whether the chosen time is a good one for a demanding moment. */
 @Composable
 private fun TimingHint(kind: WindowKind, at: String) {
     val (good, text) = when (kind) {
@@ -590,3 +564,35 @@ fun GuideContent() {
     }
 }
 
+
+/** The Plan tab's call to action: a glowing pill that breathes harder while there is nothing planned yet. */
+@Composable
+fun MomentFab(empty: Boolean, onClick: () -> Unit) {
+    val t = rememberInfiniteTransition(label = "fab")
+    val pulse by t.animateFloat(0f, 1f, infiniteRepeatable(tween(if (empty) 1400 else 2600, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "pulse")
+    val pill = RoundedCornerShape(50)
+    Box(contentAlignment = Alignment.Center) {
+        // Soft halo behind the pill.
+        Box(
+            Modifier.matchParentSize().graphicsLayer {
+                val k = 1f + (if (empty) 0.10f else 0.05f) * pulse
+                scaleX = k; scaleY = k + 0.12f * pulse
+                alpha = (if (empty) 0.45f else 0.28f) * (1f - 0.6f * pulse)
+            }.clip(pill).background(Brush.horizontalGradient(listOf(Cyan, MomentGreen))),
+        )
+        Row(
+            Modifier.clip(pill).background(Brush.horizontalGradient(listOf(Cyan, MomentGreen)))
+                .clickable(onClickLabel = "Add a moment", onClick = onClick)
+                .padding(start = 8.dp, end = 22.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(40.dp).clip(CircleShape).background(Ink), contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Add, null, tint = MomentGreen, modifier = Modifier.size(24.dp).graphicsLayer { rotationZ = 90f * pulse * if (empty) 1f else 0f })
+            }
+            HSpace(12.dp)
+            Text("Add a moment", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+private val MomentGreen = Color(0xFF2EE6A0)

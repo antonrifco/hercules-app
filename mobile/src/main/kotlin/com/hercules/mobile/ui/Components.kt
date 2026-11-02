@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -235,7 +236,7 @@ fun Dot(color: Color, size: Dp = 10.dp) {
  * every tenth tick is longer. Thin numerals in the middle.
  */
 @Composable
-fun ScoreGauge(score: Int, color: Color, size: Dp = 260.dp, caption: String = "readiness") {
+fun ScoreGauge(score: Int, color: Color, size: Dp = 260.dp, caption: String = "Your cognitive state") {
     val p by animateFloatAsState(score / 100f, tween(1100), label = "dial")
     Box(Modifier.size(size), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
@@ -265,7 +266,12 @@ fun ScoreGauge(score: Int, color: Color, size: Dp = 260.dp, caption: String = "r
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text("$score", fontSize = 88.sp, fontWeight = FontWeight.Thin, color = Text1, letterSpacing = (-4).sp)
-            Eyebrow(caption)
+            // Kept inside the inner disc: wraps to two centred lines on the smaller gauge.
+            Text(
+                caption.uppercase(UiLocale), color = Text2, fontSize = 10.sp, letterSpacing = 1.4.sp, lineHeight = 14.sp,
+                fontWeight = FontWeight.Medium, textAlign = androidx.compose.ui.text.style.TextAlign.Center, maxLines = 2,
+                modifier = Modifier.width(size * 0.58f).offset(y = (-6).dp),
+            )
         }
     }
 }

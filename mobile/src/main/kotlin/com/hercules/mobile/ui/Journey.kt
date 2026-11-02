@@ -62,23 +62,29 @@ import kotlinx.coroutines.launch
 @Composable
 fun LaunchArt(show: Boolean, durationMs: Long = 2_400) {
     var visible by remember { mutableStateOf(show) }
-    var awake by remember { mutableStateOf(false) }
+    // Android 12+ already played the wake-up in the system splash, so start from its last frame.
+    var awake by remember { mutableStateOf(SplashPlays) }
     val surge = remember { Animatable(1f) }
     val words = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
         if (!show) return@LaunchedEffect
-        delay(250)
-        awake = true
-        surge.animateTo(1.06f, tween(220, easing = FastOutSlowInEasing))
-        surge.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 300f))
+        if (!SplashPlays) {
+            delay(250)
+            awake = true
+            surge.animateTo(1.06f, tween(220, easing = FastOutSlowInEasing))
+            surge.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 300f))
+        }
         words.animateTo(1f, tween(520, easing = FastOutSlowInEasing))
-        delay((durationMs - 1_300).coerceAtLeast(300))
+        delay((durationMs - if (SplashPlays) 1_100 else 1_300).coerceAtLeast(300))
         visible = false
     }
     AnimatedVisibility(visible, enter = EnterTransition.None, exit = fadeOut(tween(450))) {
         Box(Modifier.fillMaxSize().background(Ink).clickable { visible = false }, contentAlignment = Alignment.Center) {
             // Same size and framing as the system splash icon, so the hand-over is seamless.
-            Herc(if (awake) HercMood.PRIME else HercMood.SLEEPING, size = 288.dp, pose = HercPose.ICON, mane = surge.value)
+            // Before Android 12 the splash is still: open the narrowed grey eyes and light them green.
+            val open by animateFloatAsState(if (awake) 1f else 0.3f, tween(420, easing = FastOutSlowInEasing), label = "open")
+            val eye by androidx.compose.animation.animateColorAsState(if (awake) HercMood.PRIME.eyes else HercMood.SLEEPING.eyes, tween(500), label = "eye")
+            Herc(HercMood.PRIME, size = 288.dp, pose = HercPose.ICON, mane = surge.value, eyesOpen = open, eyeColor = eye)
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.offset { androidx.compose.ui.unit.IntOffset(0, (128.dp + 16.dp * (1f - words.value)).roundToPx()) }.graphicsLayer { alpha = words.value },
@@ -90,6 +96,9 @@ fun LaunchArt(show: Boolean, durationMs: Long = 2_400) {
     }
 }
 
+/** The animated splash icon plays on Android 12+; older versions show its first frame (narrowed grey eyes). */
+val SplashPlays = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
+
 // ------------------------------------------------------------------ onboarding
 
 private class Step(val image: Int, val eyebrow: String, val title: String, val body: String, val herc: HercMood? = null)
@@ -99,7 +108,7 @@ private val Steps = listOf(
     Step(R.drawable.ill_no_watch, "02 · The watch", "Wear it to bed", "Install Hercules on your watch and open it once. It asks to read heart rate and sleep, only to score your nights. Your data stays on your devices."),
     Step(R.drawable.ill_sleep, "03 · Sleep", "Nothing to log", "Sleep is tracked for you. The first week, Herc learns what normal looks like for you.", HercMood.SLEEPING),
     Step(R.drawable.ill_plan, "04 · The plan", "Aim for the big day", "Add an interview, exam or pitch. Get a short daily checklist and, on the day, a clear go or wait."),
-    Step(R.drawable.ill_checkin, "05 · Reminders", "At most three a day", "Morning score, event prep and bedtime. Switch each off any time in Setup."),
+    Step(R.drawable.ill_checkin, "05 · Reminders", "At most three a day", "Morning score, moment prep and bedtime. Switch each off any time in Setup."),
 )
 
 private const val PREFS = "hercules_ui"
