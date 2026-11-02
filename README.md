@@ -20,7 +20,7 @@ Hercules answers three questions every day:
 
 | Question | Where in the app |
 |---|---|
-| *How ready am I today?* | **Today** tab: score, band, best hours |
+| *How ready am I today?* | **Today** tab: score, level, best hours, next step |
 | *Should I do that important thing today, or move it?* | Event card and **Go / reschedule** advice |
 | *How do I arrive at my big day in top shape?* | **Plan** tab: 7-day run-up with a daily checklist |
 
@@ -38,6 +38,23 @@ Hercules answers three questions every day:
 3. **The score appears**, with a band, a one-line meaning, and your **best hours** for demanding work.
 4. **Tips** are short headlines; tap one to see the detail.
 5. **The watch is kept simple:** today's score and peak hours, what it is tracking (sleep, heart, steps) and whether that data reached the phone, and a readiness forecast ring for each big moment in the next 7 days. Small animations (the bezel sweeping up to the score, a heart beating at your pulse, a breathing moon while calibrating) make it feel alive without extra battery-heavy assets.
+
+## 2b. Four moments, one next step
+
+Hercules is built around one question: *what should I do next?* The Today screen shows the score in plain words (Good, Moderate, Low), the main reason, your best focus hours and **one** recommended action. The same coach (`Coach.kt`) runs on phone and watch, so both always say the same thing.
+
+| Moment | What Hercules offers |
+|---|---|
+| Morning | Score, best focus time, a 10-second check-in |
+| Before important work | "Get ready" with the countdown and the steps left |
+| After important work | One tap to say how it went, shown next to that day's readiness (never claimed as cause) |
+| Evening | Bedtime, "try sleeping 40 min earlier", and an *estimate* of tomorrow's readiness at 6 h vs. the target |
+
+**Reminders** (all optional, set in Setup): morning score, event prep (evening before and 2 h ahead), bedtime, after an event, and focus start (off by default). Each is tied to your data, none are generic. **Only one device delivers each reminder:** the watch while it is worn (it has a fresh heart-rate reading), the phone otherwise. Tapping one opens the matching screen on that device.
+
+**Watch:** glanceable home (score, level, focus time, one next step), a two-tap check-in that syncs to the phone, event and tonight screens, a tracking-status screen that says what to fix, and "Continue on phone".
+
+Readings are labelled by origin: *measured by your watch*, *you reported*, *estimate*, or *general advice*.
 
 ## 3. Reading the score
 

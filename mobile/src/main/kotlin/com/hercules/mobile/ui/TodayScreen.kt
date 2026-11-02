@@ -177,15 +177,15 @@ fun TodayScreen(
                     }
                 }
             })
-            if (r != null) add("focus" to { FocusCard(brief.focus, brief.focusNow, nowMs) })
+            if (r != null && brief.focus != null) add("focus" to { FocusCard(brief.focus, brief.focusNow, nowMs) })
         }
+        data.nextEvent?.takeIf { it.event.id != actionEvent }?.let { ev -> add("next" to { NextEvent(ev, onOpenEvent) }) }
+        add("day" to { DayStrip(g.cognitive.dayKeys, data, r, nowMs, onOpenEvent) })
         if (!(watchDone && checkInDone && eventDone)) {
             add("start" to {
                 GettingStarted(watchDone, checkInDone, eventDone, onWatch = onOpenSetup, onCheckIn = { sheet = Sheet.CHECK_IN }, onEvent = onPlanEvent)
             })
         }
-        data.nextEvent?.takeIf { it.event.id != actionEvent }?.let { ev -> add("next" to { NextEvent(ev, onOpenEvent) }) }
-        add("day" to { DayStrip(g.cognitive.dayKeys, data, r, nowMs, onOpenEvent) })
         if (showTonight) add("tonight" to { TonightCard(brief!!.sleep!!, r) })
         if (r != null) add("why" to { Readouts(r) })
         if (r != null) add("tips" to { Tips(r.suggestions) })

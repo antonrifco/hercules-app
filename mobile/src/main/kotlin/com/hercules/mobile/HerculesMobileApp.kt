@@ -96,7 +96,7 @@ class MobileGraph(private val context: Context) {
     }
 }
 
-class HerculesMobileApp : Application() {
+open class HerculesMobileApp : Application() {
     lateinit var graph: MobileGraph
         private set
 

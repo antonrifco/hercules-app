@@ -125,7 +125,7 @@ fun PlanScreen(statuses: List<EventStatus>, padding: PaddingValues, onAdd: () ->
 private fun RailRow(s: EventStatus, first: Boolean, last: Boolean, primary: Boolean, onClick: () -> Unit) {
     val accent = s.advice?.verdict?.color ?: if (s.phase == PrepPhase.DONE) Text2 else Cyan
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).clickable(onClick = onClick)) {
-        Box(Modifier.width(64.dp).fillMaxHeight()) {
+        Box(Modifier.width(76.dp).fillMaxHeight()) {
             Canvas(Modifier.fillMaxSize()) {
                 val x = 10.dp.toPx()
                 val y = 22.dp.toPx()
@@ -138,6 +138,7 @@ private fun RailRow(s: EventStatus, first: Boolean, last: Boolean, primary: Bool
         }
         Column(Modifier.weight(1f).padding(top = 8.dp, bottom = 22.dp)) {
             PanelBox {
+              Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -175,6 +176,7 @@ private fun RailRow(s: EventStatus, first: Boolean, last: Boolean, primary: Bool
                         }
                     }
                 }
+              }
             }
         }
     }
