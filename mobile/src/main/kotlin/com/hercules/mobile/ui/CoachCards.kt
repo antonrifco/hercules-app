@@ -19,6 +19,8 @@ import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Flag
+import androidx.compose.material.icons.rounded.Insights
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.RateReview
 import androidx.compose.material.icons.rounded.SentimentDissatisfied
@@ -73,7 +75,7 @@ private val ActionKind.button: String
 
 /** Answers "how am I doing?" in three seconds: the dial, one word, one sentence, one reason. */
 @Composable
-fun Briefing(r: Readiness, brief: DailyBrief, onLearnMore: () -> Unit) {
+fun Briefing(r: Readiness, brief: DailyBrief, onWhy: () -> Unit, onLearnMore: () -> Unit) {
     val c = r.band.color
     Column(Modifier.fillMaxWidth().background(glow(c)), horizontalAlignment = Alignment.CenterHorizontally) {
         ScoreGauge(r.score, c, size = 208.dp, caption = "Your cognitive state")
@@ -81,6 +83,19 @@ fun Briefing(r: Readiness, brief: DailyBrief, onLearnMore: () -> Unit) {
             Icon(r.band.icon, null, tint = c, modifier = Modifier.size(16.dp))
             HSpace(8.dp)
             Text(r.band.label.uppercase(UiLocale), color = c, fontSize = 15.sp, letterSpacing = 3.sp, fontWeight = FontWeight.SemiBold)
+        }
+        VSpace(10.dp)
+        // Opens the score breakdown; sits right under the score it explains.
+        Row(
+            Modifier.clip(RoundedCornerShape(50)).border(BorderStroke(1.dp, c.copy(alpha = 0.5f)), RoundedCornerShape(50))
+                .clickable(onClickLabel = "See why this score", onClick = onWhy).padding(horizontal = 14.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Rounded.Insights, null, tint = c, modifier = Modifier.size(15.dp))
+            HSpace(6.dp)
+            Text("WHY THIS SCORE", color = Text1, fontSize = 11.sp, letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold)
+            HSpace(2.dp)
+            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = Text2, modifier = Modifier.size(16.dp))
         }
         VSpace(8.dp)
         Text(brief.headline, style = MaterialTheme.typography.headlineSmall, color = Text1, textAlign = TextAlign.Center)

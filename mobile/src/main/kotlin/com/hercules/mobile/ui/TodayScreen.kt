@@ -126,7 +126,7 @@ class TodayData(
 
 private const val HOUR = 3_600_000L
 
-private enum class Sheet { CHECK_IN, REFLECT, LEARN }
+private enum class Sheet { CHECK_IN, REFLECT, LEARN, WHY }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -159,13 +159,13 @@ fun TodayScreen(
 
     // Order follows the questions people ask, most urgent first: How am I? (score) · What unlocks it? (setup, first
     // week only) · What do I do now? (action, check-in) · What's coming? (tonight in the evening, the next moment, best focus time, the day)
-    // · Why? (score drivers, sleep, the week) · and finally general tips and activity counts.
+    // · sleep and the week · activity counts. Tips sit just under the next step; the score breakdown opens from the score.
     val sections = buildList<Pair<String, @Composable () -> Unit>> {
         add("top" to { TopLine(nowMs, r?.band, onOpenGuide) })
         add("hero" to {
             when {
                 brief == null -> Box(Modifier.fillMaxWidth().height(320.dp)) // first brief still computing: no "no score" flash
-                r != null -> Briefing(r, brief) { sheet = Sheet.LEARN }
+                r != null -> Briefing(r, brief, onWhy = { sheet = Sheet.WHY }) { sheet = Sheet.LEARN }
                 else -> NoScoreCard { sheet = Sheet.CHECK_IN }
             }
         })
@@ -189,6 +189,7 @@ fun TodayScreen(
                 }
             })
         }
+        if (r != null) add("tips" to { Tips(r.suggestions) })
         // Today's check-in: the summary once done; the prompt only when nothing above already asks for it.
         val askedAbove = (showStart && !checkInDone) || brief?.action?.kind == ActionKind.CHECK_IN
         when {
@@ -199,10 +200,8 @@ fun TodayScreen(
         data.nextEvent?.takeIf { it.event.id != actionEvent }?.let { ev -> add("next" to { NextEvent(ev, onOpenEvent) }) }
         if (r != null && brief?.focus != null) add("focus" to { FocusCard(brief.focus, brief.focusNow, nowMs) })
         add("day" to { DayStrip(g.cognitive.dayKeys, data, r, nowMs, onOpenEvent) })
-        if (r != null) add("why" to { Readouts(r) })
         add("sleep" to { SleepBlock(data.sleep, data.sleepWeek, data.today, g) })
         if (data.trend.size >= 2) add("week" to { WeekBlock(data.trend, data.sleepWeek, g) })
-        if (r != null) add("tips" to { Tips(r.suggestions) })
         add("stats" to { TodayStats(summary) })
     }
     LaunchedEffect(request) {
@@ -239,6 +238,7 @@ fun TodayScreen(
                     }
                 }
                 Sheet.LEARN -> LearnContent(r)
+                Sheet.WHY -> r?.let { Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp)) { Readouts(it) } }
             }
         }
     }
