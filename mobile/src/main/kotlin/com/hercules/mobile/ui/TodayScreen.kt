@@ -158,7 +158,7 @@ fun TodayScreen(
     var scrollTo by remember { mutableStateOf<String?>(null) }
 
     // Order follows the questions people ask, most urgent first: How am I? (score) · What unlocks it? (setup, first
-    // week only) · What do I do now? (action, focus) · What's coming? (tonight in the evening, the next moment, the day)
+    // week only) · What do I do now? (action, check-in) · What's coming? (tonight in the evening, the next moment, best focus time, the day)
     // · Why? (score drivers, sleep, the week) · and finally general tips and activity counts.
     val sections = buildList<Pair<String, @Composable () -> Unit>> {
         add("top" to { TopLine(nowMs, r?.band, onOpenGuide) })
@@ -188,7 +188,6 @@ fun TodayScreen(
                     }
                 }
             })
-            if (r != null && brief.focus != null) add("focus" to { FocusCard(brief.focus, brief.focusNow, nowMs) })
         }
         // Today's check-in: the summary once done; the prompt only when nothing above already asks for it.
         val askedAbove = (showStart && !checkInDone) || brief?.action?.kind == ActionKind.CHECK_IN
@@ -198,6 +197,7 @@ fun TodayScreen(
         }
         if (showTonight) add("tonight" to { TonightCard(brief!!.sleep!!, r) })
         data.nextEvent?.takeIf { it.event.id != actionEvent }?.let { ev -> add("next" to { NextEvent(ev, onOpenEvent) }) }
+        if (r != null && brief?.focus != null) add("focus" to { FocusCard(brief.focus, brief.focusNow, nowMs) })
         add("day" to { DayStrip(g.cognitive.dayKeys, data, r, nowMs, onOpenEvent) })
         if (r != null) add("why" to { Readouts(r) })
         add("sleep" to { SleepBlock(data.sleep, data.sleepWeek, data.today, g) })
