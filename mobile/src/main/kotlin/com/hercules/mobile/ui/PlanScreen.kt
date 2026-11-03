@@ -125,7 +125,7 @@ fun PlanScreen(
                 VSpace(8.dp)
                 Text("No moments yet", style = MaterialTheme.typography.titleLarge, color = Text1)
                 VSpace(4.dp)
-                Muted("Hercules helps you prepare for this big Moment, and tells you whether you're ready")
+                Muted("Hercules helps you prepare for Big Moments and tells you whether You're Ready.")
             }
         }
         itemsIndexed(statuses, key = { _, s -> s.event.id }) { i, s -> RailRow(s, first = i == 0, last = i == statuses.lastIndex, primary = i == 0) { onOpen(s.event.id) } }
