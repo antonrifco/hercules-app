@@ -41,3 +41,10 @@ captures/
 
 # The Gradle wrapper must be committed (overrides *.jar above)
 !gradle/wrapper/gradle-wrapper.jar
+
+# Xcode (the project is generated from apple/project.yml with XcodeGen)
+apple/*.xcodeproj/
+apple/*.xcworkspace/
+xcuserdata/
+DerivedData/
+*.xcuserstate

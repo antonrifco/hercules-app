@@ -49,9 +49,14 @@ class HerculesRepository(
     fun observeLatest(type: MetricType): Flow<Sample?> =
         q.latestOfType(type.wire).asFlow().mapToOneOrNull(io).map { it?.toModel() }
 
+    suspend fun latest(type: MetricType): Sample? =
+        withContext(io) { q.latestOfType(type.wire).executeAsOneOrNull()?.toModel() }
+
     suspend fun countSamples(): Long = withContext(io) { q.countSamples().executeAsOne() }
 
     fun observePendingSampleCount(): Flow<Long> = q.countPendingSamples().asFlow().mapToOne(io)
+
+    suspend fun pendingSampleCount(): Long = withContext(io) { q.countPendingSamples().executeAsOne() }
 
     /** Raw-sample retention. Summaries and records are kept forever. */
     suspend fun deleteSamplesBefore(cutoffMs: Long, onlySynced: Boolean): Long = withContext(io) {

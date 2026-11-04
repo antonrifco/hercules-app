@@ -6,7 +6,7 @@
 
 **Know when your brain is ready.** Hercules turns the body signals your smartwatch already collects (sleep, heart rate, activity) into a daily **cognitive readiness score from 1 to 100%**. It tells you what that means for today's important moments, and it coaches you through the days leading up to them.
 
-Android phone and Wear OS watch today (Kotlin Multiplatform), built so iOS and watchOS can follow with the same core logic.
+Two platforms, one core: **Android phone + Wear OS watch** and **iPhone + Apple Watch**. All scoring, sleep detection, planning and sync logic is one Kotlin Multiplatform module; each platform adds only its native UI and sensors.
 
 ---
 
@@ -38,6 +38,8 @@ Hercules answers three questions every day:
 3. **The score appears**, with a band, a one-line meaning, and your **best hours** for demanding work.
 4. **Tips** are short headlines; tap one to see the detail.
 5. **The watch is kept simple:** today's score and peak hours, what it is tracking (sleep, heart, steps) and whether that data reached the phone, and a readiness forecast ring for each big moment in the next 7 days. Small animations (the bezel sweeping up to the score, a heart beating at your pulse, a breathing moon while calibrating) make it feel alive without extra battery-heavy assets.
+
+On an **Apple Watch**, sleep comes from the watch's own sleep tracking (turn on a Sleep schedule / Track Sleep with Apple Watch); Hercules reads it, with heart rate and activity, from Health.
 
 ## 3. Reading the score
 
@@ -107,7 +109,7 @@ It comes with the reasons (for example "Sleep: 5h 10m" or "14:00 falls in your a
 
 ## 6. Sensors are your choice
 
-Phone **Data → Sensors** (or watch **Sensors**) lists every background sensor with a switch: heart rate, sleep, steps, 🔥 calories, 📏 distance, 🏢 floors. Each row shows what it feeds (Recovery, Sleep, Activity, Stats) and whether the watch is actually recording it. A change on either device syncs to the other. Turning a sensor off removes its ingredient from the score; it doesn't break the score.
+Phone **Data → Sensors** (or watch **Sensors**) lists every background sensor with a switch: heart rate, sleep, steps, calories, distance, floors. Each row shows what it feeds (Recovery, Sleep, Activity, Stats) and whether the watch is actually recording it. A change on either device syncs to the other. Turning a sensor off removes its ingredient from the score; it doesn't break the score.
 
 ## 7. Important limits
 
@@ -120,6 +122,8 @@ Phone **Data → Sensors** (or watch **Sensors**) lists every background sensor 
 # Part 2: Technical
 
 ## Architecture
+
+**Android**
 
 ```
 ┌──────────── Wear OS watch (wear) ───────────┐        ┌────────────── Android phone (mobile) ──────────────┐
@@ -135,25 +139,40 @@ Phone **Data → Sensors** (or watch **Sensors**) lists every background sensor 
       CognitiveService · SensorConfig · SyncService/WireCodec · DemoData        (Android now, iOS/watchOS next)
 ```
 
-All scoring and coaching logic is in `shared`, so the watch can compute a score on its own and an iOS/watchOS port reuses it unchanged.
+**Apple** (same flow, same shared core, compiled to the `HerculesShared` framework)
+
+```
+┌────────── Apple Watch (apple/watchOS) ──────────┐        ┌──────────────── iPhone (apple/iOS) ─────────────────┐
+│ HealthKit: observer queries + background        │        │ PhoneLink (WCSessionDelegate)                        │
+│  delivery, anchored reads (14-day backfill)     │ batch  │  core.receiveFromWatch → ack ids → push state        │
+│  HR, steps, energy, distance, flights, sleep ───┼───────►│ SwiftUI: Today · Plan · Data(+Sensors), guide,       │
+│ Sync line: "Sent to phone · 2m ago"             │sendMsg │   onboarding, event detail, add moment               │
+│ Home: dial, tracking, big-moment forecasts      │◄───────┤ applicationContext: WatchState + sensor choice       │
+│ Sensors ◄────── applicationContext ────────────►│        │ (server sync queued, like Android)                   │
+└──────────────────────┬──────────────────────────┘        └──────────────────────────┬───────────────────────────┘
+                       └──── shared/app: HerculesCore (Swift-friendly facade over the same services) ───┘
+```
+
+All scoring and coaching logic is in `shared`, so either watch can compute a score on its own and both platforms show the same numbers, tips and checklists. Swift talks to Kotlin through `com.hercules.shared.app.HerculesCore`: plain values and snapshot objects, `suspend` functions that Swift calls with `async`/`await`, no Flows or coroutine types.
 
 ## Modules
 
 | Module | Contents |
 |---|---|
-| `shared/` | `model/` samples and summaries · `insights/` day keys, daily aggregation, personal records, HRV · `cognitive/` `SleepAnalyzer`, `Baseline`, `ReadinessEngine`, `PrepCoach`, `CognitiveService` + `CognitiveStore` · `sensors/` `SensorKind`, `SensorConfig`, `SensorReport` · `sync/` batch sync + wire format · `demo/` synthetic data · `sqldelight/` schema |
+| `shared/` | `model/` samples and summaries · `insights/` day keys, daily aggregation, personal records, HRV · `cognitive/` `SleepAnalyzer`, `Baseline`, `ReadinessEngine`, `PrepCoach`, `CognitiveService` + `CognitiveStore` · `sensors/` `SensorKind`, `SensorConfig`, `SensorReport` · `sync/` batch sync + wire format · `demo/` synthetic data · `app/` `HerculesCore` facade for Swift (screen snapshots, drafts, HealthKit batches, watch transport, sensor choice) · `appleMain/` `AppleFactory` · `sqldelight/` schema |
 | `wear/` | `health/` passive monitoring, sleep (activity state), sensor settings + listener · `sync/` phone sink, periodic worker, `SyncStatus`, `WatchStateSource` · `ui/` Wear Compose M3 |
 | `mobile/` | `sync/` receives watch batches · `HerculesMobileApp` graph (state + sensor push) · `ui/` Today, Plan, event detail, guide, Data/Sensors |
+| `apple/` | XcodeGen `project.yml` · `Common/` palette, SF Symbol mapping, formatting, dial shapes, WatchConnectivity keys · `iOS/` `PhoneModel`, `PhoneLink`, Today (dial, day strip, readouts, tips, sleep, check-in, trend), Plan (rail, add moment, event detail), Data, guide, onboarding · `watchOS/` `WatchModel`, `HealthCollector`, `WatchSession`, home, sensors, permission · asset catalogs made from the same artwork |
 
 ## Sensors and what they're used for
 
-| Sensor | Health Services source | Stored as | Used by |
-|---|---|---|---|
-| Heart rate | `HEART_RATE_BPM` (passive) | `heart_rate` | Sleeping HR, resting HR → Recovery |
-| Sleep | `UserActivityInfo` (`USER_ACTIVITY_ASLEEP / PASSIVE / EXERCISE`) | `activity_state` points (state changes) | `SleepAnalyzer`: main sleep in the window 18:00 the day before → 14:00, at least 60 min, wake-ups merged |
-| Steps, calories, distance, floors | passive deltas | interval samples | Activity, daily stats, records |
+| Sensor | Wear OS (Health Services) | Apple Watch (HealthKit) | Stored as | Used by |
+|---|---|---|---|---|
+| Heart rate | `HEART_RATE_BPM` (passive) | `.heartRate` | `heart_rate` | Sleeping HR, resting HR → Recovery |
+| Sleep | `UserActivityInfo` (`USER_ACTIVITY_ASLEEP / PASSIVE / EXERCISE`) | `.sleepAnalysis`, asleep stages (core, deep, REM, unspecified) | `activity_state`: points = state changes (Wear OS), spans = time asleep (HealthKit) | `SleepAnalyzer`: main sleep in the window 18:00 the day before → 14:00, at least 60 min, overlapping stages and sources merged |
+| Steps, calories, distance, floors | passive deltas | `.stepCount`, `.activeEnergyBurned`, `.distanceWalkingRunning`, `.flightsClimbed` (only samples recorded by the watch, so iPhone steps don't double count) | interval samples | Activity, daily stats, records |
 
-Only sensors that are **enabled** (`SensorConfig`) and **supported** by the watch are registered. The watch publishes a `SensorReport` (supported + active) so the phone shows the real state.
+Only sensors that are **enabled** (`SensorConfig`) and **supported** by the watch are registered. The watch publishes a `SensorReport` (supported + active) so the phone shows the real state. On Apple Watch, HealthKit is asked for all six once, so switching one on later needs no new prompt.
 
 ## Data and sync
 
@@ -162,16 +181,31 @@ Only sensors that are **enabled** (`SensorConfig`) and **supported** by the watc
 - **Phone → watch:** after each batch the phone recomputes readiness and writes `WatchState` (score + next event) to DataClient `/hercules/state`. The watch uses it when it is less than 6 hours old and from today; otherwise it computes locally.
 - **Sensor choice:** `/hercules/sensors/config`, written by either side; the newest `updatedMs` wins. The watch reports back on `/hercules/sensors/report`.
 - **Backend (future):** the phone keeps everything queued (`synced = 0`). Swap `NoopRemoteSink` for an HTTP sink and set `SERVER_SYNC_ENABLED`. The wire contract is in `docs/contracts/sample-batch.v1.schema.json`.
+- **Apple Watch ↔ iPhone (WatchConnectivity):** the same batch JSON goes over `sendMessageData`, and the reply is the ack, so the same "only acked ids are synced" rule holds; sending wakes the iPhone app in the background. Readiness + events (`WatchState`) and the sensor choice travel as `applicationContext` (newest wins, like a Data Layer item). The watch syncs every 15 minutes (background app refresh), when HealthKit delivers new data, and every minute while open. A night that arrives late (the first 14-day backfill, or a watch that was away) is re-analyzed on both devices, so the personal baseline is complete from day one.
 
 ## Build and test
 
-Requirements: JDK 17+ (21 tested) and the Android SDK (compileSdk 36).
+Requirements: JDK 17+ (21 tested) and the Android SDK (compileSdk 36). For the Apple apps: a Mac with Xcode 15+ and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
 ```bash
-./gradlew :shared:testDebugUnitTest                  # unit tests: aggregation, sync, sleep, readiness, prep coach, sensors, DB
+./gradlew :shared:testDebugUnitTest                  # unit tests: aggregation, sync, sleep, readiness, prep coach, sensors, DB, Swift-facing core
 ./gradlew :wear:assembleDebug :mobile:assembleDebug
 ./gradlew :wear:lintDebug :mobile:lintDebug
 ```
+
+```bash
+# iPhone + Apple Watch (on a Mac)
+brew install xcodegen
+cd apple && xcodegen generate && open Hercules.xcodeproj
+```
+
+The Kotlin side of the Apple targets also compiles on Linux (klibs only, no framework link), which is handy in CI:
+
+```bash
+./gradlew -Phercules.apple=true -Pkotlin.native.enableKlibsCrossCompilation=true :shared:compileKotlinIosSimulatorArm64 :shared:compileKotlinWatchosArm64
+```
+
+Build the **Hercules** scheme (it embeds the **HerculesWatch** app). Before compiling Swift, each target runs `./gradlew :shared:embedAndSignAppleFrameworkForXcode -Phercules.apple=true`, which builds the static `HerculesShared` framework for the selected SDK and architecture (`iosArm64`, `iosSimulatorArm64`, `watchosArm64`, `watchosDeviceArm64`, `watchosSimulatorArm64`). Gradle needs a JDK: the script uses `$JAVA_HOME`, else `/usr/libexec/java_home -v 17+`. Set your team in `project.yml` (`DEVELOPMENT_TEAM`) or in Xcode to run on devices; HealthKit needs a signed watch app.
 
 ## Run
 
@@ -210,12 +244,26 @@ adb -s <watch> shell am broadcast -a "whs.synthetic.user.START_WALKING" com.goog
 
 Logs: `adb logcat -s Hercules HerculesSync HerculesState HerculesPhoneSync`.
 
-## Porting to iOS / watchOS
+**iPhone and Apple Watch.** Run the Hercules scheme on an iPhone paired with an Apple Watch (or a paired iPhone + Apple Watch simulator pair). The watch asks once for Health access, reads the last 14 days, and starts sending batches to the phone.
 
-1. Install Xcode, then build the framework: `./gradlew -Phercules.apple=true :shared:linkDebugFrameworkWatchosSimulatorArm64` (targets `iosArm64`, `iosSimulatorArm64`, `watchosArm64`, `watchosSimulatorArm64`; framework `HerculesShared`).
-2. **watchOS (SwiftUI):** feed HealthKit into `HerculesRepository.insertSamples`. Map `HKCategoryTypeIdentifier.sleepAnalysis` to `activity_state` samples, so `SleepAnalyzer` works as-is. Show `CognitiveService.watchState()`.
-3. **iOS (SwiftUI or Compose Multiplatform):** WatchConnectivity replaces the Data Layer. Reuse `CognitiveService`, `PrepCoach` and `SyncService`.
-4. Consider SKIE so `suspend` and `Flow` look like Swift `async` and `AsyncSequence`.
+**Try it without a watch (debug builds only):** both schemes have a `-demo` launch argument (Edit Scheme → Run → Arguments, unticked by default). Ticked, the app loads the same 14-day demo as Android; on the watch it also skips the Health prompt so the UI can be checked in the simulator. From the command line:
+
+```bash
+xcrun simctl launch booted com.hercules.app -demo
+```
+
+The iPhone also has **Data → Developer → Load 14 days of demo data**. Logs: Console.app, subsystems `com.hercules.app` and `com.hercules.app.watchkitapp`.
+
+### How the Apple apps map to the Android ones
+
+| Android | Apple | Notes |
+|---|---|---|
+| `MobileGraph`, `WatchSyncListenerService` | `PhoneModel`, `PhoneLink` | Batch in → `HerculesCore.receiveFromWatch` → ack reply → state pushed back |
+| `WearGraph`, `SyncWorker`, `SyncStatus` | `WatchModel` | `HerculesCore.syncToPhone(transport:)` with `WatchSession` as the transport |
+| `PassiveDataService`, `PassiveRegistrar` | `HealthCollector` | Observer queries + background delivery, anchored reads |
+| `WatchStateSource` | `HerculesCore.watchState` / `watchHome` | Phone's view when under 6 h old and from today, else computed on the watch |
+| Data Layer items `/hercules/state`, `/hercules/sensors/*` | `applicationContext` keys in `apple/Common/Support.swift` (`WatchLink`) | Each side's context carries all of its keys |
+| Compose screens | SwiftUI screens with the same names, wording, colours and layout | Material Rounded icons → SF Symbols; the watch dial sits around the score instead of on the (round) display edge |
 
 ## Design
 
@@ -251,6 +299,9 @@ The UI is designed as a **precision instrument**, not a wellness toy: matte blac
 ## Known gaps
 
 - **Not yet verified on a physical Galaxy Watch.** Verified so far: compiled, unit-tested, lint-clean, and the phone UI was run on an Android emulator with demo data. Watch sleep detection, the phone↔watch state and sensor sync are untested on hardware.
+- **The iPhone and Apple Watch apps have not been built in Xcode yet.** They were written without access to a Mac. Verified so far: the Kotlin they call is unit-tested on the JVM (`HerculesCoreTest`), and `:shared` (including `appleMain`) compiles for `iosSimulatorArm64`, `watchosArm64` and `watchosDeviceArm64` via klib cross-compilation on Linux. Still to do: the first Xcode build (framework link, the generated Swift interface, the Swift code, the XcodeGen project), then a run on a simulator pair and on hardware (HealthKit background delivery, WatchConnectivity background wake-ups).
+- On Apple Watch, resting heart rate comes from the same 10-minute-window rule as Wear OS; Apple Watch records heart rate less often outside workouts, so Recovery leans on sleeping heart rate. HealthKit's own resting-heart-rate type is not used yet.
+- Edits or deletions of past sleep in the Health app are not picked up (new samples are, deleted ones are not removed).
 - Sleep stages (deep/REM) and HRV need the Samsung Health Sensor SDK (partner approval). `Hrv.rmssd` is ready for it.
 - Score weights are heuristic and not personalised beyond the 14-day baseline.
 - No backend or login yet; no notifications or reminders for checklist items yet.

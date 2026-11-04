@@ -72,6 +72,40 @@ class SleepAnalyzerTest {
     @Test fun napsUnderAnHourAreIgnored() {
         assertNull(analyzer.analyze("2026-11-10", listOf(state(ActivityState.ASLEEP, D + 13 * H), state(ActivityState.AWAKE, D + 13 * H + 30 * M)), D + 14 * H))
     }
+
+    // HealthKit reports sleep as asleep spans (one per stage), possibly overlapping and from several sources.
+    private fun span(a: Long, b: Long) = Sample.create(MetricType.ACTIVITY_STATE, ActivityState.ASLEEP, a, b, SampleSource.HEALTHKIT, "aw")
+
+    @Test fun healthKitStagesAreMergedInAnyOrder() {
+        val samples = listOf(
+            span(D - 60 * M, D + 1 * H),            // core 23:00–01:00
+            span(D + 1 * H, D + 2 * H),             // deep, touching the previous stage
+            // awake 02:00–02:10 is not stored
+            span(D + 2 * H + 10 * M, D + 4 * H),    // REM
+            span(D + 4 * H, D + 7 * H),             // core until 07:00
+            span(D - 30 * M, D + 30 * M),           // a second app overlapping the first stage
+            hr(53.0, D + 3 * H),
+            hr(90.0, D + 2 * H + 5 * M),            // during the awake gap: not sleeping HR
+        )
+        for (seed in 1..5) {
+            val s = assertNotNull(analyzer.analyze("2026-11-10", samples.shuffled(kotlin.random.Random(seed)), D + 12 * H))
+            assertEquals(D - 60 * M, s.startMs)
+            assertEquals(D + 7 * H, s.endMs)
+            assertEquals(8 * 60 - 10, s.asleepMinutes)
+            assertEquals(53.0, s.sleepingHrAvg!!, 0.001)
+        }
+    }
+
+    @Test fun healthKitSpansAreClippedToTheNightWindow() {
+        val s = assertNotNull(analyzer.analyze("2026-11-10", listOf(span(D - 8 * H, D + 15 * H)), D + 16 * H))
+        assertEquals(D - 6 * H, s.startMs)
+        assertEquals(D + 14 * H, s.endMs)
+        assertEquals(20 * 60, s.asleepMinutes)
+    }
+
+    @Test fun shortHealthKitNapIsIgnored() {
+        assertNull(analyzer.analyze("2026-11-10", listOf(span(D + 13 * H, D + 13 * H + 40 * M)), D + 14 * H))
+    }
 }
 
 class ReadinessEngineTest {

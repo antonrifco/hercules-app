@@ -8,6 +8,8 @@ plugins {
 }
 
 // iOS + watchOS targets need Xcode. Turn on with -Phercules.apple=true (or in gradle.properties).
+// The Xcode project (apple/project.yml) runs `:shared:embedAndSignAppleFrameworkForXcode -Phercules.apple=true`
+// before compiling Swift; the framework is static, so the apps link it with -framework HerculesShared -lsqlite3.
 val appleEnabled = providers.gradleProperty("hercules.apple").orNull == "true"
 
 kotlin {
@@ -20,6 +22,7 @@ kotlin {
             iosArm64(),
             iosSimulatorArm64(),
             watchosArm64(),          // Apple Watch devices (arm64_32)
+            watchosDeviceArm64(),    // Apple Watch devices built for 64-bit arm64
             watchosSimulatorArm64(), // Apple Silicon watch simulator
         ).forEach { target ->
             target.binaries.framework {

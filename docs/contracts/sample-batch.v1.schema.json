@@ -16,7 +16,7 @@
         "required": ["id", "type", "value", "unit", "start", "end", "source", "deviceId"],
         "properties": {
           "id": {"type": "string", "description": "Deterministic: type|source|startMs|endMs|sessionId. Server must upsert by id."},
-          "type": {"enum": ["heart_rate", "steps", "calories", "distance", "floors", "speed", "ibi", "spo2", "skin_temp", "hrv_sdnn", "vo2_max"]},
+          "type": {"enum": ["heart_rate", "steps", "calories", "distance", "floors", "speed", "ibi", "spo2", "skin_temp", "hrv_sdnn", "vo2_max", "activity_state"], "description": "activity_state: value 0 unknown, 1 awake, 2 asleep, 3 exercise. A point (start == end) is a state change (Wear OS); a span with value 2 is time asleep (HealthKit)."},
           "value": {"type": "number"},
           "unit": {"type": "string"},
           "start": {"type": "string", "format": "date-time"},

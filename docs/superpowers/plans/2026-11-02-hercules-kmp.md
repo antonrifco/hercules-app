@@ -406,3 +406,20 @@ The app is no longer workout-centric. Built and unit-tested in this iteration:
 - **UI**: phone tabs Today / Plan / Data (English, visual-first); watch home = score ring + peak time + next event.
 
 Still open, in addition to Phases 2–5 above: on-device verification of sleep detection and of state/sensor sync; reminders for checklist tasks; calendar integration.
+
+---
+
+## Update 2026-11-04: iPhone + Apple Watch apps (Phase 5, implemented)
+
+Same specification as the Android apps, on the same `:shared` core:
+
+- **Shared:** `com.hercules.shared.app.HerculesCore` wraps the graph (repository, insights, retention, cognitive) behind a Swift-friendly API (plain values, snapshot objects, `suspend` → Swift `async throws`, no Flows). It mirrors MobileGraph/WearGraph, `WatchSyncListenerService` (`receiveFromWatch`), `WatchStateSource` (`watchState`/`watchHome`) and the phone dialogs (`sleepDraft`, `eventDraft`). `HealthBatch` turns HealthKit readings into samples; `WatchTransport` + `TransportSink` carry batches with ack semantics; `SensorSync` handles the sensor choice as JSON. `appleMain/AppleFactory` creates it. Tested in `HerculesCoreTest` (11 tests).
+- **Sleep from HealthKit:** stored as `activity_state` *spans* (value asleep, start..end). `SleepAnalyzer` now merges spans with the Wear OS state-change points, so overlapping stages, several sources and out-of-order batches give the same night. Points-only behaviour is unchanged.
+- **History:** nights touched by a batch (HealthKit's 14-day backfill, a watch that was away) are re-analyzed on both devices, so the baseline is complete from day one.
+- **Wire contract:** `activity_state` added to the schema's type enum (it was already sent by Wear OS).
+- **Gradle:** `watchosDeviceArm64` target added. SKIE was not needed.
+- **apple/:** XcodeGen `project.yml`, SwiftUI iOS app (Today, Plan, event detail, add moment, sleep correction, check-in, Data, guide, onboarding, launch art), SwiftUI watchOS app (HealthKit observer + anchored queries with background delivery, WatchConnectivity sync, home with dial/tracking/moments, sensors, permission), asset catalogs from the existing artwork.
+
+Task 13: Steps 1 and 3 are covered by klib cross-compilation on Linux (`-Pkotlin.native.enableKlibsCrossCompilation=true`); Step 2 (`iosSimulatorArm64Test`) needs a Mac. Tasks 14 and 15: implemented as above, except workouts (`HKWorkoutSession`), which the Android app no longer has either since the pivot to readiness.
+
+Still open: first Xcode build and simulator/device run; HealthKit `restingHeartRate` and sleep deletions; iPhone-side HealthKit backfill.

@@ -1,0 +1,91 @@
+# Xcode project for the iPhone and Apple Watch apps, generated with XcodeGen:
+#   brew install xcodegen && cd apple && xcodegen generate && open Hercules.xcodeproj
+# Both targets link the shared Kotlin core (:shared, framework "HerculesShared"), built by Gradle before Swift compiles.
+name: Hercules
+options:
+  bundleIdPrefix: com.hercules
+  deploymentTarget:
+    iOS: "17.0"
+    watchOS: "10.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+
+settings:
+  base:
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: "" # set your team to run on devices
+    GENERATE_INFOPLIST_FILE: NO
+    # The Kotlin build writes outside the target folder.
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    # Static Kotlin framework from `embedAndSignAppleFrameworkForXcode`; SQLDelight's native driver needs system SQLite.
+    FRAMEWORK_SEARCH_PATHS:
+      - "$(inherited)"
+      - "$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
+    OTHER_LDFLAGS:
+      - "$(inherited)"
+      - "-framework"
+      - "HerculesShared"
+      - "-lsqlite3"
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+
+targets:
+  Hercules:
+    type: application
+    platform: iOS
+    sources:
+      - path: iOS
+      - path: Common
+    settings:
+      base:
+        PRODUCT_NAME: Hercules
+        PRODUCT_BUNDLE_IDENTIFIER: com.hercules.app # same id as the Android app
+        INFOPLIST_FILE: Config/iOS-Info.plist
+        TARGETED_DEVICE_FAMILY: "1"
+    preBuildScripts:
+      - name: Build shared Kotlin framework
+        basedOnDependencyAnalysis: false
+        script: &kotlinBuild |
+          if [ "YES" = "$OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED" ]; then
+            echo "Skipping Gradle: OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED=YES"
+            exit 0
+          fi
+          if [ -z "$JAVA_HOME" ] && [ -x /usr/libexec/java_home ]; then
+            JAVA_HOME="$(/usr/libexec/java_home -v 17+ 2>/dev/null)" && export JAVA_HOME
+          fi
+          cd "$SRCROOT/.."
+          ./gradlew :shared:embedAndSignAppleFrameworkForXcode -Phercules.apple=true
+    dependencies:
+      - target: HerculesWatch
+        embed: true
+        copy:
+          destination: productsDirectory
+          subpath: "$(CONTENTS_FOLDER_PATH)/Watch"
+    scheme:
+      commandLineArguments:
+        "-demo": false # debug builds: tick to load 14 days of demo data on launch
+
+  HerculesWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: watchOS
+      - path: Common
+    settings:
+      base:
+        PRODUCT_NAME: HerculesWatch
+        PRODUCT_BUNDLE_IDENTIFIER: com.hercules.app.watchkitapp
+        INFOPLIST_FILE: Config/Watch-Info.plist
+        CODE_SIGN_ENTITLEMENTS: Config/Watch.entitlements
+        TARGETED_DEVICE_FAMILY: "4"
+        SKIP_INSTALL: YES
+    preBuildScripts:
+      - name: Build shared Kotlin framework
+        basedOnDependencyAnalysis: false
+        script: *kotlinBuild
+    scheme:
+      commandLineArguments:
+        "-demo": false # debug builds: tick to load the demo on the watch (skips the Health prompt)

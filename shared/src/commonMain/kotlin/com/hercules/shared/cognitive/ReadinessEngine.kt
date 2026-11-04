@@ -27,8 +27,13 @@ internal fun curve(x: Double, points: List<Pair<Double, Double>>): Double {
 }
 
 /**
- * Derives the main sleep from activity-state transitions (watch) and the heart rate during it.
+ * Derives the main sleep from the watch's activity-state data and the heart rate during it.
  * The "night of dayKey" is sleep inside [dayKey-1 18:00, dayKey 14:00].
+ *
+ * Two shapes of [MetricType.ACTIVITY_STATE] samples are understood:
+ *  - state changes (start == end), as Wear OS reports them: asleep lasts until the next change;
+ *  - asleep spans (end > start, value [ActivityState.ASLEEP]), as HealthKit reports sleep stages.
+ *    Spans may overlap (several stages or sources) and arrive in any order; they are merged.
  */
 class SleepAnalyzer(private val dayKeys: DayKeys) {
 
@@ -42,15 +47,18 @@ class SleepAnalyzer(private val dayKeys: DayKeys) {
         val (from, to) = window(dayKey)
         val end = minOf(to, nowMs)
         if (end <= from) return null
-        val states = samples.filter { it.type == MetricType.ACTIVITY_STATE }.sortedBy { it.startMs }
-        val intervals = mutableListOf<Pair<Long, Long>>()
+        val activity = samples.filter { it.type == MetricType.ACTIVITY_STATE }
+        val states = activity.filter { it.endMs == it.startMs }.sortedBy { it.startMs }
+        val raw = mutableListOf<Pair<Long, Long>>()
         for ((i, s) in states.withIndex()) {
             if (s.value != ActivityState.ASLEEP) continue
             val next = states.getOrNull(i + 1)?.startMs ?: end
-            val a = maxOf(s.startMs, from)
-            val b = minOf(next, end)
-            if (b > a) intervals += a to b
+            raw += maxOf(s.startMs, from) to minOf(next, end)
         }
+        for (s in activity) {
+            if (s.endMs > s.startMs && s.value == ActivityState.ASLEEP) raw += maxOf(s.startMs, from) to minOf(s.endMs, end)
+        }
+        val intervals = union(raw.filter { it.second > it.first })
         val asleepMs = intervals.sumOf { it.second - it.first }
         if (asleepMs < 60 * MIN_MS) return null
 
@@ -66,6 +74,16 @@ class SleepAnalyzer(private val dayKeys: DayKeys) {
             sleepingHrAvg = if (hr.isEmpty()) null else hr.average(),
             sleepingHrLow = if (hr.isEmpty()) null else hr[(hr.size * 0.1).toInt().coerceAtMost(hr.lastIndex)],
         )
+    }
+
+    /** Sorted union of [start, end) intervals; touching or overlapping ones become one. */
+    private fun union(intervals: List<Pair<Long, Long>>): List<Pair<Long, Long>> {
+        val out = mutableListOf<Pair<Long, Long>>()
+        for ((a, b) in intervals.sortedBy { it.first }) {
+            val last = out.lastOrNull()
+            if (last != null && a <= last.second) out[out.lastIndex] = last.first to maxOf(last.second, b) else out += a to b
+        }
+        return out
     }
 }
 

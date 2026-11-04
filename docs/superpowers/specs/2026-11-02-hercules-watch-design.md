@@ -1,7 +1,7 @@
 # Hercules: Smartwatch Body-Sensor Tracker, Design Spec
 
 **Date:** 2026-11-02
-**Status:** Phase 1 (Android: Wear OS + phone) implemented with Kotlin Multiplatform. Later phases planned in `docs/superpowers/plans/2026-11-02-hercules-kmp.md`.
+**Status:** Phase 1 (Android: Wear OS + phone) implemented with Kotlin Multiplatform. Phase 5 (iPhone + Apple Watch on the same `:shared`) implemented in `apple/`, not yet built in Xcode. Other phases planned in `docs/superpowers/plans/2026-11-02-hercules-kmp.md`.
 
 ## 1. Goal
 
@@ -13,7 +13,7 @@ A smartwatch app with a companion phone app. It records body-sensor data in the 
 |---|---|---|
 | Domain logic, DB, sync | `:shared` (KMP, `androidTarget`) | Same `:shared`, compiled for `iosArm64`, `iosSimulatorArm64`, `watchosArm64`, `watchosSimulatorArm64` |
 | Watch UI + sensors | Kotlin, Compose for Wear OS, Health Services | SwiftUI + HealthKit (Compose Multiplatform doesn't target watchOS) |
-| Phone UI | Kotlin, Jetpack Compose | SwiftUI or Compose Multiplatform |
+| Phone UI | Kotlin, Jetpack Compose | SwiftUI |
 | Watch ↔ phone | Wearable Data Layer (`MessageClient.sendRequest`) | WatchConnectivity |
 
 Why KMP over Flutter:
@@ -25,7 +25,7 @@ Why KMP over Flutter:
 
 - **Wear OS:** Wear OS 3+ (API 30+). Primary: Samsung Galaxy Watch 4 or newer. Wear OS 6 (API 36) granular health permissions are handled.
 - **Android phone:** API 28+.
-- **watchOS (later):** watchOS 10+. **iOS (later):** iOS 17+.
+- **watchOS:** watchOS 10+. **iOS:** iOS 17+.
 
 ## 4. Sensor matrix (✅ implemented, ◐ planned)
 
@@ -112,7 +112,7 @@ Ties: the earliest achievement keeps the record.
 | 2 | Device verification on a Galaxy Watch | Next |
 | 3 | Samsung Health Sensor SDK (IBI → HRV, SpO2, skin temp) | Planned |
 | 4 | Backend + `HttpRemoteSink` (Ktor) + login (device-code flow) | Planned |
-| 5 | iOS app + watchOS app on `:shared` | Planned |
+| 5 | iOS app + watchOS app on `:shared` | ✅ Written (SwiftUI, HealthKit, WatchConnectivity), Kotlin side unit-tested and cross-compiled for Apple targets. First Xcode build and device run pending. |
 
 ## 11. Out of scope for now
 Watch faces, complications and tiles, ECG, sleep staging, GPS routes, social features.
@@ -120,4 +120,4 @@ Watch faces, complications and tiles, ECG, sleep staging, GPS routes, social fea
 ## 12. Open questions
 1. Apply for Samsung partnership now? Approval takes weeks.
 2. Should the step goal be user-configurable?
-3. iOS phone UI: SwiftUI or Compose Multiplatform?
+3. ~~iOS phone UI: SwiftUI or Compose Multiplatform?~~ SwiftUI, through the Swift-friendly `HerculesCore` facade in `:shared`.
