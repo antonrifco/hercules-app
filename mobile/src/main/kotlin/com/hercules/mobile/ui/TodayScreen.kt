@@ -478,7 +478,7 @@ internal fun ScoreBreakdown(calc: ReadinessCalculation) {
     val s = calc.stamp
     Muted(
         (if (s.configType == ConfigurationType.DEFAULT) "Recommended weights" else "Your custom weights") +
-            " · configuration v${s.configVersion}. Missing data is left out, never counted as zero.",
+            ". Missing data is left out, never counted as zero.",
     )
 }
 

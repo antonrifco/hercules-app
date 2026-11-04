@@ -718,7 +718,7 @@ private fun WeightsBlock(g: MobileGraph) {
         saved?.let { VSpace(6.dp); Muted(it) }
         VSpace(8.dp)
         Muted(
-            "Active: ${if (active.type == ConfigurationType.DEFAULT) "recommended" else "custom"} · v${active.version}" +
+            "Active: ${if (active.type == ConfigurationType.DEFAULT) "recommended" else "custom"}" +
                 (if (active.updatedAtMs > 0) " · updated " + DateUtils.getRelativeTimeSpanString(active.updatedAtMs).toString().lowercase() else ""),
         )
     }
