@@ -380,11 +380,11 @@ class PeakWindowTest {
 
     private fun s(day: Int, w: AssessmentWindow, err: Double, device: DeviceKind = DeviceKind.PHONE) = CognitiveSession(
         "$day-$w-$device", device, "dev", w, "d$day", now - day * D, now - day * D + 60_000, SessionStatus.FULLY_VALID, false,
-        err, 0.02, 0.0, 50, 50, 50, 50, 1, emptyList(),
+        err, 0.02, 0.0, 50, 50, 50, 50, BeatTheClock.GAME_VERSION, emptyList(),
     )
 
     @Test fun notEnoughDataUntilEligible() {
-        val few = (1..10).flatMap { d -> AssessmentWindow.entries.map { s(d, it, 0.1) } }
+        val few = (1..5).flatMap { d -> AssessmentWindow.entries.map { s(d, it, 0.1) } }
         assertEquals(PeakResult.NOT_ENOUGH_DATA, PeakWindowPredictor.predict(few, now).result)
     }
 
@@ -413,6 +413,18 @@ class PeakWindowTest {
         assertEquals(0, PeakWindowPredictor.predict(list, now).validSessionCount)
         val old = (40..60).flatMap { d -> AssessmentWindow.entries.map { s(d, it, 0.1) } }
         assertEquals(0, PeakWindowPredictor.predict(old, now).validSessionCount)
+        val olderGame = (1..20).flatMap { d -> AssessmentWindow.entries.map { s(d, it, 0.1).copy(gameVersion = BeatTheClock.GAME_VERSION - 1) } }
+        assertEquals(0, PeakWindowPredictor.predict(olderGame, now).validSessionCount)
+    }
+
+    @Test fun eligibleWithFourGamesOnThreeDaysPerWindow() {
+        // 8 days, each window played on 4 of them: enough under the v2 thresholds.
+        val list = (1..8).flatMap { d ->
+            AssessmentWindow.entries.filter { (d + it.ordinal) % 2 == 0 }.map { w ->
+                s(d, w, if (w == AssessmentWindow.MORNING) 0.05 else 0.12)
+            }
+        }
+        assertTrue(PeakWindowPredictor.predict(list, now).result != PeakResult.NOT_ENOUGH_DATA)
     }
 }
 
@@ -471,6 +483,13 @@ class MomentsTest {
         assertTrue(e.recommendations(ctx(1)).none { it.id == "sleep_schedule" })
         assertTrue(e.recommendations(ctx(0)).any { it.id == "no_rush" })
         assertTrue(e.recommendations(ctx(-1)).isEmpty())
+    }
+
+    @Test fun bedtimeFollowsUsualWakeForLaterMoments() {
+        // Moment at 14:00 tomorrow, usual wake 07:00, 8 h target: in bed by 22:45, not 04:15.
+        val c = ctx(1).copy(eventStartMs = now + D + 14 * H, eventDayWakeMs = now + D + 7 * H)
+        val t = MomentPreparationEngine().recommendations(c).first { it.id == "sleep_opportunity" }
+        assertTrue(t.title.endsWith("22:00"), t.title)
     }
 
     @Test fun criticalRaisesPriority() {

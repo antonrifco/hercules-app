@@ -257,7 +257,8 @@ fun TodayScreen(
     var sheet by remember { mutableStateOf<Sheet?>(null) }
     var reflectId by remember { mutableStateOf<String?>(null) }
     val hour = g.cognitive.dayKeys.minuteOfDay(nowMs) / 60
-    val showTonight = brief?.sleep != null && hour >= 16
+    // Also after midnight: the next step then says "Time to rest" and points here.
+    val showTonight = brief?.sleep != null && (hour >= 16 || hour < 4)
     var scrollTo by remember { mutableStateOf<String?>(null) }
     var syncing by remember { mutableStateOf(false) }
     var totalsTick by remember { mutableIntStateOf(0) }
@@ -477,7 +478,7 @@ internal fun ScoreBreakdown(calc: ReadinessCalculation) {
     val s = calc.stamp
     Muted(
         (if (s.configType == ConfigurationType.DEFAULT) "Recommended weights" else "Your custom weights") +
-            " · configuration v${s.configVersion} · engine ${s.engineVersion}. Missing data is left out, never counted as zero.",
+            " · configuration v${s.configVersion}. Missing data is left out, never counted as zero.",
     )
 }
 

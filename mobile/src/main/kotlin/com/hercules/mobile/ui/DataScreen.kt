@@ -699,7 +699,7 @@ private fun WeightsBlock(g: MobileGraph) {
         }
         (validation as? WeightValidation.Invalid)?.let { Text(it.reason, style = MaterialTheme.typography.bodySmall, color = Color(0xFFFF8C4C)) }
         if (validation is WeightValidation.Valid && draft[Dimension.SLEEP] == 0) {
-            Muted("Heads up: every score needs last night's sleep, whatever its weight.")
+            Muted("Heads up: at 0%, last night's sleep won't count toward your score.")
         }
         VSpace(10.dp)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -727,7 +727,10 @@ private fun WeightsBlock(g: MobileGraph) {
             onDismissRequest = { confirmReset = false },
             containerColor = Panel,
             title = { Text("Reset to recommended weights?", color = Text1) },
-            text = { Text("Sleep 35%, Cardiovascular 25%, Activity 10%, Circadian 10%, Cognitive 20%. Today's score is recalculated; earlier days keep the weights they were calculated with.", color = Text2) },
+            text = {
+                val mix = DefaultScoring.DEFAULT.weights.entries.joinToString(", ") { (d, w) -> "${d.short} ${(w * 100).roundToInt()}%" }
+                Text("$mix. Today's score is recalculated; earlier days keep the weights they were calculated with.", color = Text2)
+            },
             confirmButton = {
                 TextButton(onClick = { scope.launch { g.cognitive.restoreDefaultWeights(); g.pushToWatch(); confirmReset = false } }) { Text("RESET", letterSpacing = 1.sp, color = Cyan) }
             },
@@ -765,7 +768,7 @@ private fun BaselinesBlock(g: MobileGraph) {
                 Column(Modifier.weight(1f)) {
                     Text(baselineLabel(b), style = MaterialTheme.typography.bodyMedium, color = Text1)
                     Text(
-                        "${b.value.sampleCount} ${if (b.value.sampleCount == 1) "day" else "days"} · ${(b.value.personalShare * 100).roundToInt()}% personal · ${b.calibrationVersion}",
+                        "${b.value.sampleCount} ${if (b.value.sampleCount == 1) "day" else "days"} · ${(b.value.personalShare * 100).roundToInt()}% personal",
                         style = MaterialTheme.typography.bodySmall, color = Text2,
                     )
                 }

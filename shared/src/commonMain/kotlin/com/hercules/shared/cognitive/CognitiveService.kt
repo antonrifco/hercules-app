@@ -348,7 +348,8 @@ class CognitiveService(
         val baselineDays = store.sleepRange(dayKeys.plusDays(dayKey, -params.baselineDays), dayKeys.plusDays(dayKey, -1)).size
         val readiness = calc.score?.let { score ->
             val band = ReadinessBand.of(score)
-            val bedtime = dayKeys.clock(wake + 16 * HOUR_MS - 15 * MIN_MS)
+            // Same rule as the Coach's "Lights out": the sleep target plus 15 minutes before the next wake-up.
+            val bedtime = dayKeys.clock(wake + DAY_MS - (params.sleepTargetHours * 60).toLong() * MIN_MS - 15 * MIN_MS)
             Readiness(dayKey, score, band, calc, baselineDays, wake, Tips.build(calc, band, store.sleep(dayKey), bedtime), atMs)
         }
         readiness?.let { store.upsertReadiness(it) }

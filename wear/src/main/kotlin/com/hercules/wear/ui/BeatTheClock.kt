@@ -112,21 +112,31 @@ internal fun BeatTheClockScreen(state: WatchState?, onDone: () -> Unit) {
         value = BtcInfo(maxOf(state?.playsToday ?: 0, c.playsToday()), wake)
     }
 
+    // Called from the lifecycle observer too, which keeps the first composition's closure: read the round number
+    // from the list, never from a value captured at composition time.
     fun finishRound(interrupted: Boolean) {
         val stop = SystemClock.elapsedRealtimeNanos()
-        rounds += BeatTheClock.round("$sessionId:$index", sessionId, index, plan[index], startNanos, stop, interrupted)
+        val i = rounds.size
+        if (i >= plan.size) return
+        rounds += BeatTheClock.round("$sessionId:$i", sessionId, i, plan[i], startNanos, stop, interrupted)
         lastInterrupted = interrupted
         if (rounds.size < plan.size) { stage = if (rounds.size == BeatTheClock.ROUNDS - 1) WStage.FEEL else WStage.ROUND; return }
         stage = WStage.SAVING
         scope.launch {
             val c = g.cognitive
-            val s = c.recordAssessment(
-                sessionId, DeviceKind.WATCH, g.deviceId, sessionStartMs, System.currentTimeMillis(), rounds.toList(),
-                wakeMs = info?.wakeMs, energy = energy, stress = stress,
-            )
-            result = s
-            stage = WStage.RESULT
-            SyncWorker.runNow(ctx)
+            try {
+                val s = c.recordAssessment(
+                    sessionId, DeviceKind.WATCH, g.deviceId, sessionStartMs, System.currentTimeMillis(), rounds.toList(),
+                    wakeMs = info?.wakeMs, energy = energy, stress = stress,
+                )
+                result = s
+                stage = WStage.RESULT
+                SyncWorker.runNow(ctx)
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                android.util.Log.e("HerculesBtc", "could not save Beat the Clock", e)
+                onDone()
+            }
         }
     }
 

@@ -8,6 +8,7 @@ import com.hercules.shared.readiness.MetricKey
 import com.hercules.shared.readiness.PeakResult
 import com.hercules.shared.readiness.PeakWindowPrediction
 import com.hercules.shared.readiness.PrepPhase
+import com.hercules.shared.readiness.ScoringParams
 import kotlinx.serialization.Serializable
 import kotlin.math.roundToInt
 
@@ -151,7 +152,7 @@ class Coach(private val dayKeys: DayKeys) {
         lastNight: SleepNight?,
         baselineWakeMinute: Int?,
         events: List<EventStatus>,
-        sleepTargetMinutes: Int = 8 * 60,
+        sleepTargetMinutes: Int = (ScoringParams.V1.sleepTargetHours * 60).toInt(),
     ): SleepAdvice {
         val today = dayKeys.of(nowMs)
         val tomorrow = dayKeys.plusDays(today, 1)

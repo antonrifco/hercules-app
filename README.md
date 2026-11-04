@@ -80,7 +80,7 @@ It reads like *"Medium confidence · 4 of 5 signals · 5 days of data"*, and bel
 
 ## 5. Peak Cognitive Window
 
-Each Beat the Clock game is filed under morning (0–4 h after waking), afternoon (4–8 h) or evening (8 h+). After 14 days, with at least 7 valid games on 7 different days in every part of the day, Hercules names the part of the day you perform best, or says there is no clear peak.
+Each Beat the Clock game is filed under morning (0–4 h after waking), afternoon (4–8 h) or evening (8 h+). After 7 days, with at least 4 valid games on 3 different days in every part of the day (current game version only), Hercules names the part of the day you perform best, or says there is no clear peak.
 
 ## 6. Moments (up to 7 days ahead)
 

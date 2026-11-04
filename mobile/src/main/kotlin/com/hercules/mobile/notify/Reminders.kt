@@ -52,12 +52,15 @@ object ReminderSettings {
         }
     }
 
-    fun sent(ctx: Context): Set<String> = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getStringSet("sent", emptySet()).orEmpty()
+    /** Entries are "sentMs|id": a stored set has no order, so the time decides which ones are the oldest. */
+    private fun raw(ctx: Context): Set<String> = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getStringSet("sent", emptySet()).orEmpty()
 
-    fun markSent(ctx: Context, id: String) {
+    fun sent(ctx: Context): Set<String> = raw(ctx).map { it.substringAfter('|') }.toSet()
+
+    fun markSent(ctx: Context, id: String, nowMs: Long = System.currentTimeMillis()) {
         val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         // Keep the list short: only recent ones matter, since reminders expire after 90 minutes.
-        val next = (sent(ctx) + id).toList().takeLast(120).toSet()
+        val next = (raw(ctx) + "$nowMs|$id").sortedBy { it.substringBefore('|', "0").toLongOrNull() ?: 0L }.takeLast(120).toSet()
         p.edit { putStringSet("sent", next) }
     }
 }

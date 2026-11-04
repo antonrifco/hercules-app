@@ -267,8 +267,9 @@ never mixed without normalization.
 
 # 5. Peak Cognitive Window
 
-- Uses the last 28 days of valid sessions (older practice-flagged games excluded). Eligible only with ≥ 14 observation days and, in every
-  window, ≥ 7 valid sessions on ≥ 7 distinct days.
+- Uses the last 28 days of valid sessions of the current game version (older practice-flagged games and games of an
+  earlier version excluded). Eligible only with ≥ 7 observation days and, in every window, ≥ 4 valid sessions on
+  ≥ 3 distinct days (model v2).
 - Performance per session is normalized per device (robust z of the accuracy error against that device's own
   28-day median and MAD, sign flipped so higher is better), then averaged per window.
 - `peak = argmax(mean performance)`. If the gap to the runner-up is smaller than its standard error (minimum 0.2),

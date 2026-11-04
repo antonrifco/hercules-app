@@ -100,9 +100,13 @@ fun BeatTheClockScreen(g: MobileGraph, padding: PaddingValues, onClose: () -> Un
     // Games played today on either device.
     val playsToday by produceState<Int?>(null) { value = g.cognitive.playsToday() }
 
+    // Called from the lifecycle observer too, which keeps the first composition's closure: read the round number
+    // from the list, never from a value captured at composition time.
     fun finishRound(interrupted: Boolean) {
         val stop = SystemClock.elapsedRealtimeNanos()
-        rounds += BeatTheClock.round("$sessionId:$index", sessionId, index, plan[index], startNanos, stop, interrupted)
+        val i = rounds.size
+        if (i >= plan.size) return
+        rounds += BeatTheClock.round("$sessionId:$i", sessionId, i, plan[i], startNanos, stop, interrupted)
         lastInterrupted = interrupted
         if (rounds.size < plan.size) {
             stage = Stage.BETWEEN
@@ -111,11 +115,17 @@ fun BeatTheClockScreen(g: MobileGraph, padding: PaddingValues, onClose: () -> Un
         stage = Stage.SAVING
         scope.launch {
             val c = g.cognitive
-            val s = c.recordAssessment(sessionId, DeviceKind.PHONE, g.deviceId, sessionStartMs, System.currentTimeMillis(), rounds.toList(), energy = energy, stress = stress)
-            playsAfter = c.playsToday()
-            result = s
-            stage = Stage.RESULT
-            g.pushToWatch()
+            try {
+                val s = c.recordAssessment(sessionId, DeviceKind.PHONE, g.deviceId, sessionStartMs, System.currentTimeMillis(), rounds.toList(), energy = energy, stress = stress)
+                playsAfter = c.playsToday()
+                result = s
+                stage = Stage.RESULT
+                g.pushToWatch()
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                android.util.Log.e("Hercules", "could not save Beat the Clock", e)
+                onClose()
+            }
         }
     }
 

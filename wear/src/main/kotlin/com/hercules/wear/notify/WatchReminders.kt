@@ -77,10 +77,14 @@ class WatchReminderWorker(context: Context, params: WorkerParameters) : Coroutin
             }
         }
 
-        private fun sent(ctx: Context): Set<String> = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getStringSet("sent", emptySet()).orEmpty()
+        /** Entries are "sentMs|id": a stored set has no order, so the time decides which ones are the oldest. */
+        private fun raw(ctx: Context): Set<String> = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getStringSet("sent", emptySet()).orEmpty()
+
+        private fun sent(ctx: Context): Set<String> = raw(ctx).map { it.substringAfter('|') }.toSet()
 
         private fun markSent(ctx: Context, id: String) {
-            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putStringSet("sent", (sent(ctx) + id).toList().takeLast(120).toSet()) }
+            val next = (raw(ctx) + "${System.currentTimeMillis()}|$id").sortedBy { it.substringBefore('|', "0").toLongOrNull() ?: 0L }.takeLast(120).toSet()
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putStringSet("sent", next) }
         }
 
         private fun post(ctx: Context, n: Nudge): Boolean {

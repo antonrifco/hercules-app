@@ -233,11 +233,12 @@ data class PeakWindowPrediction(
     val modelVersion: Int = MODEL_VERSION,
 ) {
     companion object {
-        const val MODEL_VERSION = 1
+        /** v2: only games of the current [BeatTheClock.GAME_VERSION]; lower thresholds (7 days, 4 games on 3 days). */
+        const val MODEL_VERSION = 2
         const val WINDOW_DAYS = 28
-        const val MIN_OBSERVATION_DAYS = 14
-        const val MIN_SESSIONS_PER_WINDOW = 7
-        const val MIN_DAYS_PER_WINDOW = 7
+        const val MIN_OBSERVATION_DAYS = 7
+        const val MIN_SESSIONS_PER_WINDOW = 4
+        const val MIN_DAYS_PER_WINDOW = 3
         const val MIN_GAP = 0.2
     }
 }
@@ -246,7 +247,10 @@ object PeakWindowPredictor {
 
     fun predict(sessions: List<CognitiveSession>, nowMs: Long): PeakWindowPrediction {
         val from = nowMs - PeakWindowPrediction.WINDOW_DAYS * 86_400_000L
-        val usable = sessions.filter { it.valid && !it.practice && it.window != null && it.accuracyError != null && it.startMs in from..nowMs }
+        // Only same-version games: a different round set gives errors that can't be compared.
+        val usable = sessions.filter {
+            it.gameVersion == BeatTheClock.GAME_VERSION && it.valid && !it.practice && it.window != null && it.accuracyError != null && it.startMs in from..nowMs
+        }
 
         // Normalize per device: robust z of the accuracy error against that device's own 28-day distribution.
         val perf = usable.groupBy { it.deviceKind }.flatMap { (_, list) ->

@@ -186,7 +186,11 @@ class MomentPreparationEngine {
         if (phase == PrepPhase.DONE) return emptyList()
         val out = mutableListOf<PrepTask>()
         val boost = if (c.urgency == Urgency.CRITICAL) -10 else 0
-        val bedtime = c.clock(c.eventStartMs - (2.5 * HOUR).toLong() - c.sleepTargetMinutes * 60_000L - 15 * 60_000L)
+        // Up 2.5 h before the moment, but never later than your usual wake: an afternoon moment doesn't mean
+        // "in bed by 04:15".
+        val wakeBy = c.eventStartMs - (2.5 * HOUR).toLong()
+        val wake = c.eventDayWakeMs?.let { minOf(it, wakeBy) } ?: wakeBy
+        val bedtime = c.clock(wake - c.sleepTargetMinutes * 60_000L - 15 * 60_000L)
         val lowSleep = c.recentSleepMinutes != null && c.recentSleepMinutes < c.sleepTargetMinutes - 30
         val irregular = c.consistencyScore != null && c.consistencyScore < 75
         val strained = c.cardioScore != null && c.cardioScore < 60
