@@ -40,7 +40,7 @@ class PhoneRemoteSink(context: Context) : RemoteSink {
                 .sendRequest(node.id, WearProtocol.SYNC_PATH, WireCodec.encodeBatch(batch))
                 .await()
             val ack = WireCodec.decodeAck(reply)
-            SyncResult.Accepted(ack.sampleIds, ack.sessionIds)
+            SyncResult.Accepted(ack.sampleIds, ack.sessionIds, ack.assessmentIds)
         } catch (e: Exception) {
             SyncResult.Rejected(retryable = true, reason = "phone transfer failed: ${e.message}")
         }
@@ -55,8 +55,8 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             val broken = g.insights.refresh()
             g.retention.apply(System.currentTimeMillis())
             val out = g.phoneSync.syncOnce()
-            SyncStatus.record(applicationContext, out.stoppedReason, delivered = out.samplesSynced + out.sessionsSynced)
-            Log.i(TAG, "sync: newRecords=${broken.size} samples=${out.samplesSynced} sessions=${out.sessionsSynced} stopped=${out.stoppedReason}")
+            SyncStatus.record(applicationContext, out.stoppedReason, delivered = out.samplesSynced + out.sessionsSynced + out.assessmentsSynced)
+            Log.i(TAG, "sync: newRecords=${broken.size} samples=${out.samplesSynced} sessions=${out.sessionsSynced} assessments=${out.assessmentsSynced} stopped=${out.stoppedReason}")
             Result.success()
         } catch (e: Exception) {
             Log.e(TAG, "sync worker failed", e)

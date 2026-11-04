@@ -41,13 +41,14 @@ object ReminderSettings {
             evening = p.getBoolean("evening", d.evening),
             reflect = p.getBoolean("reflect", d.reflect),
             focus = p.getBoolean("focus", d.focus),
+            assess = p.getBoolean("assess", d.assess),
         )
     }
 
     fun save(ctx: Context, prefs: NudgePrefs) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
             putBoolean("morning", prefs.morning); putBoolean("event", prefs.event); putBoolean("evening", prefs.evening)
-            putBoolean("reflect", prefs.reflect); putBoolean("focus", prefs.focus)
+            putBoolean("reflect", prefs.reflect); putBoolean("focus", prefs.focus); putBoolean("assess", prefs.assess)
         }
     }
 
@@ -68,23 +69,25 @@ class ReminderWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val g = ctx.graph
         val now = System.currentTimeMillis()
         val prefs = ReminderSettings.load(ctx)
-        if (!(prefs.morning || prefs.event || prefs.evening || prefs.reflect || prefs.focus)) return Result.success()
+        if (!(prefs.morning || prefs.event || prefs.evening || prefs.reflect || prefs.focus || prefs.assess)) return Result.success()
         val lastWatchHr = g.repo.observeLatest(MetricType.HEART_RATE).first()?.startMs
         // The watch delivers its own reminders while it is worn, so the wrist and the pocket never both buzz.
         if (!NudgeRouting.phoneShouldPost(lastWatchHr, now)) return Result.success()
 
-        val today = g.cognitive.dayKeys.of(now)
-        val store = g.cognitive.store
-        val due = NudgePlanner(g.cognitive.dayKeys, g.cognitive.daily).due(
-            now,
-            store.readinessRange(today, today).firstOrNull(),
-            store.checkIn(today),
-            store.sleep(today),
-            g.cognitive.upcoming(),
-            store.reflections().map { it.eventId }.toSet(),
-            g.cognitive.baseline(today).wakeMinuteOfDay,
-            prefs,
-            ReminderSettings.sent(ctx),
+        val c = g.cognitive
+        val today = c.dayKeys.of(now)
+        val due = NudgePlanner(c.dayKeys, c.daily).due(
+            nowMs = now,
+            readiness = c.evaluation(today)?.readiness,
+            sleep = c.store.sleep(today),
+            events = c.upcoming(now),
+            reflectedIds = c.store.reflections().map { it.eventId }.toSet(),
+            baselineWakeMinute = c.typicalWakeMinute(today),
+            prefs = prefs,
+            alreadySent = ReminderSettings.sent(ctx),
+            wakeMs = c.wakeMs(today),
+            playsToday = c.playsToday(today),
+            peak = c.store.latestPeak(),
         )
         due.forEach { n ->
             if (Notifier.post(ctx, n)) ReminderSettings.markSent(ctx, n.id)
@@ -109,7 +112,7 @@ object Notifier {
         val m = ctx.getSystemService(NotificationManager::class.java)
         if (m.getNotificationChannel(CHANNEL) == null) {
             m.createNotificationChannel(NotificationChannel(CHANNEL, "Reminders", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                description = "Morning score, moment prep, bedtime"
+                description = "Morning score, Beat the Clock, moment prep, bedtime"
             })
         }
     }

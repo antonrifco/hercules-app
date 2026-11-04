@@ -28,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,11 +47,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import com.hercules.shared.cognitive.ReadinessBand
 import com.hercules.shared.cognitive.Tone
-import com.hercules.shared.cognitive.Verdict
-import com.hercules.shared.cognitive.WindowKind
+import com.hercules.shared.readiness.AssessmentWindow
+import com.hercules.shared.readiness.PrepStatus
+import com.hercules.shared.readiness.ReadinessConfidence
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -65,6 +68,10 @@ val Panel = Color(0xFF10111B)        // raised surfaces
 val Hairline = Color(0xFF22243A)     // 1dp rules and borders
 val Text1 = Color(0xFFE9EBF5)
 val Text2 = Color(0xFF8B90A8)
+
+/** Rules, tracks and secondary text for the current surface; lighter panels provide brighter ones so they stay visible. */
+val LocalRule = staticCompositionLocalOf { Hairline }
+val LocalSubtle = staticCompositionLocalOf { Text2 }
 val Cyan = Color(0xFF3FE0FF)
 val Brand = Color(0xFF6E6BFF)        // indigo
 
@@ -85,12 +92,21 @@ val ReadinessBand.color: Color
 
 fun scoreColor(score: Int): Color = ReadinessBand.of(score.coerceIn(0, 100)).color
 
-val Verdict.color: Color
+/** Preparation status of a Moment: green on track, amber needs attention, grey when there isn't enough data. */
+val PrepStatus.color: Color
     get() = when (this) {
-        Verdict.GO -> Prima
-        Verdict.GO_WITH_PREP -> Baik
-        Verdict.CONSIDER_RESCHEDULE -> Cukup
-        Verdict.RESCHEDULE -> Terkuras
+        PrepStatus.ON_TRACK -> Prima
+        PrepStatus.NEEDS_ATTENTION -> Cukup
+        PrepStatus.INSUFFICIENT_DATA -> Text2
+    }
+
+/** Confidence in today's score: brighter is more certain. */
+val ReadinessConfidence.color: Color
+    get() = when (this) {
+        ReadinessConfidence.HIGH -> Prima
+        ReadinessConfidence.MEDIUM -> Baik
+        ReadinessConfidence.LOW -> Cukup
+        ReadinessConfidence.INSUFFICIENT -> Text2
     }
 
 val Tone.color: Color
@@ -100,17 +116,16 @@ val Tone.color: Color
         Tone.ACTION -> Cyan
     }
 
-/** One clearly different hue per part of the day, so the Your day strip reads at a glance. */
-val WindowKind.color: Color
+/** One hue per Beat the Clock window on the day strip. */
+val AssessmentWindow.color: Color
     get() = when (this) {
-        WindowKind.WARMUP -> Color(0xFFFFD166)      // sunrise yellow
-        WindowKind.PEAK -> Cyan                     // the brightest: your best hours
-        WindowKind.STEADY -> Color(0xFF3D7BFF)      // blue
-        WindowKind.DIP -> Color(0xFFA35CFF)         // violet
-        WindowKind.SECOND_PEAK -> Color(0xFFFF7A59) // coral
-        WindowKind.EVENING -> Color(0xFFE2557F)     // rose
-        WindowKind.LATE -> Color(0xFF5A5F80)        // grey
+        AssessmentWindow.MORNING -> Color(0xFFFFD166)   // sunrise yellow
+        AssessmentWindow.AFTERNOON -> Color(0xFF3D7BFF) // blue
+        AssessmentWindow.EVENING -> Color(0xFFE2557F)   // rose
     }
+
+/** Grey for "not enough data": never a score colour. */
+val InsufficientColor = Text2
 
 /** The "now" marker: white, so it never looks like a part of the day. */
 val NowColor = Color(0xFFFFFFFF)
@@ -170,7 +185,7 @@ fun countdownLabel(daysUntil: Int, startMs: Long): String = when {
 
 /** Small uppercase, letter-spaced label: the voice of every section. */
 @Composable
-fun Eyebrow(text: String, modifier: Modifier = Modifier, color: Color = Text2) {
+fun Eyebrow(text: String, modifier: Modifier = Modifier, color: Color = LocalSubtle.current) {
     Text(text.uppercase(UiLocale), modifier = modifier, color = color, fontSize = 11.sp, letterSpacing = 1.8.sp, fontWeight = FontWeight.Medium)
 }
 
@@ -185,7 +200,7 @@ fun Section(title: String, modifier: Modifier = Modifier, trailing: @Composable 
             trailing?.invoke()
         }
         VSpace(10.dp)
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(LocalRule.current))
         VSpace(14.dp)
         content()
     }
@@ -205,7 +220,7 @@ fun PanelBox(modifier: Modifier = Modifier, accent: Color? = null, content: @Com
 
 @Composable
 fun Muted(text: String, modifier: Modifier = Modifier) {
-    Text(text, modifier = modifier, style = MaterialTheme.typography.bodySmall, color = Text2)
+    Text(text, modifier = modifier, style = MaterialTheme.typography.bodySmall, color = LocalSubtle.current)
 }
 
 /** Outlined tag; reads like a status light rather than a candy pill. */
@@ -279,8 +294,9 @@ fun ScoreGauge(score: Int, color: Color, size: Dp = 260.dp, caption: String = "Y
 @Composable
 fun ScoreBar(score: Int, color: Color = scoreColor(score), height: Dp = 4.dp) {
     val p by animateFloatAsState(score / 100f, tween(700), label = "bar")
+    val track = LocalRule.current
     Canvas(Modifier.fillMaxWidth().height(height)) {
-        drawRect(Hairline)
+        drawRect(track)
         drawRect(color, size = Size(this.size.width * p, this.size.height))
     }
 }
@@ -294,6 +310,8 @@ fun MiniBars(
     colorOf: (Float) -> Color,
     target: Float? = null,
     barHeight: Dp = 84.dp,
+    /** Optional second line under each label (e.g. the month under the date). */
+    subLabels: List<String>? = null,
 ) {
     Column {
         Canvas(Modifier.fillMaxWidth().height(barHeight)) {
@@ -315,7 +333,12 @@ fun MiniBars(
         }
         VSpace(6.dp)
         Row(Modifier.fillMaxWidth()) {
-            labels.forEach { Text(it.uppercase(UiLocale), Modifier.weight(1f), fontSize = 10.sp, letterSpacing = 1.sp, color = Text2, textAlign = TextAlign.Center) }
+            labels.forEach { Text(it.uppercase(UiLocale), Modifier.weight(1f), fontSize = 10.sp, lineHeight = if (subLabels != null) 12.sp else TextUnit.Unspecified, letterSpacing = 1.sp, color = Text2, textAlign = TextAlign.Center) }
+        }
+        if (subLabels != null) {
+            Row(Modifier.fillMaxWidth()) {
+                subLabels.forEach { Text(it.uppercase(UiLocale), Modifier.weight(1f), fontSize = 9.sp, lineHeight = 11.sp, letterSpacing = 0.5.sp, color = Text2.copy(alpha = 0.7f), textAlign = TextAlign.Center, maxLines = 1, softWrap = false) }
+            }
         }
     }
 }

@@ -20,7 +20,7 @@ enum class LegalDoc(val title: String, val updated: String, val intro: String, v
     PRIVACY(
         "Privacy Policy",
         "3 November 2026",
-        "Hercules turns what your watch measures into a daily readiness score. This page explains what data that involves, where it goes, and the control you have over it.",
+        "Hercules turns what your devices measure into a daily Cognitive Readiness Score. This page explains what data that involves, where it goes, and the control you have over it.",
         listOf(
             "The short version" to listOf(
                 "Your data stays on your phone and your watch.",
@@ -28,9 +28,12 @@ enum class LegalDoc(val title: String, val updated: String, val intro: String, v
                 "Uninstalling the app deletes everything it stored.",
             ),
             "What Hercules collects" to listOf(
+                "From Health Connect, only the types you allow: sleep sessions, heart rate variability, resting heart rate, steps and exercise sessions. Optionally respiratory rate, skin temperature, blood oxygen and heart rate, which are stored but not used in the score. Hercules only reads; it never writes to Health Connect.",
+                "From your phone's ambient light sensor: light levels, sampled while the app is open and occasionally in the background. No camera, no location.",
                 "From your watch, with your permission: heart rate, sleep and wake times, steps, distance, floors, calories and motion. You can switch each sensor off in Setup.",
-                "What you enter: check-ins (energy and stress), moments you plan, the steps you tick off, ratings after a moment, and sleep times you correct.",
-                "What Hercules works out from these: your daily readiness score, focus windows, sleep advice and personal bests.",
+                "From Beat the Clock: how long you held each round compared with its target.",
+                "What you enter: moments you plan, the steps you tick off, ratings after a moment, sleep times you correct, your usual wake time and score weights.",
+                "What Hercules works out from these: your daily score with its coverage and confidence, personal baselines, your peak cognitive window, preparation status and personal bests.",
             ),
             "How it is used" to listOf(
                 "Only to calculate your score and advice, and to send you the reminders you have switched on. All of this runs on your devices.",
@@ -43,16 +46,19 @@ enum class LegalDoc(val title: String, val updated: String, val intro: String, v
             ),
             "How long it is kept" to listOf(
                 "Raw sensor readings are deleted after 30 days, and after 90 days at most.",
-                "Daily summaries, scores, check-ins, moments and personal bests are kept on your device so you can see your history, until you delete the app or its data.",
+                "Light readings are deleted after 60 days.",
+                "Daily summaries, scores, assessments, moments and personal bests are kept on your device so you can see your history, until you delete the app or its data.",
             ),
             "Permissions" to listOf(
+                "Health Connect (read only): the record types listed above. You can grant or withdraw each one in Setup or in Health Connect.",
                 "Body sensors, activity recognition and background sensor access (watch): to measure heart rate, sleep and movement.",
+                "Hercules has no internet permission, so it can't send your data anywhere.",
                 "Notifications: for the reminders you choose. Each one can be turned off in Setup.",
             ),
             "Your control" to listOf(
                 "Turn sensors and reminders on or off at any time in Setup.",
-                "Delete a moment and its checklist from the moment's page.",
-                "Delete all data with Android Settings > Apps > Hercules > Storage > Clear storage, on the phone and on the watch, or by uninstalling.",
+                "Cancel a moment from its page.",
+                "Delete all data in Setup > Data, with Android Settings > Apps > Hercules > Storage > Clear storage, or by uninstalling.",
             ),
             "Children" to listOf(
                 "Hercules is not meant for children under 16 and does not knowingly collect their data.",
@@ -68,16 +74,16 @@ enum class LegalDoc(val title: String, val updated: String, val intro: String, v
         "These terms apply when you use the Hercules app on your phone and watch. By using the app you agree to them.",
         listOf(
             "Not medical advice" to listOf(
-                "Hercules is a wellbeing tool, not a medical device. The readiness score and advice are estimates based on general research about sleep, recovery and focus, applied to your own data.",
+                "Hercules is a wellbeing tool, not a medical device. The Cognitive Readiness Score, peak window and advice are estimates based on general research about sleep, recovery and focus, applied to your own data.",
                 "Do not use Hercules to diagnose, treat or prevent any condition. If you are worried about your sleep, heart or health, talk to a doctor.",
                 "Watch sensors can be wrong or miss data. The app does its best with what it receives, but cannot guarantee accuracy.",
             ),
             "Your decisions" to listOf(
-                "Hercules may suggest moving a demanding task or moment to a better time. Whether and how you act on that is your decision.",
+                "Hercules suggests how to prepare and when you tend to perform best. Whether and how you act on that is your decision.",
                 "Hercules is not responsible for the outcome of interviews, exams, negotiations or any other moment.",
             ),
             "Using the app" to listOf(
-                "You need a compatible Android phone and, for automatic tracking, a Wear OS watch.",
+                "You need a compatible Android phone with Health Connect. A Wear OS watch is optional.",
                 "Use the app for your own personal, non-commercial purposes. Do not try to copy, reverse engineer or resell it.",
             ),
             "Your data" to listOf(

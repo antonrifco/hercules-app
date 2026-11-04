@@ -22,7 +22,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.remote.interactions.RemoteActivityHelper
 import com.hercules.shared.cognitive.ActionKind
-import com.hercules.shared.cognitive.CheckIn
 import com.hercules.shared.cognitive.Level
 import com.hercules.shared.cognitive.RecommendedAction
 import com.hercules.shared.cognitive.SleepAdvice
@@ -112,7 +111,8 @@ import androidx.wear.compose.navigation.composable
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
 import com.hercules.shared.cognitive.EventStatus
 import com.hercules.shared.cognitive.ReadinessBand
-import com.hercules.shared.cognitive.Verdict
+import com.hercules.shared.readiness.confidenceBasis
+import com.hercules.shared.readiness.PrepStatus
 import com.hercules.shared.cognitive.WatchState
 import com.hercules.shared.cognitive.formatDuration
 import com.hercules.shared.demo.DemoData
@@ -136,10 +136,11 @@ import kotlin.math.sin
 
 /*
  * The watch does three things only:
- *   1. today's readiness (score, band, peak window),
- *   2. what it is tracking (sleep, heart, steps) and whether that data reached the phone,
- *   3. readiness for the big moments planned in the next 7 days.
- * Planning, check-ins and sleep corrections live on the phone.
+ *   1. today's cognitive state (score, band, peak window), or what is missing for one,
+ *   2. Beat the Clock, the same game and rules as on the phone,
+ *   3. what it is tracking (sleep, heart, steps) and whether that data reached the phone,
+ *   4. preparation status for the Moments planned in the next 7 days.
+ * Moments, weights and sleep corrections live on the phone.
  */
 
 private val WCyan = Color(0xFF3FE0FF)
@@ -228,7 +229,7 @@ private fun HerculesWearNav(launch: Intent?, onLaunchHandled: () -> Unit) {
             delay(60_000)
         }
     }
-    // One shared view of "today" for every screen, refreshed each minute and after a check-in.
+    // One shared view of "today" for every screen, refreshed each minute and after Beat the Clock.
     LaunchedEffect(reload) {
         while (true) {
             state = runCatching { ctx.graph.watchState.current() }.getOrNull() ?: state
@@ -240,7 +241,7 @@ private fun HerculesWearNav(launch: Intent?, onLaunchHandled: () -> Unit) {
         val target = i.getStringExtra(WatchReminderWorker.EXTRA_TARGET) ?: return@LaunchedEffect
         eventId = i.getStringExtra(WatchReminderWorker.EXTRA_EVENT)
         when (target) {
-            "CHECK_IN" -> nav.navigate("checkin")
+            "ASSESS" -> nav.navigate("play")
             "EVENT", "REFLECT" -> if (eventId != null) nav.navigate("event")
             "SLEEP" -> nav.navigate("tonight")
         }
@@ -253,26 +254,23 @@ private fun HerculesWearNav(launch: Intent?, onLaunchHandled: () -> Unit) {
                 state,
                 onAction = { a ->
                     when (a.kind) {
-                        ActionKind.CHECK_IN -> nav.navigate("checkin")
+                        ActionKind.ASSESS -> nav.navigate("play")
                         ActionKind.PREPARE -> { eventId = a.eventId; nav.navigate("event") }
                         ActionKind.REFLECT -> { eventId = a.eventId; nav.navigate("event") }
                         ActionKind.SLEEP -> nav.navigate("tonight")
-                        ActionKind.FOCUS -> Unit
+                        ActionKind.PEAK -> Unit
                     }
                 },
-                onCheckIn = { nav.navigate("checkin") },
+                onPlay = { nav.navigate("play") },
                 onTonight = { nav.navigate("tonight") },
                 onStatus = { nav.navigate("status") },
-                onEvent = { id -> eventId = id; nav.navigate("event") },
+                onMoments = { nav.navigate("moments") },
             )
         }
-        composable("checkin") {
-            CheckInScreen(
-                existing = state?.checkIn,
-                onSave = { e, s -> ctx.graph.watchState.saveCheckIn(e, s); reload++ },
-                onDone = { nav.popBackStack() },
-            )
+        composable("moments") {
+            MomentsScreen(state) { id -> eventId = id; nav.navigate("event") }
         }
+        composable("play") { BeatTheClockScreen(state) { reload++; nav.popBackStack() } }
         composable("event") { EventScreen(state?.let { st -> (st.upcoming + listOfNotNull(st.nextEvent)).firstOrNull { it.event.id == eventId } }) }
         composable("tonight") { TonightScreen(state?.brief?.sleep, state?.readiness != null) }
         composable("status") { StatusScreen(state, onSensors = { nav.navigate("sensors") }, onPermissions = { permissions = Permissions.state(ctx) }) }
@@ -298,7 +296,7 @@ internal fun PermissionScreen(onResult: () -> Unit) {
         ScalingLazyColumn(state = listState, contentPadding = padding, modifier = Modifier.fillMaxSize()) {
             item { Herc(HercMood.GOOD, size = 60.dp) }
             item { Text("Allow access", style = MaterialTheme.typography.titleSmall, color = Color.White) }
-            item { WhyRow(Icons.Rounded.Favorite, "Heart rate", "to score your recovery") }
+            item { WhyRow(Icons.Rounded.Favorite, "Heart rate", "to read your recovery") }
             item { WhyRow(Icons.Rounded.Bedtime, "Sleep & motion", "to track your nights") }
             item { WEyebrow("Choose \"all the time\"", WText2) }
             item {
@@ -334,10 +332,10 @@ private val Level.color: Color
 internal fun HomeScreen(
     state: WatchState?,
     onAction: (RecommendedAction) -> Unit,
-    onCheckIn: () -> Unit,
+    onPlay: () -> Unit,
     onTonight: () -> Unit,
     onStatus: () -> Unit,
-    onEvent: (String) -> Unit,
+    onMoments: () -> Unit,
 ) {
     val ctx = LocalContext.current
     val g = ctx.graph
@@ -362,21 +360,30 @@ internal fun HomeScreen(
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(top = 6.dp)) {
                         if (r == null) {
                             Herc(HercMood.SLEEPING, size = 52.dp)
-                            WEyebrow("No score yet", WCyan)
+                            WEyebrow("Insufficient data", WCyan)
+                            val calc = state?.evaluation?.calc
+                            Text(
+                                calc?.insufficientReason ?: "Waiting on the first reading",
+                                fontSize = 10.sp, color = WText2, textAlign = TextAlign.Center, maxLines = 3,
+                                modifier = Modifier.padding(horizontal = 10.dp),
+                            )
+                            calc?.let { WEyebrow("Coverage ${(it.coverage * 100).roundToInt()}%", WText2) }
                         } else {
                             Herc(r.band.mood(), size = 40.dp)
                             CountUp(r.score)
+                            WEyebrow(r.calc.confidence.label, WText2)
+                            Text(r.calc.confidenceBasis, fontSize = 9.sp, color = WText2, textAlign = TextAlign.Center)
                             Text(
                                 r.band.label.uppercase(), color = color, fontSize = 13.sp, letterSpacing = 3.sp, fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.semantics { contentDescription = "Your cognitive state ${r.score}, ${r.band.label}" },
                             )
                         }
-                        brief?.focus?.let { w ->
+                        brief?.peak?.let { w ->
                             Spacer(Modifier.height(4.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Rounded.Timer, null, tint = WCyan, modifier = Modifier.size(12.dp))
                                 Spacer(Modifier.width(4.dp))
-                                WEyebrow(if (brief.focusNow) "Focus now · until ${dk.clock(w.endMs)}" else "Focus ${dk.clock(w.startMs)}–${dk.clock(w.endMs)}", WCyan)
+                                WEyebrow(if (brief.peakNow) "Peak now · until ${dk.clock(w.endMs)}" else "Peak ${dk.clock(w.startMs)}–${dk.clock(w.endMs)}", WCyan)
                             }
                         }
                     }
@@ -384,23 +391,29 @@ internal fun HomeScreen(
                 // 2 · What should I do next?
                 item {
                     if (brief != null) ActionButton(brief.action, onAction)
-                    else Button(onClick = onCheckIn, modifier = Modifier.fillMaxWidth(), icon = { Icon(Icons.Rounded.Bolt, null) }) { Text("Check in") }
+                    else Button(onClick = onPlay, modifier = Modifier.fillMaxWidth(), icon = { Icon(Icons.Rounded.Timer, null) }) { Text("Beat the Clock") }
                 }
                 // A tracking problem blocks tomorrow's score, so it comes before everything else below.
                 if (sync?.problem != null) item { SyncLine(sync, pending, now, onClick = onStatus) }
-                // 3 · Am I ready for what is coming? The next moment, then the rest of the week's.
-                schedule.firstOrNull()?.let { ev -> item { MomentRow(ev, r?.score, now, onClick = { onEvent(ev.event.id) }) } }
                 // Quick actions
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.padding(top = 8.dp)) {
-                        QuickAction(Icons.Rounded.Bolt, "Check-in", done = state?.checkIn != null, onClick = onCheckIn)
+                        QuickAction(Icons.Rounded.Timer, "Clock", done = (state?.playsToday ?: 0) > 0, onClick = onPlay)
                         QuickAction(Icons.Rounded.Bedtime, "Tonight", onClick = onTonight)
                         QuickAction(Icons.Rounded.MonitorHeart, "Tracking", warn = sync?.problem != null, onClick = onStatus)
                     }
                 }
-                if (schedule.size > 1) {
-                    item { SectionLabel("Later") }
-                    items(schedule.drop(1)) { ev -> MomentRow(ev, r?.score, now, onClick = { onEvent(ev.event.id) }) }
+                // Moments have their own page, as on the phone: Home stays about today.
+                if (schedule.isNotEmpty()) {
+                    item {
+                        Button(
+                            onClick = onMoments,
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                            icon = { Icon(Icons.Rounded.Flag, null) },
+                            secondaryLabel = { Text(if (schedule.size == 1) "1 coming up" else "${schedule.size} coming up", maxLines = 1) },
+                            colors = ButtonDefaults.filledTonalButtonColors(),
+                        ) { Text("Moments") }
+                    }
                 }
                 if (sync?.problem == null) item { SyncLine(sync, pending, now, onClick = onStatus) }
             }
@@ -412,14 +425,14 @@ internal fun HomeScreen(
 @Composable
 private fun ActionButton(a: RecommendedAction, onAction: (RecommendedAction) -> Unit) {
     val icon = when (a.kind) {
-        ActionKind.CHECK_IN -> Icons.Rounded.Bolt
+        ActionKind.ASSESS -> Icons.Rounded.Timer
         ActionKind.PREPARE -> Icons.Rounded.Flag
         ActionKind.REFLECT -> Icons.Rounded.RateReview
         ActionKind.SLEEP -> Icons.Rounded.Bedtime
-        ActionKind.FOCUS -> Icons.Rounded.Timer
+        ActionKind.PEAK -> Icons.Rounded.Bolt
     }
-    val tappable = a.kind != ActionKind.FOCUS
-    // "Get ready: Pitch to investors" is two lines on a watch: keep the verb as the title, the subject as the detail.
+    val tappable = a.kind != ActionKind.PEAK
+    // "Gear up: Pitch to investors" is two lines on a watch: keep the verb as the title, the subject as the detail.
     val title = a.title.substringBefore(": ")
     val subject = a.title.substringAfter(": ", "")
     val detail = listOf(subject, a.detail.orEmpty()).filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { null }
@@ -447,6 +460,25 @@ private fun QuickAction(icon: ImageVector, label: String, done: Boolean = false,
     }
 }
 
+/** Every upcoming Moment, soonest first. Tap one for its details. */
+@Composable
+private fun MomentsScreen(state: WatchState?, onEvent: (String) -> Unit) {
+    val schedule = state?.let { s -> s.upcoming.ifEmpty { listOfNotNull(s.nextEvent) } }.orEmpty()
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(30_000L) } }
+    val listState = rememberScalingLazyListState()
+    ScreenScaffold(scrollState = listState) { padding ->
+        ScalingLazyColumn(state = listState, contentPadding = padding, modifier = Modifier.fillMaxSize()) {
+            item { ListHeader { Text("Moments") } }
+            if (schedule.isEmpty()) {
+                item { Text("No Moments coming up. Add one on your phone.", fontSize = 12.sp, color = WText2, textAlign = TextAlign.Center) }
+            } else {
+                items(schedule) { ev -> MomentRow(ev, state?.readiness?.score, now, onClick = { onEvent(ev.event.id) }) }
+            }
+        }
+    }
+}
+
 @Composable
 private fun SectionLabel(text: String) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 10.dp, bottom = 2.dp)) {
@@ -470,12 +502,12 @@ private fun countdown(ev: EventStatus, now: Long): String = when {
     }
 }
 
-/** One planned moment: title, countdown, prep progress, and the readiness forecast as a small ring. */
+/** One planned moment: title, countdown, preparation status, and the latest score as a small ring. */
 @Composable
 private fun MomentRow(ev: EventStatus, todayScore: Int?, now: Long, onClick: () -> Unit) {
-    val forecast = ev.advice?.expectedScore ?: ev.projectedScore ?: todayScore.takeIf { ev.daysUntil <= 0 }
-    val accent = ev.advice?.verdict?.color ?: forecast?.let { scoreColor(it) } ?: WCyan
-    val steps = if (ev.todayTasks.isNotEmpty()) "${ev.doneTaskIds.size}/${ev.todayTasks.size} steps" else null
+    val forecast = ev.preparation.latestScore ?: todayScore
+    val accent = ev.preparation.status.color
+    val steps = ev.preparation.status.label + if (ev.todayTasks.isNotEmpty()) " · ${ev.doneTaskIds.size}/${ev.todayTasks.size}" else ""
     Row(
         Modifier.fillMaxWidth().padding(vertical = 2.dp).clip(RoundedCornerShape(14.dp))
             .border(1.dp, WLine, RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 7.dp),
@@ -484,7 +516,7 @@ private fun MomentRow(ev: EventStatus, todayScore: Int?, now: Long, onClick: () 
         Column(Modifier.weight(1f)) {
             Text(ev.event.title, style = MaterialTheme.typography.labelMedium, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(countdown(ev, now), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = accent, maxLines = 1)
-            if (steps != null) Text(steps, fontSize = 10.sp, color = WText2, maxLines = 1)
+            Text(steps, fontSize = 10.sp, color = WText2, maxLines = 1)
         }
         Spacer(Modifier.width(6.dp))
         ForecastRing(forecast, accent, Modifier.size(32.dp))
@@ -498,64 +530,12 @@ private fun SyncLine(s: SyncStatus.State?, pending: Long, now: Long, onClick: ()
     val (icon, text, tint) = when {
         problem != null -> Triple(Icons.Rounded.CloudOff, "Phone out of reach", Color(0xFFFFC857))
         s?.lastOkMs != null -> Triple(Icons.Rounded.CloudDone, "Synced ${ago(now - s.lastOkMs)}", WText2)
-        else -> Triple(Icons.Rounded.CloudDone, if (pending > 0) "Waiting to sync" else "Tracking starts now", WText2)
+        else -> Triple(Icons.Rounded.CloudDone, if (pending > 0) "Waiting to sync" else "Tracking is live", WText2)
     }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(6.dp)) {
         Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(12.dp))
         Spacer(Modifier.width(5.dp))
         Text(text, fontSize = 10.sp, color = tint)
-    }
-}
-
-// ------------------------------------------------------------------ check-in
-
-/** Two taps: energy, then stress. Big targets, nothing to type. */
-@Composable
-internal fun CheckInScreen(existing: CheckIn?, onSave: suspend (Int, Int) -> Unit, onDone: () -> Unit) {
-    var step by remember { mutableIntStateOf(0) }
-    var energy by remember { mutableIntStateOf(existing?.energy ?: 3) }
-    var saved by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    val listState = rememberScalingLazyListState()
-    LaunchedEffect(saved) { if (saved) { delay(1400); onDone() } }
-
-    ScreenScaffold(scrollState = listState) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-            when {
-                saved -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Herc(HercMood.GOOD, size = 76.dp)
-                    Text("Saved", style = MaterialTheme.typography.titleMedium, color = Color.White)
-                    WEyebrow("Score updated", WText2)
-                }
-                else -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    WEyebrow(if (step == 0) "Energy · 1 of 2" else "Stress · 2 of 2", WCyan)
-                    Text(if (step == 0) "How energetic?" else "How stressed?", fontSize = 14.sp, color = Color.White)
-                    Text(if (step == 0) "1 drained · 5 charged" else "1 calm · 5 tense", fontSize = 9.sp, color = WText2)
-                    Spacer(Modifier.height(6.dp))
-                    RatingGrid(good = { v -> if (step == 0) scoreColor(v * 20) else scoreColor(120 - v * 20) }) { v ->
-                        if (step == 0) { energy = v; step = 1 } else scope.launch { onSave(energy, v); saved = true }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/** 3 + 2 big round buttons: comfortable to hit on a small round screen. */
-@Composable
-private fun RatingGrid(good: (Int) -> Color, onPick: (Int) -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        listOf(1..3, 4..5).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEach { v ->
-                    Box(
-                        Modifier.size(44.dp).clip(CircleShape).background(good(v).copy(alpha = 0.16f)).border(1.5.dp, good(v), CircleShape)
-                            .clickable { onPick(v) }.semantics { contentDescription = "$v of 5" },
-                        contentAlignment = Alignment.Center,
-                    ) { Text("$v", fontSize = 20.sp, fontWeight = FontWeight.Medium, color = Color.White) }
-                }
-            }
-        }
     }
 }
 
@@ -572,11 +552,11 @@ internal fun EventScreen(ev: EventStatus?) {
     ScreenScaffold(scrollState = listState) { padding ->
         ScalingLazyColumn(state = listState, contentPadding = padding, modifier = Modifier.fillMaxSize()) {
             if (ev == null) {
-                item { Text("Open the moment on your phone to see it here.", fontSize = 12.sp, color = WText2, textAlign = TextAlign.Center) }
+                item { Text("Open the Moment on your phone to see it here.", fontSize = 12.sp, color = WText2, textAlign = TextAlign.Center) }
                 return@ScalingLazyColumn
             }
-            val forecast = ev.advice?.expectedScore ?: ev.projectedScore
-            val accent = ev.advice?.verdict?.color ?: forecast?.let { scoreColor(it) } ?: WCyan
+            val forecast = ev.preparation.latestScore
+            val accent = ev.preparation.status.color
             item { Text(ev.event.title, style = MaterialTheme.typography.titleSmall, color = Color.White, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis) }
             item {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -587,7 +567,9 @@ internal fun EventScreen(ev: EventStatus?) {
                     forecast?.let { ForecastRing(it, accent, Modifier.size(38.dp)) }
                 }
             }
-            ev.advice?.let { a -> item { Pill(a.verdict.label, a.verdict.color) } }
+            item { Pill(ev.preparation.status.label, accent) }
+            item { Text(ev.preparation.peak.label, fontSize = 10.sp, color = WText2, textAlign = TextAlign.Center) }
+            items(ev.preparation.reasons.take(3)) { reason -> Text("· $reason", fontSize = 11.sp, color = Color.White, maxLines = 3) }
             if (ev.todayTasks.isNotEmpty()) {
                 item { SectionLabel("Today · ${ev.doneTaskIds.size}/${ev.todayTasks.size} steps") }
                 items(ev.todayTasks.take(5)) { t ->
@@ -632,12 +614,12 @@ internal fun TonightScreen(advice: SleepAdvice?, hasScore: Boolean) {
         ScalingLazyColumn(state = listState, contentPadding = padding, modifier = Modifier.fillMaxSize()) {
             item { Herc(HercMood.SLEEPING, size = 44.dp) }
             if (advice == null) {
-                item { Text("Sleep plan appears once your day is scored.", fontSize = 12.sp, color = WText2, textAlign = TextAlign.Center) }
+                item { Text("Your sleep game plan shows up once today is scored.", fontSize = 12.sp, color = WText2, textAlign = TextAlign.Center) }
                 return@ScalingLazyColumn
             }
-            item { WEyebrow("Be in bed by", WText2) }
+            item { WEyebrow("Lights out by", WText2) }
             item { Text(dk.clock(advice.bedtimeMs), fontSize = 36.sp, fontWeight = FontWeight.Thin, color = Color.White) }
-            advice.shiftEarlierMinutes?.let { item { Text("Try ${it} min earlier than last night.", fontSize = 12.sp, color = Color.White, textAlign = TextAlign.Center) } }
+            advice.shiftEarlierMinutes?.let { item { Text("Aim ${it} min earlier than last night.", fontSize = 12.sp, color = Color.White, textAlign = TextAlign.Center) } }
             advice.tomorrowNote?.let { item { Text(it, fontSize = 11.sp, color = WText2, textAlign = TextAlign.Center) } }
             if (advice.ifShort != null && advice.ifTarget != null) {
                 item { SectionLabel("Tomorrow, estimated") }
@@ -690,7 +672,7 @@ internal fun StatusScreen(state: WatchState?, onSensors: () -> Unit, onPermissio
                         title = if (heartOk) "Heart rate on" else if (!tracking) "Tracking is off" else "No heart reading yet",
                         hint = when {
                             !tracking -> "Tap Turn on below."
-                            !hrFresh -> "Wear the watch snugly."
+                            !hrFresh -> "Wear it snug on your wrist."
                             else -> "${latestHr!!.value.toInt()} bpm · ${ago(now - latestHr!!.startMs)}"
                         },
                     )
@@ -721,7 +703,7 @@ internal fun StatusScreen(state: WatchState?, onSensors: () -> Unit, onPermissio
                     StatusLine(
                         ok = mins != null, icon = Icons.Rounded.Bedtime,
                         title = if (mins != null) "Last night ${formatDuration(mins)}" else "No sleep yet",
-                        hint = if (mins != null) "Measured by this watch." else "Sleep with the watch on.",
+                        hint = if (mins != null) "Measured by this watch." else "Wear it to bed tonight.",
                     )
                 },
             ).sortedBy { it.first } // false (needs attention) first; stable, so the order above holds within each group
@@ -960,12 +942,11 @@ private val ReadinessBand.color: Color
         ReadinessBand.TERKURAS -> Color(0xFFFF4D6D)
     }
 
-private val Verdict.color: Color
+private val PrepStatus.color: Color
     get() = when (this) {
-        Verdict.GO -> Color(0xFF2EE6A0)
-        Verdict.GO_WITH_PREP -> Color(0xFF9BE35A)
-        Verdict.CONSIDER_RESCHEDULE -> Color(0xFFFFC857)
-        Verdict.RESCHEDULE -> Color(0xFFFF4D6D)
+        PrepStatus.ON_TRACK -> Color(0xFF2EE6A0)
+        PrepStatus.NEEDS_ATTENTION -> Color(0xFFFFC857)
+        PrepStatus.INSUFFICIENT_DATA -> WText2
     }
 
 private val SensorKind.icon: ImageVector

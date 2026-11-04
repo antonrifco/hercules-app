@@ -90,7 +90,7 @@ fun LaunchArt(show: Boolean, durationMs: Long = 2_400) {
                 modifier = Modifier.offset { androidx.compose.ui.unit.IntOffset(0, (128.dp + 16.dp * (1f - words.value)).roundToPx()) }.graphicsLayer { alpha = words.value },
             ) {
                 Text("HERCULES", color = Text1, fontSize = 18.sp, letterSpacing = 8.sp, fontWeight = FontWeight.Medium)
-                Text("Know when your mind is ready", color = Text2, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                Text("Know when you're ready to roar", color = Text2, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
             }
         }
     }
@@ -104,11 +104,11 @@ val SplashPlays = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_C
 private class Step(val image: Int, val eyebrow: String, val title: String, val body: String, val herc: HercMood? = null)
 
 private val Steps = listOf(
-    Step(R.drawable.ill_score, "01 · Meet Herc", "Know when your brain is ready", "Herc turns your sleep and heart rate into a daily score from 1 to 100. His eyes change colour with it, from Prime to Drained.", HercMood.PRIME),
-    Step(R.drawable.ill_no_watch, "02 · The watch", "Wear it to bed", "Install Hercules on your watch and open it once. It asks to read heart rate and sleep, only to score your nights. Your data stays on your devices."),
-    Step(R.drawable.ill_sleep, "03 · Sleep", "Nothing to log", "Sleep is tracked for you. The first week, Herc learns what normal looks like for you.", HercMood.SLEEPING),
-    Step(R.drawable.ill_plan, "04 · The plan", "Aim for the big day", "Add an interview, exam or pitch. Get a short daily checklist and, on the day, a clear go or wait."),
-    Step(R.drawable.ill_checkin, "05 · Reminders", "At most three a day", "Morning score, moment prep and bedtime. Switch each off any time in Setup."),
+    Step(R.drawable.ill_score, "01 · Meet Herc", "Know when you're at your sharpest", "Herc turns your sleep, heart, movement, daylight and a quick timing game into one score from 1 to 100. Watch his eyes: green means Prime, red means recharge.", HercMood.PRIME),
+    Step(R.drawable.ill_sleep, "02 · Health Connect", "Zero logging", "Herc reads sleep, heart rate and activity from Health Connect, and never writes to it. In week one he learns what your normal looks like.", HercMood.SLEEPING),
+    Step(R.drawable.ill_checkin, "03 · Beat the Clock", "A 2-minute game. Play any time.", "Guess when 15 to 30 seconds are up, on your phone or watch. Your first game counts; Herc learns your normal and finds your peak window."),
+    Step(R.drawable.ill_plan, "04 · Moments", "Win the big day", "Add an interview, exam or pitch up to 7 days out. Get daily prep steps and a straight answer: On Track or Needs Attention."),
+    Step(R.drawable.ill_no_watch, "05 · The watch", "Optional, but powerful", "The Hercules watch adds overnight tracking and Beat the Clock on your wrist. Your data never leaves your devices."),
 )
 
 private const val PREFS = "hercules_ui"

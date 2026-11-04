@@ -69,4 +69,5 @@ dependencies {
         debugImplementation("androidx.compose.ui:ui-test-manifest")
     }
     implementation(libs.androidx.work)
+    implementation(libs.health.connect)
 }

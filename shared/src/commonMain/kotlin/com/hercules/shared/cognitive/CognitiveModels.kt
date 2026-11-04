@@ -1,8 +1,19 @@
 package com.hercules.shared.cognitive
 
+import com.hercules.shared.readiness.AssessmentWindow
+import com.hercules.shared.readiness.Dimension
+import com.hercules.shared.readiness.DimensionScore
+import com.hercules.shared.readiness.MomentStatus
+import com.hercules.shared.readiness.PeakWindowPrediction
+import com.hercules.shared.readiness.PrepPhase
+import com.hercules.shared.readiness.PrepTask
+import com.hercules.shared.readiness.Preparation
+import com.hercules.shared.readiness.ReadinessCalculation
+import com.hercules.shared.readiness.ReadinessConfidence
+import com.hercules.shared.readiness.Urgency
 import kotlinx.serialization.Serializable
 
-/** Main sleep that ended on the morning of [dayKey]. */
+/** The resolved main sleep that ended on the morning of [dayKey], from the best available provider. */
 @Serializable
 data class SleepNight(
     val dayKey: String,
@@ -12,53 +23,34 @@ data class SleepNight(
     val sleepingHrAvg: Double? = null,
     val sleepingHrLow: Double? = null,
     val source: String = SOURCE_SENSOR,
+    /** Time awake in bed; null when the provider reports neither awake time nor stages. */
+    val awakeMinutes: Int? = null,
+    val deepMinutes: Int? = null,
+    val remMinutes: Int? = null,
+    val lightMinutes: Int? = null,
+    /** Package (Health Connect data origin) or device that recorded it. */
+    val provider: String? = null,
 ) {
     val corrected: Boolean get() = source == SOURCE_USER
 
     companion object {
+        /** Detected by the Hercules watch. */
         const val SOURCE_SENSOR = "sensor"
+        /** Read from Health Connect. */
+        const val SOURCE_HEALTH_CONNECT = "health_connect"
         /** Times the user corrected; automatic detection never overwrites these. */
         const val SOURCE_USER = "user"
     }
 }
 
-/** Morning self-report. Energy and stress are on a 1..5 scale. Sleep is never asked: it comes from the watch. */
-@Serializable
-data class CheckIn(
-    val dayKey: String,
-    val sleepHours: Double?,
-    val energy: Int,
-    val stress: Int,
-    val createdMs: Long,
-)
-
+/** Readiness classifications (spec §2.2). Enum names are kept from earlier builds for stored data. */
 @Serializable
 enum class ReadinessBand(val label: String, val minScore: Int, val headline: String, val meaning: String) {
-    PRIMA(
-        "Prime", 85,
-        "Prime condition for important decisions",
-        "Focus, working memory and emotional control are at their best. Ideal for interviews, negotiations or big decisions.",
-    ),
-    BAIK(
-        "Good", 70,
-        "Good condition for important work",
-        "Ready for important work. A short warm-up and the right hour get the most out of today.",
-    ),
-    CUKUP(
-        "Fair", 55,
-        "Fair: choose your timing",
-        "You can still do well if you schedule important work in your peak window.",
-    ),
-    RENDAH(
-        "Low", 40,
-        "Postpone big decisions that aren't urgent",
-        "Judgement and impulse control tend to drop. If it has to be today, keep it to your peak window.",
-    ),
-    TERKURAS(
-        "Drained", 0,
-        "Make recovery today's priority",
-        "Body and brain need to recover. If possible, reschedule important things and stick to light tasks.",
-    );
+    PRIMA("Prime", 85, "Prime: ready for your hardest work", "Every signal is firing. Take on the work that matters most."),
+    BAIK("Good", 70, "Good: ready for important work", "You're in good shape. Point your best hours at what matters."),
+    CUKUP("Fair", 55, "Fair: choose your battles", "You can still win today. Save demanding work for your stronger hours."),
+    RENDAH("Low", 40, "Low: keep it lean", "Running below your usual. Keep big tasks short and well prepared."),
+    TERKURAS("Drained", 0, "Drained: recharge first", "Body and mind need a reset. Go light today and come back stronger.");
 
     companion object {
         fun of(score: Int): ReadinessBand = entries.first { score >= it.minScore }
@@ -66,58 +58,45 @@ enum class ReadinessBand(val label: String, val minScore: Int, val headline: Str
 }
 
 @Serializable
-enum class ComponentKind(val label: String, val weight: Double, val explanation: String) {
-    SLEEP("Sleep", 0.40, "Last night's sleep duration. The biggest single factor for focus, memory and decision-making."),
-    RECOVERY("Recovery", 0.30, "Sleeping/resting heart rate compared with your personal average. Higher = your body is under strain."),
-    SELF_REPORT("How you feel", 0.15, "Energy and stress from the morning check-in. Your own perception is valuable data."),
-    ACTIVITY("Activity", 0.15, "Yesterday's activity compared with your usual. Too little or too much both lower readiness."),
-}
-
-@Serializable
-data class ReadinessComponent(val kind: ComponentKind, val score: Int, val detail: String)
-
-@Serializable
-enum class Confidence(val label: String) {
-    HIGH("High accuracy"),
-    MEDIUM("Medium accuracy"),
-    LOW("Calibrating"),
-}
-
-@Serializable
-enum class WindowKind(val label: String, val adjustment: Int) {
-    WARMUP("Waking up", -10),
-    PEAK("Peak focus", 3),
-    STEADY("Steady", -2),
-    DIP("Afternoon dip", -8),
-    SECOND_PEAK("Second wind", 0),
-    EVENING("Winding down", -8),
-    LATE("Late", -18),
-}
-
-@Serializable
-data class TimeWindow(val kind: WindowKind, val startMs: Long, val endMs: Long)
-
-@Serializable
 enum class Tone { POSITIVE, CAUTION, ACTION }
 
 @Serializable
 data class Suggestion(val title: String, val detail: String, val tone: Tone)
 
+/** A clock range for an assessment window on a given day. */
+@Serializable
+data class TimeWindow(val window: AssessmentWindow, val startMs: Long, val endMs: Long)
+
+/** A published score (coverage ≥ 70% and sleep available). Everything it was calculated with travels along. */
 @Serializable
 data class Readiness(
     val dayKey: String,
     val score: Int,
     val band: ReadinessBand,
-    val components: List<ReadinessComponent>,
-    val confidence: Confidence,
+    val calc: ReadinessCalculation,
+    /** Valid sleep nights behind the personal baselines (for "learning your patterns"). */
     val baselineDays: Int,
     val wakeMs: Long,
-    val windows: List<TimeWindow>,
     val suggestions: List<Suggestion>,
+    val computedMs: Long,
+) {
+    val coverage: Double get() = calc.coverage
+    val confidence: ReadinessConfidence get() = calc.confidence
+    val dimensions: List<DimensionScore> get() = calc.dimensions
+    fun dimension(d: Dimension): DimensionScore = calc.dimensions.first { it.dimension == d }
+}
+
+/** Today's evaluation: a published [readiness], or the reasons there isn't one yet (INSUFFICIENT_DATA). */
+@Serializable
+data class Evaluation(
+    val dayKey: String,
+    val calc: ReadinessCalculation,
+    val readiness: Readiness?,
+    val wakeMs: Long,
     val computedMs: Long,
 )
 
-// ------------------------------------------------------------------ planning
+// ------------------------------------------------------------------ moments
 
 @Serializable
 enum class EventType(val label: String) {
@@ -137,7 +116,7 @@ enum class EventType(val label: String) {
             DECISION to listOf("decision", "decide", "choose", "board", "invest"),
         )
 
-        /** Infers the kind of moment from its title, so the user never has to pick one. */
+        /** Infers the kind of moment from its title (only for the icon), so the user never has to pick one. */
         fun fromTitle(title: String): EventType {
             val t = title.lowercase()
             return KEYWORDS.firstOrNull { (_, words) -> words.any { it in t } }?.first ?: OTHER
@@ -145,51 +124,21 @@ enum class EventType(val label: String) {
     }
 }
 
-@Serializable
-enum class Importance(val label: String) {
-    NORMAL("Normal"),
-    HIGH("Important"),
-    CRITICAL("Critical"),
-}
-
+/** A Moment (spec §8.2). The class keeps its earlier name; the UI always says "moment". */
 @Serializable
 data class PlanEvent(
     val id: String,
     val title: String,
     val type: EventType,
     val startMs: Long,
-    val importance: Importance,
+    val urgency: Urgency,
     val notes: String = "",
     val createdMs: Long,
-)
-
-@Serializable
-enum class PrepPhase(val label: String, val description: String) {
-    FOUNDATION("Build the foundation", "Lock in a consistent sleep pattern."),
-    SHARPEN("Sharpen", "Protect your sleep and cut anything that hurts recovery."),
-    EVE("The day before", "Wind down early and protect tonight's sleep."),
-    DAY("The big day", "Wake up body and brain, then perform at your best hour."),
-    DONE("Done", "This moment is over."),
-}
-
-@Serializable
-data class PrepTask(val id: String, val title: String, val detail: String)
-
-@Serializable
-enum class Verdict(val label: String) {
-    GO("Go ahead"),
-    GO_WITH_PREP("Go, with prep"),
-    CONSIDER_RESCHEDULE("Consider rescheduling"),
-    RESCHEDULE("Postpone if you can"),
-}
-
-@Serializable
-data class DecisionAdvice(
-    val verdict: Verdict,
-    val expectedScore: Int,
-    val headline: String,
-    val reasons: List<String>,
-    val actions: List<String>,
+    val timezoneId: String = "",
+    val status: MomentStatus = MomentStatus.ACTIVE,
+    val updatedMs: Long = createdMs,
+    val completedMs: Long? = null,
+    val cancelledMs: Long? = null,
 )
 
 @Serializable
@@ -202,10 +151,8 @@ data class EventStatus(
     val phase: PrepPhase,
     val todayTasks: List<PrepTask>,
     val doneTaskIds: Set<String>,
-    val prepScore: Int?,
-    val projectedScore: Int?,
+    val preparation: Preparation,
     val history: List<DayScore>,
-    val advice: DecisionAdvice?,
 )
 
 /** Compact state the phone pushes to the watch (Wearable DataClient). */
@@ -214,15 +161,30 @@ data class WatchState(
     val readiness: Readiness?,
     val nextEvent: EventStatus?,
     val updatedMs: Long,
-    /** Upcoming big moments (up to 7 days), soonest first, for the watch's schedule list. */
+    /** Upcoming Moments, soonest first. */
     val upcoming: List<EventStatus> = emptyList(),
-    /** Today's check-in (null = not done yet), so the watch can offer it or show it as done. */
-    val checkIn: CheckIn? = null,
     val sleepMinutes: Int? = null,
     /** The phone's message and next step, so both screens always say the same thing. */
     val brief: DailyBrief? = null,
-    /** Events already rated on the phone, so the watch doesn't ask again. */
+    /** Moments already rated on the phone, so the watch doesn't ask again. */
     val reflectedIds: Set<String> = emptySet(),
     /** Which reminders the user turned on (set on the phone), so the watch follows the same choices. */
     val reminders: NudgePrefs = NudgePrefs(),
+    /** Today's evaluation, including why there's no score yet. */
+    val evaluation: Evaluation? = null,
+    val peak: PeakWindowPrediction? = null,
+    /** Beat the Clock runs played today on either device. */
+    val playsToday: Int = 0,
+    /** Wake time the phone uses today, so both devices file runs under the same part of the day. */
+    val wakeMs: Long? = null,
 )
+
+/** How a Moment felt afterwards, 1 (rough) to 5 (great). Shown next to readiness, never claimed to be caused by it. */
+@Serializable
+data class EventReflection(val eventId: String, val rating: Int, val createdMs: Long)
+
+/** "6h 40m" */
+fun formatDuration(minutes: Int): String = if (minutes >= 60) "${minutes / 60}h ${minutes % 60}m" else "${minutes}m"
+
+internal const val MIN_MS = 60_000L
+internal const val HOUR_MS = 60 * MIN_MS

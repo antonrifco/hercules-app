@@ -18,18 +18,13 @@ import com.hercules.shared.createHerculesDatabase
 import com.hercules.shared.data.HerculesRepository
 import com.hercules.shared.insights.InsightsService
 import com.hercules.shared.insights.RetentionPolicy
-import com.hercules.shared.sync.NoopRemoteSink
-import com.hercules.shared.sync.SyncService
+import com.hercules.mobile.health.HealthConnectImporter
+import com.hercules.mobile.health.LightSampler
+import com.hercules.mobile.health.PhoneCapabilities
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.tasks.await
-
-/**
- * Flip to true and replace [NoopRemoteSink] with an HttpRemoteSink (Ktor) once the backend exists.
- * Everything received from the watch is already queued (synced = 0) for that moment.
- */
-const val SERVER_SYNC_ENABLED = false
 
 class MobileGraph(private val context: Context) {
     val deviceId: String = DeviceId.get(context)
@@ -38,7 +33,9 @@ class MobileGraph(private val context: Context) {
     val insights = InsightsService(repo, clock = System::currentTimeMillis)
     val retention = RetentionPolicy(repo)
     val cognitive = CognitiveService(repo, CognitiveStore(db, Dispatchers.IO), clock = System::currentTimeMillis)
-    val serverSync = SyncService(repo, NoopRemoteSink, deviceId, clock = System::currentTimeMillis)
+    val healthConnect = HealthConnectImporter(context, cognitive.store, cognitive.dayKeys)
+    val light = LightSampler(context, cognitive.store)
+    val capabilities by lazy { PhoneCapabilities(context, healthConnect, light, cognitive.store, cognitive.dayKeys) { lastWatchSync.value } }
 
     private val prefs = context.getSharedPreferences("hercules", Context.MODE_PRIVATE)
     private val _lastWatchSync = MutableStateFlow(prefs.getLong(KEY_LAST_SYNC, 0L).takeIf { it > 0 })
@@ -47,6 +44,13 @@ class MobileGraph(private val context: Context) {
     fun markWatchSync(atMs: Long) {
         prefs.edit { putLong(KEY_LAST_SYNC, atMs) }
         _lastWatchSync.value = atMs
+    }
+
+    /** Pulls new Health Connect records (30 days the first time, then the last 3) and recalculates. */
+    suspend fun importHealthAndRefresh() {
+        val days = if (healthConnect.lastImportMs() == null) 30 else 3
+        runCatching { healthConnect.import(days) }.onFailure { Log.w(TAG, "health import failed", it) }
+        refreshAndPushToWatch()
     }
 
     /** Recompute readiness and give the watch the latest score + next event. Safe to call often. */
@@ -105,6 +109,7 @@ open class HerculesMobileApp : Application() {
         graph = MobileGraph(this)
         com.hercules.mobile.notify.Notifier.ensureChannel(this)
         com.hercules.mobile.notify.ReminderWorker.schedule(this)
+        com.hercules.mobile.health.HealthWorker.schedule(this)
     }
 }
 

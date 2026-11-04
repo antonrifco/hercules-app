@@ -1,12 +1,14 @@
 package com.hercules.shared.cognitive
 
 import com.hercules.shared.insights.DayKeys
+import com.hercules.shared.readiness.PeakWindowPrediction
+import com.hercules.shared.readiness.PrepPhase
 import kotlinx.serialization.Serializable
 
 /** Where a notification should land when tapped. Phone and watch map these to their own screens. */
-enum class NudgeTarget { TODAY, CHECK_IN, EVENT, REFLECT, SLEEP }
+enum class NudgeTarget { TODAY, ASSESS, EVENT, REFLECT, SLEEP }
 
-enum class NudgeKind { MORNING, EVENT_EVE, EVENT_SOON, FOCUS, EVENING, REFLECT }
+enum class NudgeKind { MORNING, ASSESS, EVENT_EVE, EVENT_SOON, FOCUS, EVENING, REFLECT }
 
 data class Nudge(
     val id: String,
@@ -26,6 +28,8 @@ data class NudgePrefs(
     val evening: Boolean = true,
     val reflect: Boolean = true,
     val focus: Boolean = false,
+    /** A reminder when a Beat the Clock window opens. */
+    val assess: Boolean = true,
 )
 
 /** Who delivers a reminder so the wrist and the pocket never both buzz. */
@@ -49,70 +53,78 @@ class NudgePlanner(private val dayKeys: DayKeys, private val coach: Coach) {
     companion object {
         /** A reminder stays valid this long after its time, so a late phone wake-up still delivers it. */
         const val VALID_MS = 90 * 60_000L
+        const val ASSESS_AFTER_WAKE_MS = 2 * 60 * 60_000L
     }
 
     fun due(
         nowMs: Long,
         readiness: Readiness?,
-        checkIn: CheckIn?,
         sleep: SleepNight?,
         events: List<EventStatus>,
         reflectedIds: Set<String>,
         baselineWakeMinute: Int?,
         prefs: NudgePrefs,
         alreadySent: Set<String>,
+        wakeMs: Long?,
+        playsToday: Int,
+        peak: PeakWindowPrediction?,
     ): List<Nudge> {
         val today = dayKeys.of(nowMs)
         val out = mutableListOf<Nudge>()
+        val todayPeak = coach.peakToday(peak, wakeMs, nowMs)?.first
 
         if (prefs.morning && readiness != null) {
-            val f = coach.focus(readiness, readiness.wakeMs)
-            val level = readiness.band.level.label
             out += Nudge(
                 "morning:$today", NudgeKind.MORNING, readiness.wakeMs + 45 * MIN_MS,
-                "Readiness ${readiness.score} · $level",
-                listOfNotNull(f?.first?.let { "Best focus ${dayKeys.clock(it.startMs)}–${dayKeys.clock(it.endMs)}." }, if (checkIn == null) "Quick check-in?" else null).joinToString(" "),
-                if (checkIn == null) NudgeTarget.CHECK_IN else NudgeTarget.TODAY,
+                "Your cognitive state: ${readiness.score} · ${readiness.band.label}",
+                todayPeak?.let { "Peak window ${dayKeys.clock(it.startMs)}–${dayKeys.clock(it.endMs)}." } ?: coach.headline(readiness.band),
+                NudgeTarget.TODAY,
+            )
+        }
+
+        // Optional and any time, so at most one gentle nudge a day, and none once you've played.
+        if (prefs.assess && wakeMs != null && playsToday == 0) {
+            out += Nudge(
+                "assess:$today", NudgeKind.ASSESS, wakeMs + ASSESS_AFTER_WAKE_MS,
+                "Beat the Clock?",
+                "A 2-minute game that shows how sharp you are today.",
+                NudgeTarget.ASSESS,
             )
         }
 
         if (prefs.event) {
             for (e in events.filter { it.phase != PrepPhase.DONE }) {
                 val dayBefore = dayKeys.plusDays(dayKeys.of(e.event.startMs), -1)
-                if (dayBefore == today || e.daysUntil == 1) {
-                    val left = e.todayTasks.size - e.doneTaskIds.size
+                if (dayBefore == today) {
+                    val left = e.todayTasks.count { it.id !in e.doneTaskIds }
                     out += Nudge(
                         "eve:${e.event.id}", NudgeKind.EVENT_EVE, dayKeys.startOf(today) + 18 * HOUR_MS,
                         "Tomorrow: ${e.event.title}",
-                        if (left > 0) "$left prep steps left. Sleep well tonight." else "Prep done. Sleep well tonight.",
+                        if (left > 0) "$left prep steps to go. Then get a strong night's sleep." else "Prep done. Now win the night: sleep well.",
                         NudgeTarget.EVENT, e.event.id,
                     )
                 }
                 if (e.daysUntil == 0) {
-                    val expected = e.advice?.expectedScore
                     out += Nudge(
                         "soon:${e.event.id}", NudgeKind.EVENT_SOON, e.event.startMs - 2 * HOUR_MS,
                         "${e.event.title} at ${dayKeys.clock(e.event.startMs)}",
-                        listOfNotNull(e.advice?.verdict?.label, expected?.let { "Expected readiness $it." }).joinToString(" · ").ifEmpty { "Time to get ready." },
+                        "${e.preparation.status.label} · ${e.preparation.peak.label}",
                         NudgeTarget.EVENT, e.event.id,
                     )
                 }
             }
         }
 
-        if (prefs.focus && readiness != null) {
-            readiness.windows.firstOrNull { it.kind == WindowKind.PEAK }?.let {
-                out += Nudge("focus:$today", NudgeKind.FOCUS, it.startMs - 10 * MIN_MS, "Peak focus starts at ${dayKeys.clock(it.startMs)}", "Save your hardest task for now.", NudgeTarget.TODAY)
-            }
+        if (prefs.focus && todayPeak != null) {
+            out += Nudge("focus:$today", NudgeKind.FOCUS, todayPeak.startMs - 10 * MIN_MS, "Peak window opens at ${dayKeys.clock(todayPeak.startMs)}", "Line up your hardest task.", NudgeTarget.TODAY)
         }
 
         if (prefs.evening) {
             val advice = coach.sleepAdvice(nowMs, readiness, sleep, baselineWakeMinute, events)
-            // Bedtime is tonight's: if it already passed after midnight math, it belongs to the next calendar day.
             out += Nudge(
                 "evening:$today", NudgeKind.EVENING, advice.bedtimeMs - 60 * MIN_MS,
-                "Be in bed by ${dayKeys.clock(advice.bedtimeMs)}",
-                listOfNotNull(advice.tomorrowNote, advice.shiftEarlierMinutes?.let { "Try sleeping $it min earlier." }).joinToString(" ").ifEmpty { "A good night lifts tomorrow's score." },
+                "Lights out by ${dayKeys.clock(advice.bedtimeMs)}",
+                listOfNotNull(advice.tomorrowNote, advice.shiftEarlierMinutes?.let { "Aim $it min earlier than last night." }).joinToString(" ").ifEmpty { "A strong night powers tomorrow's score." },
                 NudgeTarget.SLEEP,
             )
         }
@@ -120,7 +132,7 @@ class NudgePlanner(private val dayKeys: DayKeys, private val coach: Coach) {
         if (prefs.reflect) {
             for (e in events) {
                 if (e.event.id !in reflectedIds) {
-                    out += Nudge("reflect:${e.event.id}", NudgeKind.REFLECT, e.event.startMs + 90 * MIN_MS, "How did ${e.event.title} go?", "Takes 5 seconds.", NudgeTarget.REFLECT, e.event.id)
+                    out += Nudge("reflect:${e.event.id}", NudgeKind.REFLECT, e.event.startMs + 90 * MIN_MS, "How did ${e.event.title} go?", "Tell Herc in 5 seconds.", NudgeTarget.REFLECT, e.event.id)
                 }
             }
         }

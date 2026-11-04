@@ -42,8 +42,17 @@ class WatchReminderWorker(context: Context, params: WorkerParameters) : Coroutin
         val state = runCatching { g.watchState.current(now) }.getOrNull() ?: return Result.success()
         val today = g.cognitive.today()
         val due = NudgePlanner(g.cognitive.dayKeys, g.cognitive.daily).due(
-            now, state.readiness, state.checkIn, g.cognitive.store.sleep(today), state.upcoming, state.reflectedIds,
-            g.cognitive.baseline(today).wakeMinuteOfDay, state.reminders, sent(ctx),
+            nowMs = now,
+            readiness = state.readiness,
+            sleep = g.cognitive.store.sleep(today),
+            events = state.upcoming,
+            reflectedIds = state.reflectedIds,
+            baselineWakeMinute = g.cognitive.typicalWakeMinute(today),
+            prefs = state.reminders,
+            alreadySent = sent(ctx),
+            wakeMs = state.wakeMs ?: g.cognitive.wakeMs(today),
+            playsToday = state.playsToday,
+            peak = state.peak,
         )
         due.forEach { if (post(ctx, it)) markSent(ctx, it.id) }
         return Result.success()

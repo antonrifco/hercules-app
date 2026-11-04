@@ -34,7 +34,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.hercules.shared.cognitive.ComponentKind
+import com.hercules.shared.readiness.Dimension
+import androidx.compose.material.icons.rounded.WbSunny
+import androidx.compose.material.icons.rounded.Timer
 import com.hercules.shared.cognitive.EventType
 import com.hercules.shared.cognitive.ReadinessBand
 import com.hercules.shared.cognitive.Tone
@@ -57,12 +59,13 @@ val Tone.icon: ImageVector
         Tone.ACTION -> Icons.Rounded.TipsAndUpdates
     }
 
-val ComponentKind.icon: ImageVector
+val Dimension.icon: ImageVector
     get() = when (this) {
-        ComponentKind.SLEEP -> Icons.Rounded.Bedtime
-        ComponentKind.RECOVERY -> Icons.Rounded.MonitorHeart
-        ComponentKind.SELF_REPORT -> Icons.Rounded.Psychology
-        ComponentKind.ACTIVITY -> Icons.AutoMirrored.Rounded.DirectionsWalk
+        Dimension.SLEEP -> Icons.Rounded.Bedtime
+        Dimension.CARDIO -> Icons.Rounded.MonitorHeart
+        Dimension.ACTIVITY -> Icons.AutoMirrored.Rounded.DirectionsWalk
+        Dimension.CIRCADIAN -> Icons.Rounded.WbSunny
+        Dimension.COGNITIVE -> Icons.Rounded.Timer
     }
 
 val EventType.icon: ImageVector
