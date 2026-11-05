@@ -13,10 +13,30 @@ WATCH_ID=com.hercules.app.watchkitapp
 mkdir -p "$OUT"
 FAIL=0
 problem() { echo "PROBLEM: $*" | tee -a "$OUT/problems.txt"; FAIL=1; }
+say() { echo "$(date +%H:%M:%S) $*"; }
+
+# limit <seconds> <command...>: runs the command and kills it after <seconds> (macOS has no `timeout`).
+limit() {
+  local secs=$1
+  shift
+  "$@" &
+  local pid=$!
+  ( sleep "$secs"; if kill -0 "$pid" 2>/dev/null; then kill -9 "$pid" 2>/dev/null; echo "TIMEOUT after ${secs}s: $*" >&2; fi ) &
+  local watcher=$!
+  wait "$pid"
+  local rc=$?
+  pkill -P "$watcher" 2>/dev/null
+  kill "$watcher" 2>/dev/null
+  wait "$watcher" 2>/dev/null
+  return $rc
+}
 
 # Newest runtime of the kind, preferring a mid-size device.
 pick() {
-  xcrun simctl list devices available -j | python3 -c '
+  local list
+  list=$(mktemp)
+  limit 120 xcrun simctl list devices available -j > "$list" || { echo "simctl list failed" >&2; return; }
+  python3 -c '
 import json, re, sys
 kind = sys.argv[1]
 best = None
@@ -38,24 +58,38 @@ for runtime, devices in json.load(sys.stdin)["devices"].items():
 if best:
     print(best[1])
     print("%s on %s" % (best[2], best[3].split(".")[-1]), file=sys.stderr)
-' "$1"
+' "$1" < "$list"
 }
 
-running() { xcrun simctl spawn "$1" launchctl list 2>/dev/null | grep -q "$2"; }
+running() {
+  local out
+  out=$(mktemp)
+  limit 30 xcrun simctl spawn "$1" launchctl list > "$out" 2>/dev/null
+  grep -q "$2" "$out"
+}
+
+# boot <udid>: boots and waits until the simulator is ready.
+boot() {
+  say "booting $1"
+  limit 120 xcrun simctl boot "$1" 2>/dev/null || true
+  limit 600 xcrun simctl bootstatus "$1" -b > /dev/null || problem "simulator $1 did not finish booting"
+  say "booted $1"
+}
 
 # shot <device> <bundle-id> <file-prefix> <name> <seconds> [launch args...]
 shot() {
   local dev=$1 bid=$2 prefix=$3 name=$4 wait=$5
   shift 5
-  xcrun simctl terminate "$dev" "$bid" >/dev/null 2>&1 || true
-  if ! xcrun simctl launch "$dev" "$bid" "$@" >/dev/null; then
+  say "launch $prefix-$name $*"
+  limit 30 xcrun simctl terminate "$dev" "$bid" >/dev/null 2>&1 || true
+  if ! limit 90 xcrun simctl launch "$dev" "$bid" "$@" >/dev/null; then
     problem "$prefix-$name: launch failed"
     return
   fi
   sleep "$wait"
   running "$dev" "$bid" || problem "$prefix-$name: not running ${wait}s after launch (crash?)"
-  xcrun simctl io "$dev" screenshot "$OUT/$prefix-$name.png" >/dev/null 2>&1 || problem "$prefix-$name: screenshot failed"
-  echo "shot $prefix-$name"
+  limit 60 xcrun simctl io "$dev" screenshot "$OUT/$prefix-$name.png" >/dev/null 2>&1 || problem "$prefix-$name: screenshot failed"
+  say "shot $prefix-$name"
 }
 
 echo "== bundle"
@@ -65,10 +99,10 @@ plutil -p "$APP/Watch/HerculesWatch.app/Info.plist" 2>/dev/null | grep -E "WKCom
 echo "== iPhone"
 PHONE=$(pick iOS)
 [ -n "$PHONE" ] || { problem "no iPhone simulator"; exit 1; }
-xcrun simctl boot "$PHONE" 2>/dev/null || true
-xcrun simctl bootstatus "$PHONE" -b >/dev/null
-xcrun simctl status_bar "$PHONE" override --time 9:41 --batteryState charged --batteryLevel 100 >/dev/null 2>&1 || true
-xcrun simctl install "$PHONE" "$APP" || problem "install Hercules.app failed"
+boot "$PHONE"
+limit 30 xcrun simctl status_bar "$PHONE" override --time 9:41 --batteryState charged --batteryLevel 100 >/dev/null 2>&1 || true
+limit 180 xcrun simctl install "$PHONE" "$APP" || problem "install Hercules.app failed"
+say "installed Hercules.app"
 
 shot "$PHONE" $PHONE_ID phone 01-onboarding 7
 shot "$PHONE" $PHONE_ID phone 02-today 16 -skipOnboarding YES -demo YES
@@ -88,17 +122,17 @@ WATCH=$(pick watchOS)
 if [ -z "$WATCH" ]; then
   problem "no Apple Watch simulator"
 else
-  xcrun simctl boot "$WATCH" 2>/dev/null || true
-  xcrun simctl bootstatus "$WATCH" -b >/dev/null
-  xcrun simctl install "$WATCH" "$WATCH_APP" || problem "install HerculesWatch.app failed"
+  boot "$WATCH"
+  limit 180 xcrun simctl install "$WATCH" "$WATCH_APP" || problem "install HerculesWatch.app failed"
+  say "installed HerculesWatch.app"
   shot "$WATCH" $WATCH_ID watch 01-permission 10
   shot "$WATCH" $WATCH_ID watch 02-home 20 -demo YES
   shot "$WATCH" $WATCH_ID watch 03-sensors 12 -demo YES -screen sensors
-  xcrun simctl spawn "$WATCH" log show --last 15m --style compact \
+  limit 120 xcrun simctl spawn "$WATCH" log show --last 15m --style compact \
     --predicate 'subsystem BEGINSWITH "com.hercules"' > "$OUT/watch-log.txt" 2>/dev/null || true
 fi
 
-xcrun simctl spawn "$PHONE" log show --last 15m --style compact \
+limit 120 xcrun simctl spawn "$PHONE" log show --last 15m --style compact \
   --predicate 'subsystem BEGINSWITH "com.hercules"' > "$OUT/phone-log.txt" 2>/dev/null || true
 
 echo "== crash reports"

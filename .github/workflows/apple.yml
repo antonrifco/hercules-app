@@ -89,6 +89,7 @@ jobs:
       # Boots an iPhone and an Apple Watch simulator, runs both apps with demo data, screenshots every screen and
       # fails on crashes or apps that stop running.
       - name: Run in simulators
+        timeout-minutes: 25
         run: bash .github/scripts/simulator-smoke.sh
 
       - name: Upload build log
