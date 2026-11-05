@@ -20,6 +20,7 @@ struct Eyebrow: View {
             .tracking(1.8)
             .foregroundStyle(color)
             .lineLimit(1)
+            .minimumScaleFactor(0.75)
     }
 }
 
@@ -118,6 +119,7 @@ struct PillTag: View {
                 .tracking(1.2)
                 .foregroundStyle(color)
                 .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)

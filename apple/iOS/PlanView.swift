@@ -55,6 +55,7 @@ private struct RailRow: View {
                             .foregroundStyle(Palette.text1)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
                             .padding(.top, 6)
                         Group {
                             if let a = s.advice {
@@ -221,7 +222,9 @@ private struct EventDetailContent: View {
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(a.verdict.label).font(.system(size: 22)).foregroundStyle(color)
+                                .fixedSize(horizontal: false, vertical: true)
                             Text(a.headline).font(.subheadline).foregroundStyle(Palette.text1)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         ScoreRing(score: Int(a.expectedScore), label: "at \(Fmt.clock(s.event.startMs))", size: 60)
@@ -230,6 +233,7 @@ private struct EventDetailContent: View {
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
                             Image(systemName: "arrow.right").font(.system(size: 12)).foregroundStyle(color)
                             Text(action).font(.subheadline).foregroundStyle(Palette.text1)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }

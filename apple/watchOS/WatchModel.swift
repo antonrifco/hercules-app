@@ -34,6 +34,8 @@ final class WatchModel: ObservableObject {
     private var syncAgain = false
     private var demo = false
     private var isActive = false
+    /// True once Health access was checked and observers are registered; nothing is read before that.
+    private var collecting = false
     private var loop: Task<Void, Never>?
 
     private enum Keys {
@@ -105,6 +107,7 @@ final class WatchModel: ObservableObject {
     }
 
     private func startCollecting() {
+        collecting = true
         let sensors = enabledSensors
         health.start(sensors)
         Task {
@@ -216,7 +219,7 @@ final class WatchModel: ObservableObject {
         loop?.cancel()
         loop = Task { [weak self] in
             guard let self else { return }
-            if !self.needsPermission && !self.demo { await self.health.collectAll(self.enabledSensors) }
+            if self.collecting { await self.health.collectAll(self.enabledSensors) }
             while !Task.isCancelled {
                 await self.syncNow()
                 try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
@@ -235,7 +238,7 @@ final class WatchModel: ObservableObject {
     }
 
     private func backgroundRefresh() async {
-        if !needsPermission && !demo { await health.collectAll(enabledSensors) }
+        if collecting { await health.collectAll(enabledSensors) }
         await syncNow()
         scheduleBackgroundRefresh()
     }

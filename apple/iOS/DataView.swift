@@ -50,7 +50,7 @@ private struct WatchLinkSection: View {
                 Muted("Last data " + (lastSync.map { Fmt.relative($0).lowercased() } ?? "never"))
             } else {
                 Illustration("ill_no_watch").frame(height: 170).frame(maxWidth: .infinity)
-                Muted("Open Hercules on your Apple Watch. It syncs every 15 minutes over Bluetooth.").padding(.top, 4)
+                Muted("Install Hercules on your Apple Watch and open it once. It sends its readings whenever it's open, and this iPhone also reads your watch's data from Health.").padding(.top, 4)
             }
         }
     }

@@ -163,12 +163,12 @@ private struct NextEventPanel: View {
         HSection("Next") {
             Button { onOpen(s.event.id) } label: {
                 PanelBox(accent: accent) {
-                    HStack(spacing: 16) {
+                    HStack(spacing: 12) {
                         Text(Fmt.dayTag(s.daysUntil))
-                            .font(.system(size: 40, weight: .thin))
+                            .font(.system(size: 34, weight: .thin))
                             .foregroundStyle(accent)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.6)
+                            .fixedSize()
                         VStack(alignment: .leading, spacing: 4) {
                             HStack(spacing: 6) {
                                 Image(systemName: Symbols.event(s.event.type)).font(.system(size: 12)).foregroundStyle(Palette.text2)
@@ -179,6 +179,7 @@ private struct NextEventPanel: View {
                                 .foregroundStyle(Palette.text1)
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
                             if let a = s.advice {
                                 PillTag(text: a.verdict.label, color: accent).padding(.top, 4)
                             } else {
@@ -187,9 +188,9 @@ private struct NextEventPanel: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         if let a = s.advice {
-                            ScoreRing(score: Int(a.expectedScore), label: "at \(Fmt.clock(s.event.startMs))", size: 58)
+                            ScoreRing(score: Int(a.expectedScore), label: "at \(Fmt.clock(s.event.startMs))", size: 52)
                         } else if let prep = s.prepScore {
-                            ScoreRing(score: prep.intValue, label: "prep", size: 58)
+                            ScoreRing(score: prep.intValue, label: "prep", size: 52)
                         }
                     }
                 }

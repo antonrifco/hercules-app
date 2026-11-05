@@ -16,6 +16,7 @@ struct WatchHomeView: View {
     var body: some View {
         let home = model.home
         let readiness = home?.readiness
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(spacing: 6) {
                 // 1 · Today
@@ -32,7 +33,7 @@ struct WatchHomeView: View {
                 }
 
                 // 2 · Tracking
-                WSectionLabel(text: "Tracking")
+                WSectionLabel(text: "Tracking").id("tracking")
                 HStack(alignment: .top, spacing: 14) {
                     SleepStat(value: home?.sleepText ?? "--")
                     HeartStat(bpm: home.map { Int($0.heartRate) } ?? 0)
@@ -41,7 +42,7 @@ struct WatchHomeView: View {
                 if let sync = home?.sync { SyncLineView(line: sync) }
 
                 // 3 · Planned moments
-                WSectionLabel(text: "Big moments ahead")
+                WSectionLabel(text: "Big moments ahead").id("moments")
                 let moments = home?.moments ?? []
                 if moments.isEmpty {
                     Text("Plan one on your phone").font(.footnote).foregroundStyle(Palette.text2).multilineTextAlignment(.center)
@@ -67,10 +68,15 @@ struct WatchHomeView: View {
         .navigationDestination(isPresented: $showSensors) { SensorsView() }
         #if DEBUG
         .task {
-            // Debug only, for screenshots: `-screen sensors`.
+            // Debug only, for screenshots: `-screen sensors`, `-scroll tracking|moments`.
             if UserDefaults.standard.string(forKey: "screen") == "sensors" { showSensors = true }
+            if let target = UserDefaults.standard.string(forKey: "scroll") {
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                proxy.scrollTo(target, anchor: .top)
+            }
         }
         #endif
+        }
     }
 }
 

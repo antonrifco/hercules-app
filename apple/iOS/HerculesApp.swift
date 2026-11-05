@@ -76,6 +76,10 @@ struct RootView: View {
                 }
             }
             .background(Palette.ink.ignoresSafeArea())
+            .safeAreaInset(edge: .top, spacing: 0) {
+                // Zero height, but its background extends behind the status bar and covers scrolled content.
+                Color.clear.frame(height: 0).background(Palette.ink)
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) { HerculesTabBar(selected: $tab) }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(item: $openEventId) { id in

@@ -127,7 +127,9 @@ else
   say "installed HerculesWatch.app"
   shot "$WATCH" $WATCH_ID watch 01-permission 10
   shot "$WATCH" $WATCH_ID watch 02-home 20 -demo YES
-  shot "$WATCH" $WATCH_ID watch 03-sensors 12 -demo YES -screen sensors
+  shot "$WATCH" $WATCH_ID watch 03-tracking 16 -demo YES -scroll tracking
+  shot "$WATCH" $WATCH_ID watch 04-moments 16 -demo YES -scroll moments
+  shot "$WATCH" $WATCH_ID watch 05-sensors 14 -demo YES -screen sensors
   limit 120 xcrun simctl spawn "$WATCH" log show --last 15m --style compact \
     --predicate 'subsystem BEGINSWITH "com.hercules"' > "$OUT/watch-log.txt" 2>/dev/null || true
 fi
