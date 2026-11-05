@@ -1,0 +1,174 @@
+-- v1 -> v2: spec V1 (dimensions, Health Connect, Beat the Clock, scoring configurations, Moments lifecycle).
+ALTER TABLE sleep_night ADD COLUMN awake_min INTEGER;
+ALTER TABLE sleep_night ADD COLUMN deep_min INTEGER;
+ALTER TABLE sleep_night ADD COLUMN rem_min INTEGER;
+ALTER TABLE sleep_night ADD COLUMN light_min INTEGER;
+ALTER TABLE sleep_night ADD COLUMN provider TEXT;
+
+ALTER TABLE readiness_day ADD COLUMN config_id TEXT;
+ALTER TABLE readiness_day ADD COLUMN config_version INTEGER;
+ALTER TABLE readiness_day ADD COLUMN engine_version TEXT;
+ALTER TABLE readiness_day ADD COLUMN coverage REAL;
+ALTER TABLE readiness_day ADD COLUMN confidence TEXT;
+ALTER TABLE readiness_day ADD COLUMN calculated_ms INTEGER;
+-- Rows from the old engine stay untouched; they have no configuration stamp and are not shown as V1 scores.
+
+ALTER TABLE plan_event ADD COLUMN timezone_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE plan_event ADD COLUMN status TEXT NOT NULL DEFAULT 'ACTIVE';
+ALTER TABLE plan_event ADD COLUMN updated_ms INTEGER;
+ALTER TABLE plan_event ADD COLUMN completed_ms INTEGER;
+ALTER TABLE plan_event ADD COLUMN cancelled_ms INTEGER;
+
+CREATE TABLE health_metric (
+    id TEXT NOT NULL PRIMARY KEY,
+    metric_type TEXT NOT NULL,
+    value REAL NOT NULL,
+    unit TEXT NOT NULL,
+    measured_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    recorded_ms INTEGER NOT NULL,
+    day_key TEXT NOT NULL,
+    source_package TEXT NOT NULL,
+    source_device TEXT,
+    quality TEXT NOT NULL,
+    collection TEXT NOT NULL,
+    metadata TEXT
+);
+CREATE INDEX health_metric_type_day ON health_metric(metric_type, day_key);
+
+-- Sleep sessions as each provider reported them; `sleep_night` holds the resolved night.
+CREATE TABLE sleep_session (
+    id TEXT NOT NULL PRIMARY KEY,
+    day_key TEXT NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    asleep_min INTEGER NOT NULL,
+    awake_min INTEGER,
+    deep_min INTEGER,
+    rem_min INTEGER,
+    light_min INTEGER,
+    source_package TEXT NOT NULL,
+    source_device TEXT,
+    quality TEXT NOT NULL
+);
+CREATE INDEX sleep_session_day ON sleep_session(day_key);
+
+CREATE TABLE exercise_session (
+    id TEXT NOT NULL PRIMARY KEY,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    exercise_type INTEGER NOT NULL,
+    source_package TEXT NOT NULL,
+    source_device TEXT
+);
+CREATE INDEX exercise_session_start ON exercise_session(start_ms);
+
+CREATE TABLE light_sample (
+    id TEXT NOT NULL PRIMARY KEY,
+    lux REAL NOT NULL,
+    measured_ms INTEGER NOT NULL,
+    sensor TEXT NOT NULL,
+    context TEXT NOT NULL
+);
+CREATE INDEX light_sample_time ON light_sample(measured_ms);
+
+CREATE TABLE cognitive_session (
+    id TEXT NOT NULL PRIMARY KEY,
+    device_kind TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    assessment_window TEXT,
+    day_key TEXT NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    practice INTEGER NOT NULL,
+    accuracy_error REAL,
+    consistency_error REAL,
+    bias REAL,
+    accuracy_score INTEGER,
+    consistency_score INTEGER,
+    bias_score INTEGER,
+    cognitive_score INTEGER,
+    game_version INTEGER NOT NULL,
+    synced INTEGER NOT NULL DEFAULT 0,
+    -- Optional self-report asked during the game (1–5); never part of the score.
+    energy INTEGER,
+    stress INTEGER
+);
+CREATE INDEX cognitive_session_start ON cognitive_session(start_ms);
+
+CREATE TABLE cognitive_round (
+    id TEXT NOT NULL PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    round_order INTEGER NOT NULL,
+    target_ms INTEGER NOT NULL,
+    actual_ms INTEGER NOT NULL,
+    signed_error_ms INTEGER NOT NULL,
+    absolute_error_ms INTEGER NOT NULL,
+    relative_error REAL NOT NULL,
+    validity TEXT NOT NULL
+);
+CREATE INDEX cognitive_round_session ON cognitive_round(session_id);
+
+CREATE TABLE user_baseline (
+    id TEXT NOT NULL PRIMARY KEY,
+    metric_type TEXT NOT NULL,
+    device_source TEXT,
+    assessment_window TEXT,
+    median REAL NOT NULL,
+    mad REAL NOT NULL,
+    sample_count INTEGER NOT NULL,
+    personal_share REAL NOT NULL,
+    calibration_version TEXT NOT NULL,
+    updated_ms INTEGER NOT NULL
+);
+
+-- Configuration history: never overwritten; exactly one row is active.
+CREATE TABLE scoring_config (
+    id TEXT NOT NULL PRIMARY KEY,
+    version INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    sleep_weight REAL NOT NULL,
+    cardio_weight REAL NOT NULL,
+    activity_weight REAL NOT NULL,
+    circadian_weight REAL NOT NULL,
+    cognitive_weight REAL NOT NULL,
+    updated_ms INTEGER NOT NULL,
+    is_active INTEGER NOT NULL
+);
+
+CREATE TABLE peak_window (
+    id TEXT NOT NULL PRIMARY KEY,
+    start_day TEXT NOT NULL,
+    end_day TEXT NOT NULL,
+    result TEXT NOT NULL,
+    predicted_window TEXT,
+    json TEXT NOT NULL,
+    model_version INTEGER NOT NULL,
+    updated_ms INTEGER NOT NULL
+);
+
+CREATE TABLE moment_snapshot (
+    moment_id TEXT NOT NULL,
+    day_key TEXT NOT NULL,
+    captured_ms INTEGER NOT NULL,
+    score INTEGER,
+    classification TEXT,
+    confidence TEXT,
+    coverage REAL,
+    prep_status TEXT NOT NULL,
+    peak_alignment TEXT NOT NULL,
+    config_id TEXT,
+    config_version INTEGER,
+    PRIMARY KEY (moment_id, day_key)
+);
+
+-- Small app state: import checkpoints, settings, today's evaluation.
+CREATE TABLE kv (
+    key TEXT NOT NULL PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+
+-- The daily check-in is gone: energy and stress are now asked (optionally) inside Beat the Clock.
+DROP TABLE IF EXISTS checkin;

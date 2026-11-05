@@ -29,16 +29,20 @@ class WatchSyncListenerService : WearableListenerService() {
                 val (batch, ack) = WireCodec.decodeBatchWithAck(request)
                 g.repo.insertSamples(batch.samples)
                 g.repo.upsertSummarizedSessions(batch.sessions)
+                // Beat the Clock sessions from the watch: stored by id, so a retried batch changes nothing.
+                g.cognitive.applyRemoteSessions(batch.assessments)
                 g.insights.refresh(g.insights.daysOf(batch.samples) + batch.sessions.map { it.dayKey })
                 g.markWatchSync(System.currentTimeMillis())
-                Log.i(TAG, "stored ${batch.samples.size} samples, ${batch.sessions.size} sessions from ${batch.deviceId}")
+                Log.i(TAG, "stored ${batch.samples.size} samples, ${batch.sessions.size} sessions, ${batch.assessments.size} assessments from ${batch.deviceId}")
                 result.setResult(WireCodec.encodeAck(ack))
-                // New sleep/HR data can change today's score: recompute and send it back to the watch.
-                g.refreshAndPushToWatch()
             } catch (e: Exception) {
                 Log.e(TAG, "failed to store watch batch", e)
                 result.setException(e)
+                return@launch
             }
+            // New sleep/HR data can change today's score: recompute and send it back to the watch. After the ack, so
+            // a failure here can't try to complete the reply a second time.
+            runCatching { applicationContext.graph.refreshAndPushToWatch() }.onFailure { Log.w(TAG, "refresh after sync failed", it) }
         }
         return result.task
     }

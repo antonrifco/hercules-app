@@ -1,12 +1,12 @@
 package com.hercules.mobile.ui
 
-import android.graphics.ImageDecoder
-import android.graphics.drawable.AnimatedImageDrawable
-import android.widget.ImageView
 import androidx.core.content.edit
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -41,12 +42,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import com.hercules.mobile.R
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -54,48 +55,60 @@ import kotlinx.coroutines.launch
 // ------------------------------------------------------------------ animated launch
 
 /**
- * Picks up where the system splash ends (same mark, same black): plays the generated splash
- * animation once, then fades into the app.
+ * Picks up where the system splash ends (same lion, same place, same black, eyes still narrowed): Herc opens his
+ * eyes in Prime green, the head surges forward a touch and settles, then the name rises in and it all fades into
+ * the app. Tap to skip.
  */
 @Composable
-fun LaunchArt(show: Boolean, durationMs: Long = 2_600) {
+fun LaunchArt(show: Boolean, durationMs: Long = 2_400) {
     var visible by remember { mutableStateOf(show) }
+    // Android 12+ already played the wake-up in the system splash, so start from its last frame.
+    var awake by remember { mutableStateOf(SplashPlays) }
+    val surge = remember { Animatable(1f) }
+    val words = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
-        delay(durationMs)
+        if (!show) return@LaunchedEffect
+        if (!SplashPlays) {
+            delay(250)
+            awake = true
+            surge.animateTo(1.06f, tween(220, easing = FastOutSlowInEasing))
+            surge.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 300f))
+        }
+        words.animateTo(1f, tween(520, easing = FastOutSlowInEasing))
+        delay((durationMs - if (SplashPlays) 1_100 else 1_300).coerceAtLeast(300))
         visible = false
     }
-    AnimatedVisibility(visible, enter = EnterTransition.None, exit = fadeOut(tween(500))) {
+    AnimatedVisibility(visible, enter = EnterTransition.None, exit = fadeOut(tween(450))) {
         Box(Modifier.fillMaxSize().background(Ink).clickable { visible = false }, contentAlignment = Alignment.Center) {
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { ctx ->
-                    ImageView(ctx).apply {
-                        scaleType = ImageView.ScaleType.CENTER_CROP
-                        val d = runCatching {
-                            ImageDecoder.decodeDrawable(ImageDecoder.createSource(ctx.resources, R.raw.splash_anim))
-                        }.getOrNull()
-                        if (d is AnimatedImageDrawable) {
-                            d.repeatCount = 0
-                            setImageDrawable(d)
-                            d.start()
-                        } else {
-                            setImageResource(R.drawable.splash_art)
-                        }
-                    }
-                },
-            )
+            // Same size and framing as the system splash icon, so the hand-over is seamless.
+            // Before Android 12 the splash is still: open the narrowed grey eyes and light them green.
+            val open by animateFloatAsState(if (awake) 1f else 0.3f, tween(420, easing = FastOutSlowInEasing), label = "open")
+            val eye by androidx.compose.animation.animateColorAsState(if (awake) HercMood.PRIME.eyes else HercMood.SLEEPING.eyes, tween(500), label = "eye")
+            Herc(HercMood.PRIME, size = 288.dp, pose = HercPose.ICON, mane = surge.value, eyesOpen = open, eyeColor = eye)
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.offset { androidx.compose.ui.unit.IntOffset(0, (128.dp + 16.dp * (1f - words.value)).roundToPx()) }.graphicsLayer { alpha = words.value },
+            ) {
+                Text("HERCULES", color = Text1, fontSize = 18.sp, letterSpacing = 8.sp, fontWeight = FontWeight.Medium)
+                Text("Know when you're ready to roar", color = Text2, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+            }
         }
     }
 }
 
+/** The animated splash icon plays on Android 12+; older versions show its first frame (narrowed grey eyes). */
+val SplashPlays = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
+
 // ------------------------------------------------------------------ onboarding
 
-private class Step(val image: Int, val eyebrow: String, val title: String, val body: String)
+private class Step(val image: Int, val eyebrow: String, val title: String, val body: String, val herc: HercMood? = null)
 
 private val Steps = listOf(
-    Step(R.drawable.ill_score, "01 · The dial", "Your brain has a readiness level", "Every morning Hercules reads it, 1 to 100, from your sleep, heart and how you feel."),
-    Step(R.drawable.ill_sleep, "02 · The setup", "Sleep sets the dial", "Wear the watch to bed. That's the whole setup. It learns your normal in 7 nights."),
-    Step(R.drawable.ill_plan, "03 · The plan", "Aim for the big day", "Add an interview or a pitch up to 7 days out. Get a daily run-up and a clear call on the day."),
+    Step(R.drawable.ill_score, "01 · Meet Herc", "Know when you're at your sharpest", "Herc turns your sleep, heart, movement, daylight and a quick timing game into one score from 1 to 100. Watch his eyes: green means Prime, red means recharge.", HercMood.PRIME),
+    Step(R.drawable.ill_sleep, "02 · Health Connect", "Zero logging", "Herc reads sleep, heart rate and activity from Health Connect, and never writes to it. In week one he learns what your normal looks like.", HercMood.SLEEPING),
+    Step(R.drawable.ill_checkin, "03 · Beat the Clock", "A 2-minute game. Play any time.", "Guess when 15 to 30 seconds are up, on your phone or watch. Your first game counts; Herc learns your normal and finds your peak window."),
+    Step(R.drawable.ill_plan, "04 · Moments", "Win the big day", "Add an interview, exam or pitch up to 7 days out. Get daily prep steps and a straight answer: On Track or Needs Attention."),
+    Step(R.drawable.ill_no_watch, "05 · The watch", "Optional, but powerful", "The Hercules watch adds overnight tracking and Beat the Clock on your wrist. Your data never leaves your devices."),
 )
 
 private const val PREFS = "hercules_ui"
@@ -112,7 +125,17 @@ fun rememberOnboarded(): Pair<Boolean, () -> Unit> {
 @Composable
 fun Onboarding(onDone: () -> Unit) {
     val pager = rememberPagerState { Steps.size }
+    // On "Meet Herc" he walks through the five bands so the colours explain themselves.
+    var cycling by remember { mutableStateOf(HercMood.PRIME) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_400)
+            cycling = HercMood.entries[(cycling.ordinal + 1) % HercMood.DRAINED.ordinal.plus(1)]
+        }
+    }
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
+    val askNotifications = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { onDone() }
     Column(Modifier.fillMaxSize().background(Ink).statusBarsPadding().navigationBarsPadding().padding(horizontal = 24.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("HERCULES", color = Text1, fontSize = 13.sp, letterSpacing = 5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
@@ -122,7 +145,20 @@ fun Onboarding(onDone: () -> Unit) {
             val s = Steps[page]
             val shown by animateFloatAsState(if (pager.currentPage == page) 1f else 0.3f, tween(400), label = "step")
             Column(Modifier.fillMaxSize().alpha(shown), verticalArrangement = Arrangement.Center) {
-                Illustration(s.image, Modifier.fillMaxWidth().aspectRatio(1f))
+                if (s.herc != null) {
+                    Box(Modifier.fillMaxWidth().aspectRatio(1f), contentAlignment = Alignment.Center) {
+                        val m = if (s.herc == HercMood.PRIME) cycling else s.herc
+                        Herc(m, size = 260.dp, pose = HercPose.HEAD)
+                        if (s.herc == HercMood.PRIME) {
+                            Text(
+                                m.label.uppercase(), color = m.eyes, fontSize = 12.sp, letterSpacing = 3.sp, fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.align(Alignment.BottomCenter),
+                            )
+                        }
+                    }
+                } else {
+                    Illustration(s.image, Modifier.fillMaxWidth().aspectRatio(1f))
+                }
                 Eyebrow(s.eyebrow, color = Cyan)
                 Text(s.title, fontSize = 30.sp, fontWeight = FontWeight.Light, color = Text1, lineHeight = 36.sp, modifier = Modifier.padding(top = 10.dp))
                 Text(s.body, fontSize = 15.sp, color = Text2, lineHeight = 22.sp, modifier = Modifier.padding(top = 12.dp))
@@ -135,11 +171,19 @@ fun Onboarding(onDone: () -> Unit) {
                 }
             }
             val last = pager.currentPage == Steps.lastIndex
+            if (last) TextButton(onClick = onDone) { Text("NOT NOW", letterSpacing = 1.5.sp, color = Text2, fontSize = 12.sp) }
             Button(
-                onClick = { if (last) onDone() else scope.launch { pager.animateScrollToPage(pager.currentPage + 1) } },
+                onClick = {
+                    when {
+                        !last -> scope.launch { pager.animateScrollToPage(pager.currentPage + 1) }
+                        android.os.Build.VERSION.SDK_INT >= 33 && !com.hercules.mobile.notify.Notifier.canPost(ctx) -> askNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                        else -> onDone()
+                    }
+                },
+                modifier = Modifier.height(48.dp),
                 shape = RoundedCornerShape(6.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Ink),
-            ) { Text(if (last) "START" else "NEXT", letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold) }
+            ) { Text(if (last) "ALLOW & START" else "NEXT", letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold) }
         }
     }
 }
@@ -162,7 +206,7 @@ fun <T> HerculesNavBar(items: List<T>, selected: T, icon: (T) -> ImageVector, la
                     Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(icon(t), null, tint = if (on) Cyan else Text2, modifier = Modifier.size(22.dp))
-                            Text(label(t).uppercase(UiLocale), fontSize = 9.sp, letterSpacing = 1.5.sp, color = if (on) Text1 else Text2, modifier = Modifier.padding(top = 4.dp))
+                            Text(label(t).uppercase(UiLocale), fontSize = 10.sp, letterSpacing = 1.5.sp, color = if (on) Text1 else Text2, modifier = Modifier.padding(top = 4.dp))
                         }
                     }
                 }

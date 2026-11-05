@@ -140,24 +140,28 @@ CREATE TABLE sleep_night (
     asleep_min INTEGER NOT NULL,
     hr_avg REAL,
     hr_low REAL,
-    source TEXT NOT NULL
-);
-
-CREATE TABLE checkin (
-    day_key TEXT NOT NULL PRIMARY KEY,
-    sleep_hours REAL,
-    energy INTEGER NOT NULL,
-    stress INTEGER NOT NULL,
-    created_ms INTEGER NOT NULL
+    source TEXT NOT NULL,
+    awake_min INTEGER,
+    deep_min INTEGER,
+    rem_min INTEGER,
+    light_min INTEGER,
+    provider TEXT
 );
 
 -- Computed readiness per day (JSON of Readiness), kept for trends.
 CREATE TABLE readiness_day (
     day_key TEXT NOT NULL PRIMARY KEY,
     score INTEGER NOT NULL,
-    json TEXT NOT NULL
+    json TEXT NOT NULL,
+    config_id TEXT,
+    config_version INTEGER,
+    engine_version TEXT,
+    coverage REAL,
+    confidence TEXT,
+    calculated_ms INTEGER
 );
 
+-- Moments. `importance` holds the urgency (NORMAL / CRITICAL; older rows may say HIGH, read as CRITICAL).
 CREATE TABLE plan_event (
     id TEXT NOT NULL PRIMARY KEY,
     title TEXT NOT NULL,
@@ -165,7 +169,12 @@ CREATE TABLE plan_event (
     start_ms INTEGER NOT NULL,
     importance TEXT NOT NULL,
     notes TEXT NOT NULL,
-    created_ms INTEGER NOT NULL
+    created_ms INTEGER NOT NULL,
+    timezone_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    updated_ms INTEGER,
+    completed_ms INTEGER,
+    cancelled_ms INTEGER
 );
 
 CREATE TABLE prep_task_done (
@@ -176,8 +185,17 @@ CREATE TABLE prep_task_done (
     PRIMARY KEY (event_id, day_key, task_id)
 );
 
+CREATE TABLE event_reflection (
+    event_id TEXT NOT NULL PRIMARY KEY,
+    rating INTEGER NOT NULL,
+    created_ms INTEGER NOT NULL
+);
+
 upsertSleep:
 INSERT OR REPLACE INTO sleep_night VALUES ?;
+
+sleepAll:
+SELECT * FROM sleep_night ORDER BY day_key;
 
 sleepByKey:
 SELECT * FROM sleep_night WHERE day_key = ?;
@@ -185,14 +203,11 @@ SELECT * FROM sleep_night WHERE day_key = ?;
 sleepRange:
 SELECT * FROM sleep_night WHERE day_key >= :fromKey AND day_key <= :toKey ORDER BY day_key;
 
-upsertCheckIn:
-INSERT OR REPLACE INTO checkin VALUES ?;
-
-checkInByKey:
-SELECT * FROM checkin WHERE day_key = ?;
-
 upsertReadiness:
 INSERT OR REPLACE INTO readiness_day VALUES ?;
+
+readinessAll:
+SELECT * FROM readiness_day ORDER BY day_key;
 
 readinessByKey:
 SELECT * FROM readiness_day WHERE day_key = ?;
@@ -212,6 +227,9 @@ DELETE FROM prep_task_done WHERE event_id = ?;
 eventsFrom:
 SELECT * FROM plan_event WHERE start_ms >= :fromMs ORDER BY start_ms;
 
+eventsAll:
+SELECT * FROM plan_event ORDER BY start_ms DESC;
+
 eventById:
 SELECT * FROM plan_event WHERE id = ?;
 
@@ -223,3 +241,330 @@ DELETE FROM prep_task_done WHERE event_id = ? AND day_key = ? AND task_id = ?;
 
 tasksDone:
 SELECT * FROM prep_task_done WHERE event_id = ?;
+
+upsertReflection:
+INSERT OR REPLACE INTO event_reflection VALUES ?;
+
+reflectionById:
+SELECT * FROM event_reflection WHERE event_id = ?;
+
+reflectionsAll:
+SELECT * FROM event_reflection ORDER BY created_ms DESC;
+
+-- spec V1 entities ------------------------------------------------------
+
+-- Every imported or derived observation (Health Connect records, watch-derived daily values). Extensible by type.
+CREATE TABLE health_metric (
+    id TEXT NOT NULL PRIMARY KEY,
+    metric_type TEXT NOT NULL,
+    value REAL NOT NULL,
+    unit TEXT NOT NULL,
+    measured_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    recorded_ms INTEGER NOT NULL,
+    day_key TEXT NOT NULL,
+    source_package TEXT NOT NULL,
+    source_device TEXT,
+    quality TEXT NOT NULL,
+    collection TEXT NOT NULL,
+    metadata TEXT
+);
+CREATE INDEX health_metric_type_day ON health_metric(metric_type, day_key);
+
+-- Sleep sessions as each provider reported them; `sleep_night` holds the resolved night.
+CREATE TABLE sleep_session (
+    id TEXT NOT NULL PRIMARY KEY,
+    day_key TEXT NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    asleep_min INTEGER NOT NULL,
+    awake_min INTEGER,
+    deep_min INTEGER,
+    rem_min INTEGER,
+    light_min INTEGER,
+    source_package TEXT NOT NULL,
+    source_device TEXT,
+    quality TEXT NOT NULL
+);
+CREATE INDEX sleep_session_day ON sleep_session(day_key);
+
+CREATE TABLE exercise_session (
+    id TEXT NOT NULL PRIMARY KEY,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    exercise_type INTEGER NOT NULL,
+    source_package TEXT NOT NULL,
+    source_device TEXT
+);
+CREATE INDEX exercise_session_start ON exercise_session(start_ms);
+
+CREATE TABLE light_sample (
+    id TEXT NOT NULL PRIMARY KEY,
+    lux REAL NOT NULL,
+    measured_ms INTEGER NOT NULL,
+    sensor TEXT NOT NULL,
+    context TEXT NOT NULL
+);
+CREATE INDEX light_sample_time ON light_sample(measured_ms);
+
+CREATE TABLE cognitive_session (
+    id TEXT NOT NULL PRIMARY KEY,
+    device_kind TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    assessment_window TEXT,
+    day_key TEXT NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    practice INTEGER NOT NULL,
+    accuracy_error REAL,
+    consistency_error REAL,
+    bias REAL,
+    accuracy_score INTEGER,
+    consistency_score INTEGER,
+    bias_score INTEGER,
+    cognitive_score INTEGER,
+    game_version INTEGER NOT NULL,
+    synced INTEGER NOT NULL DEFAULT 0,
+    -- Optional self-report asked during the game (1–5); never part of the score.
+    energy INTEGER,
+    stress INTEGER
+);
+CREATE INDEX cognitive_session_start ON cognitive_session(start_ms);
+
+CREATE TABLE cognitive_round (
+    id TEXT NOT NULL PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    round_order INTEGER NOT NULL,
+    target_ms INTEGER NOT NULL,
+    actual_ms INTEGER NOT NULL,
+    signed_error_ms INTEGER NOT NULL,
+    absolute_error_ms INTEGER NOT NULL,
+    relative_error REAL NOT NULL,
+    validity TEXT NOT NULL
+);
+CREATE INDEX cognitive_round_session ON cognitive_round(session_id);
+
+CREATE TABLE user_baseline (
+    id TEXT NOT NULL PRIMARY KEY,
+    metric_type TEXT NOT NULL,
+    device_source TEXT,
+    assessment_window TEXT,
+    median REAL NOT NULL,
+    mad REAL NOT NULL,
+    sample_count INTEGER NOT NULL,
+    personal_share REAL NOT NULL,
+    calibration_version TEXT NOT NULL,
+    updated_ms INTEGER NOT NULL
+);
+
+-- Configuration history: never overwritten; exactly one row is active.
+CREATE TABLE scoring_config (
+    id TEXT NOT NULL PRIMARY KEY,
+    version INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    sleep_weight REAL NOT NULL,
+    cardio_weight REAL NOT NULL,
+    activity_weight REAL NOT NULL,
+    circadian_weight REAL NOT NULL,
+    cognitive_weight REAL NOT NULL,
+    updated_ms INTEGER NOT NULL,
+    is_active INTEGER NOT NULL
+);
+
+CREATE TABLE peak_window (
+    id TEXT NOT NULL PRIMARY KEY,
+    start_day TEXT NOT NULL,
+    end_day TEXT NOT NULL,
+    result TEXT NOT NULL,
+    predicted_window TEXT,
+    json TEXT NOT NULL,
+    model_version INTEGER NOT NULL,
+    updated_ms INTEGER NOT NULL
+);
+
+CREATE TABLE moment_snapshot (
+    moment_id TEXT NOT NULL,
+    day_key TEXT NOT NULL,
+    captured_ms INTEGER NOT NULL,
+    score INTEGER,
+    classification TEXT,
+    confidence TEXT,
+    coverage REAL,
+    prep_status TEXT NOT NULL,
+    peak_alignment TEXT NOT NULL,
+    config_id TEXT,
+    config_version INTEGER,
+    PRIMARY KEY (moment_id, day_key)
+);
+
+-- Small app state: import checkpoints, settings, today's evaluation.
+CREATE TABLE kv (
+    key TEXT NOT NULL PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+upsertMetric:
+INSERT OR REPLACE INTO health_metric VALUES ?;
+
+metricsOfType:
+SELECT * FROM health_metric WHERE metric_type = :type AND day_key >= :fromKey AND day_key <= :toKey ORDER BY measured_ms;
+
+latestMetric:
+SELECT * FROM health_metric WHERE metric_type = ? ORDER BY measured_ms DESC LIMIT 1;
+
+metricTypeCounts:
+SELECT metric_type, COUNT(*) AS n, MAX(measured_ms) AS latest FROM health_metric GROUP BY metric_type;
+
+upsertSleepSession:
+INSERT OR REPLACE INTO sleep_session VALUES ?;
+
+sleepSessionsForDay:
+SELECT * FROM sleep_session WHERE day_key = ? ORDER BY start_ms;
+
+upsertExercise:
+INSERT OR REPLACE INTO exercise_session VALUES ?;
+
+exerciseBetween:
+SELECT * FROM exercise_session WHERE end_ms > :fromMs AND start_ms < :toMs ORDER BY start_ms;
+
+insertLight:
+INSERT OR REPLACE INTO light_sample VALUES ?;
+
+lightBetween:
+SELECT * FROM light_sample WHERE measured_ms >= :fromMs AND measured_ms < :toMs ORDER BY measured_ms;
+
+latestLight:
+SELECT * FROM light_sample ORDER BY measured_ms DESC LIMIT 1;
+
+countLightSince:
+SELECT COUNT(*) FROM light_sample WHERE measured_ms >= ?;
+
+deleteLightBefore:
+DELETE FROM light_sample WHERE measured_ms < ?;
+
+upsertCognitiveSession:
+INSERT OR REPLACE INTO cognitive_session VALUES ?;
+
+upsertCognitiveRound:
+INSERT OR REPLACE INTO cognitive_round VALUES ?;
+
+cognitiveSessionsFrom:
+SELECT * FROM cognitive_session WHERE start_ms >= ? ORDER BY start_ms;
+
+cognitiveSessionById:
+SELECT * FROM cognitive_session WHERE id = ?;
+
+roundsForSession:
+SELECT * FROM cognitive_round WHERE session_id = ? ORDER BY round_order;
+
+pendingCognitiveSessions:
+SELECT * FROM cognitive_session WHERE synced = 0 ORDER BY start_ms LIMIT :limit;
+
+markCognitiveSynced:
+UPDATE cognitive_session SET synced = 1 WHERE id IN ?;
+
+countCognitiveByDevice:
+SELECT COUNT(*) FROM cognitive_session WHERE device_kind = ?;
+
+upsertBaseline:
+INSERT OR REPLACE INTO user_baseline VALUES ?;
+
+allBaselines:
+SELECT * FROM user_baseline ORDER BY metric_type, device_source, assessment_window;
+
+insertConfig:
+INSERT OR REPLACE INTO scoring_config VALUES ?;
+
+deactivateConfigs:
+UPDATE scoring_config SET is_active = 0;
+
+activeConfig:
+SELECT * FROM scoring_config WHERE is_active = 1 LIMIT 1;
+
+configHistory:
+SELECT * FROM scoring_config ORDER BY updated_ms DESC;
+
+insertPeak:
+INSERT OR REPLACE INTO peak_window VALUES ?;
+
+latestPeak:
+SELECT * FROM peak_window ORDER BY updated_ms DESC LIMIT 1;
+
+upsertSnapshot:
+INSERT OR REPLACE INTO moment_snapshot VALUES ?;
+
+snapshotsFor:
+SELECT * FROM moment_snapshot WHERE moment_id = ? ORDER BY day_key;
+
+kvGet:
+SELECT value FROM kv WHERE key = ?;
+
+kvPut:
+INSERT OR REPLACE INTO kv VALUES (?, ?);
+
+-- clear all local data (Setup) -----------------------------------------
+clearSamples:
+DELETE FROM sample;
+clearSessions:
+DELETE FROM workout_session;
+clearDaily:
+DELETE FROM daily_summary;
+clearRecords:
+DELETE FROM personal_record;
+clearSleep:
+DELETE FROM sleep_night;
+clearReadiness:
+DELETE FROM readiness_day;
+clearEvents:
+DELETE FROM plan_event;
+clearTasks:
+DELETE FROM prep_task_done;
+clearReflections:
+DELETE FROM event_reflection;
+clearMetrics:
+DELETE FROM health_metric;
+clearSleepSessions:
+DELETE FROM sleep_session;
+clearExercise:
+DELETE FROM exercise_session;
+clearLight:
+DELETE FROM light_sample;
+clearCognitive:
+DELETE FROM cognitive_session;
+clearRounds:
+DELETE FROM cognitive_round;
+clearBaselines:
+DELETE FROM user_baseline;
+clearConfigs:
+DELETE FROM scoring_config;
+clearPeaks:
+DELETE FROM peak_window;
+clearSnapshots:
+DELETE FROM moment_snapshot;
+clearKv:
+DELETE FROM kv;
+
+-- remove demo data only (Developers); derived tables are cleared and rebuilt by the caller --
+deleteDemoSamples:
+DELETE FROM sample WHERE device_id = 'demo';
+deleteDemoMetrics:
+DELETE FROM health_metric WHERE id LIKE 'demo:%';
+deleteDemoSleepSessions:
+DELETE FROM sleep_session WHERE id LIKE 'demo:%';
+deleteDemoExercise:
+DELETE FROM exercise_session WHERE id LIKE 'demo:%';
+deleteDemoLight:
+DELETE FROM light_sample WHERE id LIKE 'demo:%';
+deleteDemoRounds:
+DELETE FROM cognitive_round WHERE session_id LIKE 'demo:%';
+deleteDemoCognitive:
+DELETE FROM cognitive_session WHERE id LIKE 'demo:%';
+deleteDemoEvents:
+DELETE FROM plan_event WHERE id LIKE 'demo-%';
+deleteDemoTasks:
+DELETE FROM prep_task_done WHERE event_id LIKE 'demo-%';
+deleteDemoReflections:
+DELETE FROM event_reflection WHERE event_id LIKE 'demo-%';
+deleteDemoSnapshots:
+DELETE FROM moment_snapshot WHERE moment_id LIKE 'demo-%';
