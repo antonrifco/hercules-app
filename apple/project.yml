@@ -44,6 +44,7 @@ targets:
         PRODUCT_NAME: Hercules
         PRODUCT_BUNDLE_IDENTIFIER: com.hercules.app # same id as the Android app
         INFOPLIST_FILE: Config/iOS-Info.plist
+        CODE_SIGN_ENTITLEMENTS: Config/iOS.entitlements
         TARGETED_DEVICE_FAMILY: "1"
     preBuildScripts:
       - name: Build shared Kotlin framework

@@ -1,6 +1,9 @@
 import Foundation
 import UIKit
+import os
 import HerculesShared
+
+private let log = Logger(subsystem: "com.hercules.app", category: "Hercules")
 
 /// Flip to true once the backend exists (an HTTP sink in the shared core). Everything received from the watch is
 /// already queued (synced = 0) for that moment, exactly as on Android.
@@ -14,6 +17,7 @@ final class PhoneModel: ObservableObject {
 
     let core: HerculesCore
     private let link = PhoneLink()
+    private let health: HealthCollector
     private let defaults = UserDefaults.standard
 
     @Published private(set) var snapshot: PhoneSnapshot?
@@ -22,8 +26,12 @@ final class PhoneModel: ObservableObject {
     @Published private(set) var watch = WatchLinkStatus()
     @Published private(set) var lastWatchSync: Int64?
     @Published var serverMessage: String?
+    /// Health access not asked yet: the Data tab offers it.
+    @Published private(set) var healthNeedsAccess = false
 
     private var started = false
+    private var demo = false
+    private var readingHealth = false
     private var loop: Task<Void, Never>?
     private var pendingPush: Task<Void, Never>?
 
@@ -41,7 +49,9 @@ final class PhoneModel: ObservableObject {
     }
 
     private init() {
-        core = AppleFactory.shared.core(deviceId: DeviceIdentity.current)
+        let deviceId = DeviceIdentity.current
+        core = AppleFactory.shared.core(deviceId: deviceId)
+        health = HealthCollector(deviceId: deviceId)
         let config = UserDefaults.standard.string(forKey: Keys.sensorConfig) ?? SensorSync.shared.defaultConfig()
         let report = UserDefaults.standard.string(forKey: Keys.sensorReport)
         sensorConfig = config
@@ -66,20 +76,64 @@ final class PhoneModel: ObservableObject {
             self.schedulePush()
         }
         link.activate()
+        health.ingest = { [weak self] batch in await self?.ingestFromHealth(batch) ?? false }
         Task {
             #if DEBUG
-            // Debug only: launch with `-demo` (Xcode scheme argument or `xcrun simctl launch … -demo`).
-            if CommandLine.arguments.contains("-demo") { await loadDemo() }
+            // Debug only: launch with `-demo YES` (Xcode scheme argument or `xcrun simctl launch … -demo YES`).
+            if CommandLine.arguments.contains("-demo") {
+                demo = true
+                await loadDemo()
+            }
             #endif
             _ = try? await core.applyRetention()
+            if !demo && HealthCollector.isAvailable {
+                // Observers must be registered at every launch, including background launches by HealthKit.
+                if await health.needsAuthorization() { healthNeedsAccess = true } else { startHealth() }
+            }
             await reload()
         }
+    }
+
+    // MARK: Health
+
+    private var enabledSensors: [String] { SensorSync.shared.enabled(configJson: sensorConfig) }
+
+    /// Asked once, after onboarding or from the Data tab. Reads the Apple Watch's data that Health has synced to
+    /// this phone, so the morning score is ready even if the watch app was not opened.
+    func requestHealthAccess() async {
+        guard !demo, HealthCollector.isAvailable else { return }
+        do {
+            try await health.requestAuthorization()
+        } catch {
+            log.error("health authorization: \(error.localizedDescription, privacy: .public)")
+        }
+        healthNeedsAccess = false
+        startHealth()
+    }
+
+    private func startHealth() {
+        readingHealth = true
+        let sensors = enabledSensors
+        health.start(sensors)
+        Task { await health.collectAll(sensors) }
+    }
+
+    private func ingestFromHealth(_ batch: HealthBatch) async -> Bool {
+        do {
+            try await core.ingest(batch: batch)
+        } catch {
+            log.error("health ingest: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+        schedulePush()
+        return true
     }
 
     /// While the app is in front: recompute and push to the watch every 5 minutes (like the Android app).
     func becameActive() {
         loop?.cancel()
         loop = Task { [weak self] in
+            if let self, self.readingHealth { await self.health.collectAll(self.enabledSensors) }
             while !Task.isCancelled {
                 await self?.refreshAndPush()
                 try? await Task.sleep(nanoseconds: 300 * 1_000_000_000)
@@ -139,7 +193,11 @@ final class PhoneModel: ObservableObject {
 
     private func applyWatchContext(_ context: [String: Any]) {
         if let config = context[WatchLink.sensorConfigKey] as? String {
-            sensorConfig = SensorSync.shared.latest(localJson: sensorConfig, remoteJson: config)
+            let newest = SensorSync.shared.latest(localJson: sensorConfig, remoteJson: config)
+            if newest != sensorConfig {
+                sensorConfig = newest
+                if readingHealth { startHealth() }
+            }
         }
         if let report = context[WatchLink.sensorReportKey] as? String {
             sensorReport = report
@@ -183,6 +241,7 @@ final class PhoneModel: ObservableObject {
     func toggleSensor(_ kind: SensorKind, on: Bool) {
         sensorConfig = SensorSync.shared.toggle(configJson: sensorConfig, sensor: kind.name, on: on, nowMs: nowMs())
         sensors = SensorSync.shared.panel(configJson: sensorConfig, reportJson: sensorReport)
+        if readingHealth { startHealth() }
         Task { await pushToWatch() }
     }
 

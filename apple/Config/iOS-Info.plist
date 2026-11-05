@@ -20,6 +20,10 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Hercules reads your Apple Watch's sleep, heart rate and activity from Health to score how ready your brain is today.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Hercules does not write to Health.</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

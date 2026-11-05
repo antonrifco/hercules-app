@@ -7,6 +7,10 @@ import HerculesShared
 @MainActor
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        #if DEBUG
+        // Debug only, for screenshots: `-skipOnboarding YES`.
+        if UserDefaults.standard.bool(forKey: "skipOnboarding") { UserDefaults.standard.set(true, forKey: "onboarded") }
+        #endif
         PhoneModel.shared.start()
         return true
     }
@@ -26,7 +30,10 @@ struct HerculesApp: App {
                 if onboarded {
                     RootView()
                 } else {
-                    OnboardingView { onboarded = true }
+                    OnboardingView {
+                        onboarded = true
+                        Task { await model.requestHealthAccess() }
+                    }
                 }
                 if showLaunchArt {
                     LaunchArtView { showLaunchArt = false }
@@ -82,7 +89,34 @@ struct RootView: View {
         .sheet(isPresented: $guide) {
             GuideView().presentationDetents([.large]).presentationDragIndicator(.visible)
         }
+        #if DEBUG
+        .task { await openDebugScreen() }
+        #endif
     }
+
+    #if DEBUG
+    /// Debug only, for screenshots: `-screen plan|data|guide|add|event`.
+    private func openDebugScreen() async {
+        switch UserDefaults.standard.string(forKey: "screen") ?? "" {
+        case "plan": tab = .plan
+        case "data": tab = .data
+        case "guide": guide = true
+        case "add":
+            tab = .plan
+            adding = true
+        case "event":
+            tab = .plan
+            for _ in 0..<40 where openEventId == nil {
+                if let id = model.snapshot?.nextEvent?.event.id ?? model.snapshot?.events.first?.event.id {
+                    openEventId = id
+                } else {
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                }
+            }
+        default: break
+        }
+    }
+    #endif
 }
 
 private struct NewMomentButton: View {

@@ -34,6 +34,9 @@ internal fun curve(x: Double, points: List<Pair<Double, Double>>): Double {
  *  - state changes (start == end), as Wear OS reports them: asleep lasts until the next change;
  *  - asleep spans (end > start, value [ActivityState.ASLEEP]), as HealthKit reports sleep stages.
  *    Spans may overlap (several stages or sources) and arrive in any order; they are merged.
+ *
+ * Only the main sleep counts: wake-ups up to [MAX_WAKE_GAP_MS] stay inside the night, while a nap hours later
+ * (or an earlier evening doze) is a separate block and never moves bedtime or wake time.
  */
 class SleepAnalyzer(private val dayKeys: DayKeys) {
 
@@ -58,7 +61,7 @@ class SleepAnalyzer(private val dayKeys: DayKeys) {
         for (s in activity) {
             if (s.endMs > s.startMs && s.value == ActivityState.ASLEEP) raw += maxOf(s.startMs, from) to minOf(s.endMs, end)
         }
-        val intervals = union(raw.filter { it.second > it.first })
+        val intervals = mainBlock(union(raw.filter { it.second > it.first })) ?: return null
         val asleepMs = intervals.sumOf { it.second - it.first }
         if (asleepMs < 60 * MIN_MS) return null
 
@@ -76,6 +79,16 @@ class SleepAnalyzer(private val dayKeys: DayKeys) {
         )
     }
 
+    /** The block with the most sleep, where a block is a run of intervals separated by short wake-ups. */
+    private fun mainBlock(sorted: List<Pair<Long, Long>>): List<Pair<Long, Long>>? {
+        val blocks = mutableListOf<MutableList<Pair<Long, Long>>>()
+        for (iv in sorted) {
+            val last = blocks.lastOrNull()
+            if (last != null && iv.first - last.last().second <= MAX_WAKE_GAP_MS) last += iv else blocks += mutableListOf(iv)
+        }
+        return blocks.maxByOrNull { b -> b.sumOf { it.second - it.first } } // ties: the earlier block
+    }
+
     /** Sorted union of [start, end) intervals; touching or overlapping ones become one. */
     private fun union(intervals: List<Pair<Long, Long>>): List<Pair<Long, Long>> {
         val out = mutableListOf<Pair<Long, Long>>()
@@ -84,6 +97,11 @@ class SleepAnalyzer(private val dayKeys: DayKeys) {
             if (last != null && a <= last.second) out[out.lastIndex] = last.first to maxOf(last.second, b) else out += a to b
         }
         return out
+    }
+
+    companion object {
+        /** Longest time awake that still counts as a wake-up inside the same night. */
+        const val MAX_WAKE_GAP_MS = 2 * HOUR_MS
     }
 }
 

@@ -103,6 +103,32 @@ class SleepAnalyzerTest {
         assertEquals(20 * 60, s.asleepMinutes)
     }
 
+    @Test fun aNapDoesNotMoveTheWakeTime() {
+        // HealthKit: night 23:00–07:00, then a 50-minute nap at 13:00.
+        val hk = analyzer.analyze("2026-11-10", listOf(span(D - 60 * M, D + 7 * H), span(D + 13 * H, D + 13 * H + 50 * M)), D + 14 * H)!!
+        assertEquals(D + 7 * H, hk.endMs)
+        assertEquals(8 * 60, hk.asleepMinutes)
+        // Wear OS: the same with state changes, and a 90-minute nap at noon.
+        val wear = analyzer.analyze(
+            "2026-11-10",
+            listOf(
+                state(ActivityState.ASLEEP, D - 60 * M), state(ActivityState.AWAKE, D + 7 * H),
+                state(ActivityState.ASLEEP, D + 12 * H), state(ActivityState.AWAKE, D + 13 * H + 30 * M),
+            ),
+            D + 14 * H,
+        )!!
+        assertEquals(D - 60 * M, wear.startMs)
+        assertEquals(D + 7 * H, wear.endMs)
+        assertEquals(8 * 60, wear.asleepMinutes)
+    }
+
+    @Test fun aLongWakeUpStillCountsAsOneNight() {
+        // Awake 03:00–04:45 (under 2 h): both halves belong to the night.
+        val s = analyzer.analyze("2026-11-10", listOf(span(D - 60 * M, D + 3 * H), span(D + 4 * H + 45 * M, D + 7 * H)), D + 12 * H)!!
+        assertEquals(D - 60 * M, s.startMs)
+        assertEquals(4 * 60 + 2 * 60 + 15, s.asleepMinutes)
+    }
+
     @Test fun shortHealthKitNapIsIgnored() {
         assertNull(analyzer.analyze("2026-11-10", listOf(span(D + 13 * H, D + 13 * H + 40 * M)), D + 14 * H))
     }

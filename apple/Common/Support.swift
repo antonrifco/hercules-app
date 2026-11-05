@@ -39,8 +39,13 @@ enum Fmt {
     static func longDate(_ ms: Int64) -> String { longDateFormat.string(from: date(ms)) }
     /// "Wed 10:00"
     static func dayTime(_ ms: Int64) -> String { dayTimeFormat.string(from: date(ms)) }
-    /// "5 minutes ago"
-    static func relative(_ ms: Int64) -> String { relativeFormat.localizedString(for: date(ms), relativeTo: Date()) }
+    /// "5 minutes ago"; "just now" under a minute (and for a timestamp slightly ahead of this clock).
+    static func relative(_ ms: Int64) -> String {
+        let now = Date()
+        let then = date(ms)
+        guard now.timeIntervalSince(then) >= 60 else { return "just now" }
+        return relativeFormat.localizedString(for: then, relativeTo: now)
+    }
 
     /// "Today", "D-3", "Done"
     static func dayTag(_ daysUntil: Int32) -> String {
@@ -49,6 +54,9 @@ enum Fmt {
         return "D-\(daysUntil)"
     }
 }
+
+/// "07" for 7: clock fields and list numbers.
+func twoDigits(_ n: Int) -> String { n >= 0 && n < 10 ? "0\(n)" : "\(n)" }
 
 extension String {
     /// Shortens to at most `max` characters, ending with "…" when anything was cut.

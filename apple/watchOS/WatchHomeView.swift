@@ -11,6 +11,7 @@ import HerculesShared
  */
 struct WatchHomeView: View {
     @EnvironmentObject private var model: WatchModel
+    @State private var showSensors = false
 
     var body: some View {
         let home = model.home
@@ -47,9 +48,7 @@ struct WatchHomeView: View {
                 }
                 ForEach(moments, id: \.id) { MomentRowView(moment: $0) }
 
-                NavigationLink {
-                    SensorsView()
-                } label: {
+                Button { showSensors = true } label: {
                     Text("SENSORS")
                         .font(.system(size: 11))
                         .tracking(1.5)
@@ -65,6 +64,13 @@ struct WatchHomeView: View {
             .padding(.horizontal, 4)
         }
         .background(Color.black)
+        .navigationDestination(isPresented: $showSensors) { SensorsView() }
+        #if DEBUG
+        .task {
+            // Debug only, for screenshots: `-screen sensors`.
+            if UserDefaults.standard.string(forKey: "screen") == "sensors" { showSensors = true }
+        }
+        #endif
     }
 }
 

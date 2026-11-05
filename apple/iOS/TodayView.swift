@@ -8,23 +8,33 @@ struct TodayView: View {
     let onOpenGuide: () -> Void
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                TopLine(nowMs: snap?.nowMs ?? nowMs(), onOpenGuide: onOpenGuide)
-                if let r = snap?.readiness { Hero(r: r) } else { EmptyHero() }
-                if let snap { DayStripView(snap: snap, onOpen: onOpenEvent) }
-                if let r = snap?.readiness { Readouts(r: r) }
-                if let next = snap?.nextEvent { NextEventPanel(s: next, onOpen: onOpenEvent) }
-                if let r = snap?.readiness { Tips(tips: r.suggestions) }
-                SleepBlock(snap: snap)
-                CheckInBlock(existing: snap?.checkIn)
-                if let snap, snap.trendDays >= 2 { TrendBlock(snap: snap) }
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    TopLine(nowMs: snap?.nowMs ?? nowMs(), onOpenGuide: onOpenGuide)
+                    if let r = snap?.readiness { Hero(r: r) } else { EmptyHero() }
+                    if let snap { DayStripView(snap: snap, onOpen: onOpenEvent) }
+                    if let r = snap?.readiness { Readouts(r: r).id("readout") }
+                    if let next = snap?.nextEvent { NextEventPanel(s: next, onOpen: onOpenEvent) }
+                    if let r = snap?.readiness { Tips(tips: r.suggestions).id("tips") }
+                    SleepBlock(snap: snap).id("sleep")
+                    CheckInBlock(existing: snap?.checkIn).id("checkin")
+                    if let snap, snap.trendDays >= 2 { TrendBlock(snap: snap).id("trend") }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 4)
+                .padding(.bottom, 32)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 4)
-            .padding(.bottom, 32)
+            .scrollIndicators(.hidden)
+            #if DEBUG
+            .task {
+                // Debug only, for screenshots: `-scroll readout|tips|sleep|checkin|trend`.
+                guard let target = UserDefaults.standard.string(forKey: "scroll") else { return }
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                proxy.scrollTo(target, anchor: .top)
+            }
+            #endif
         }
-        .scrollIndicators(.hidden)
     }
 }
 
@@ -227,7 +237,7 @@ private struct TipRow: View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 14) {
-                    Text(String(format: "%02d", index + 1)).font(.system(size: 13, design: .monospaced)).foregroundStyle(color)
+                    Text(twoDigits(index + 1)).font(.system(size: 13, design: .monospaced)).foregroundStyle(color)
                     Text(tip.title)
                         .font(.body)
                         .foregroundStyle(Palette.text1)

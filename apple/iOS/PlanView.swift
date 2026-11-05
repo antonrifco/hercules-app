@@ -364,9 +364,9 @@ struct AddMomentSheet: View {
                     .padding(.top, 10)
                     HStack {
                         Eyebrow("Time").frame(maxWidth: .infinity, alignment: .leading)
-                        TimeStepper(value: String(format: "%02d", hour), onMinus: { hour = (hour + 23) % 24 }, onPlus: { hour = (hour + 1) % 24 })
+                        TimeStepper(value: twoDigits(hour), onMinus: { hour = (hour + 23) % 24 }, onPlus: { hour = (hour + 1) % 24 })
                         Text(":").font(.system(size: 20, design: .monospaced)).foregroundStyle(Palette.text2)
-                        TimeStepper(value: String(format: "%02d", minute), onMinus: { minute = (minute + 45) % 60 }, onPlus: { minute = (minute + 15) % 60 })
+                        TimeStepper(value: twoDigits(minute), onMinus: { minute = (minute + 45) % 60 }, onPlus: { minute = (minute + 15) % 60 })
                     }
                     .padding(.top, 14)
                     Group {

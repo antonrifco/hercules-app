@@ -11,6 +11,7 @@ on:
       - "*.gradle.kts"
       - "gradle.properties"
       - ".github/workflows/apple.yml"
+      - ".github/scripts/**"
   pull_request:
     paths:
       - "apple/**"
@@ -19,6 +20,7 @@ on:
       - "*.gradle.kts"
       - "gradle.properties"
       - ".github/workflows/apple.yml"
+      - ".github/scripts/**"
   workflow_dispatch:
 
 concurrency:
@@ -27,9 +29,11 @@ concurrency:
 
 jobs:
   xcode:
-    name: Xcode build (iOS + watchOS simulator)
+    name: Xcode build + run in simulators
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 75
+    permissions:
+      contents: write # publishes screenshots to the ci/apple-screenshots branch
     steps:
       - uses: actions/checkout@v4
 
@@ -82,6 +86,11 @@ jobs:
           echo "-----"
           grep -nE "^e: |FAILURE|What went wrong" -A6 build/xcodebuild.log | head -80 || true
 
+      # Boots an iPhone and an Apple Watch simulator, runs both apps with demo data, screenshots every screen and
+      # fails on crashes or apps that stop running.
+      - name: Run in simulators
+        run: bash .github/scripts/simulator-smoke.sh
+
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
@@ -89,6 +98,28 @@ jobs:
           name: xcodebuild-log
           path: build/xcodebuild.log
           if-no-files-found: ignore
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulator-screenshots
+          path: shots/
+          if-no-files-found: ignore
+
+      # Also as a single force-pushed commit on ci/apple-screenshots, to look at without downloading artifacts.
+      - name: Publish screenshots
+        if: always() && github.event_name == 'push' && hashFiles('shots/summary.txt') != ''
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          cd shots
+          git init -q -b ci/apple-screenshots
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Simulator screenshots for ${GITHUB_SHA::7} (${GITHUB_REF_NAME})"
+          git push -q -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci/apple-screenshots
 
   kotlin-native-tests:
     name: Shared tests on iOS simulator (Kotlin/Native)

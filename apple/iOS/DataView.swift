@@ -13,6 +13,9 @@ struct DataView: View {
                     Text("Body data").font(.system(size: 28, weight: .light)).foregroundStyle(Palette.text1)
                 }
                 WatchLinkSection(status: model.watch, lastSync: model.lastWatchSync)
+                if model.healthNeedsAccess {
+                    HealthAccessSection { Task { await model.requestHealthAccess() } }
+                }
                 SensorGrid(panel: model.sensors) { kind, on in model.toggleSensor(kind, on: on) }
                 TodayStats(day: model.data?.today)
                 PersonalBests(records: model.data?.records ?? [])
@@ -49,6 +52,19 @@ private struct WatchLinkSection: View {
                 Illustration("ill_no_watch").frame(height: 170).frame(maxWidth: .infinity)
                 Muted("Open Hercules on your Apple Watch. It syncs every 15 minutes over Bluetooth.").padding(.top, 4)
             }
+        }
+    }
+}
+
+/// Shown until Health access was asked: the phone reads the watch's nights from Health, so the score is ready
+/// in the morning even if the watch app was not opened.
+private struct HealthAccessSection: View {
+    let onAllow: () -> Void
+
+    var body: some View {
+        HSection("Health") {
+            Muted("Let Hercules read your Apple Watch's sleep, heart rate and activity from Health on this iPhone, so your score is ready each morning even before you open the watch app.")
+            OutlineButton(title: "Allow Health access", action: onAllow).padding(.top, 10)
         }
     }
 }

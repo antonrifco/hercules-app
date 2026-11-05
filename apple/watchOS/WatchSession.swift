@@ -12,6 +12,16 @@ private let log = Logger(subsystem: "com.hercules.app.watchkitapp", category: "H
 final class WatchSession: NSObject, WCSessionDelegate, WatchTransport {
     /// The phone's application context (latest `WatchState` and sensor choice).
     var onPhoneContext: (@MainActor ([String: Any]) -> Void)?
+    /// The session became usable, or the phone came into reach: a good moment to publish and sync.
+    var onReady: (@MainActor () -> Void)?
+
+    /// `sendMessage` only works while the phone is reachable, which on watchOS also means this app is in the
+    /// foreground (or running a workout). In the background there is nothing to send to.
+    var reachable: Bool {
+        guard WCSession.isSupported() else { return false }
+        let session = WCSession.default
+        return session.activationState == .activated && session.isReachable
+    }
 
     func activate() {
         guard WCSession.isSupported() else { return }
@@ -55,8 +65,15 @@ final class WatchSession: NSObject, WCSessionDelegate, WatchTransport {
     func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
         if let error { log.error("activation: \(error.localizedDescription, privacy: .public)") }
         let context = session.receivedApplicationContext
-        guard !context.isEmpty else { return }
-        Task { @MainActor in self.onPhoneContext?(context) }
+        Task { @MainActor in
+            if !context.isEmpty { self.onPhoneContext?(context) }
+            self.onReady?() // anything published before activation was dropped: publish again
+        }
+    }
+
+    func sessionReachabilityDidChange(_ session: WCSession) {
+        guard session.isReachable else { return }
+        Task { @MainActor in self.onReady?() }
     }
 
     func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {

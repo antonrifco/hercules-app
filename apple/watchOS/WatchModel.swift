@@ -33,6 +33,7 @@ final class WatchModel: ObservableObject {
     private var syncing = false
     private var syncAgain = false
     private var demo = false
+    private var isActive = false
     private var loop: Task<Void, Never>?
 
     private enum Keys {
@@ -55,6 +56,11 @@ final class WatchModel: ObservableObject {
 
         health.ingest = { [weak self] batch in await self?.ingest(batch) ?? false }
         link.onPhoneContext = { [weak self] context in self?.applyPhoneContext(context) }
+        link.onReady = { [weak self] in
+            guard let self else { return }
+            self.publishSensors()
+            Task { await self.syncNow() }
+        }
         link.activate()
         // Observers must be registered at every launch, including background launches by HealthKit.
         Task { await bootstrap() }
@@ -159,7 +165,10 @@ final class WatchModel: ObservableObject {
     }
 
     /// Summaries → retention → hand data to the phone. Runs one at a time; a request during a run queues one more.
+    /// In the background the phone is never reachable over `sendMessage`, so the data waits for the next time the
+    /// app is open (the phone meanwhile reads the same readings from Health); that is not reported as a problem.
     func syncNow() async {
+        guard isActive || link.reachable else { return }
         guard !syncing else {
             syncAgain = true
             return
@@ -203,6 +212,7 @@ final class WatchModel: ObservableObject {
 
     /// While the app is visible: collect, hand data to the phone and refresh the screen every minute.
     func becameActive() {
+        isActive = true
         loop?.cancel()
         loop = Task { [weak self] in
             guard let self else { return }
@@ -215,6 +225,7 @@ final class WatchModel: ObservableObject {
     }
 
     func resignedActive() {
+        isActive = false
         loop?.cancel()
         loop = nil
     }
