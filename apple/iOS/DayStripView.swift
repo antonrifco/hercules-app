@@ -119,13 +119,14 @@ struct DayStripView: View {
             ctx.stroke(line(ex, y + d, ex, bandY + bandH), with: .color(Palette.text2), lineWidth: 1)
 
             // Up to 27 title characters, and never wider than the strip.
+            let unbounded = CGSize(width: CGFloat.infinity, height: CGFloat.infinity)
             var title = e.event.title.clipped(27)
             var label = ctx.resolve(Text("\(Fmt.clock(e.event.startMs)) \(title)").font(.system(size: 10)).foregroundColor(Palette.text1))
-            var m = label.measure(in: CGSize(width: .infinity, height: .infinity))
+            var m = label.measure(in: unbounded)
             while m.width > size.width, title.count > 2 {
                 title = String(title.dropLast(2)) + "…"
                 label = ctx.resolve(Text("\(Fmt.clock(e.event.startMs)) \(title)").font(.system(size: 10)).foregroundColor(Palette.text1))
-                m = label.measure(in: CGSize(width: .infinity, height: .infinity))
+                m = label.measure(in: unbounded)
             }
             let lx = max(min(ex + 8, size.width - m.width), 0)
             ctx.draw(label, at: CGPoint(x: lx, y: y - m.height / 2 - 12), anchor: .topLeading)
