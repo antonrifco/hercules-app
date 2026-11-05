@@ -1,0 +1,2 @@
+Timestamp               Ty Process[PID:TID]
+2026-11-05 06:12:30.874 E  HerculesWatch[30309:15668] [com.hercules.app.watchkitapp:Health] authorization status: Missing com.apple.developer.healthkit entitlement.

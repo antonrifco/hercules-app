@@ -1,0 +1,12 @@
+Timestamp               Ty Process[PID:TID]
+2026-11-05 06:06:13.621 E  Hercules[15616:bd97] [com.hercules.app:Health] authorization status: Missing com.apple.developer.healthkit entitlement.
+2026-11-05 06:06:48.700 E  Hercules[18141:d65b] [com.hercules.app:Health] authorization status: Missing com.apple.developer.healthkit entitlement.
+2026-11-05 06:07:08.130 E  Hercules[19133:dfc7] [com.hercules.app:Health] authorization status: Missing com.apple.developer.healthkit entitlement.
+2026-11-05 06:07:22.746 E  Hercules[19867:e7f6] [com.hercules.app:Health] authorization status: Missing com.apple.developer.healthkit entitlement.
+2026-11-05 06:07:39.636 E  Hercules[20705:f1a8] [com.hercules.app:Health] authorization status: Missing com.apple.developer.healthkit entitlement.
+2026-11-05 06:07:53.756 E  Hercules[21471:f933] [com.hercules.app:Health] authorization status: Missing com.apple.developer.healthkit entitlement.
+2026-11-05 06:08:07.330 E  Hercules[22889:1068a] [com.hercules.app:Health] authorization status: Missing com.apple.developer.healthkit entitlement.
+2026-11-05 06:08:22.404 E  Hercules[23719:10eb1] [com.hercules.app:Health] authorization status: Missing com.apple.developer.healthkit entitlement.
+2026-11-05 06:08:42.391 E  Hercules[24784:11818] [com.hercules.app:Health] authorization status: Missing com.apple.developer.healthkit entitlement.
+2026-11-05 06:09:02.632 E  Hercules[25593:11fc9] [com.hercules.app:Health] authorization status: Missing com.apple.developer.healthkit entitlement.
+2026-11-05 06:09:20.107 E  Hercules[26778:12b17] [com.hercules.app:Health] authorization status: Missing com.apple.developer.healthkit entitlement.
