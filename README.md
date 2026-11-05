@@ -199,7 +199,7 @@ brew install xcodegen
 cd apple && xcodegen generate && open Hercules.xcodeproj
 ```
 
-The Kotlin side of the Apple targets also compiles on Linux (klibs only, no framework link), which is handy in CI:
+CI does the same on a macOS runner for every push that touches `apple/` or `shared/` (`.github/workflows/apple.yml`: simulator build of both apps, unsigned, plus the shared tests on an iOS simulator). The Kotlin side of the Apple targets also compiles on Linux (klibs only, no framework link):
 
 ```bash
 ./gradlew -Phercules.apple=true -Pkotlin.native.enableKlibsCrossCompilation=true :shared:compileKotlinIosSimulatorArm64 :shared:compileKotlinWatchosArm64
@@ -299,7 +299,7 @@ The UI is designed as a **precision instrument**, not a wellness toy: matte blac
 ## Known gaps
 
 - **Not yet verified on a physical Galaxy Watch.** Verified so far: compiled, unit-tested, lint-clean, and the phone UI was run on an Android emulator with demo data. Watch sleep detection, the phone↔watch state and sensor sync are untested on hardware.
-- **The iPhone and Apple Watch apps have not been built in Xcode yet.** They were written without access to a Mac. Verified so far: the Kotlin they call is unit-tested on the JVM (`HerculesCoreTest`), and `:shared` (including `appleMain`) compiles for `iosSimulatorArm64`, `watchosArm64` and `watchosDeviceArm64` via klib cross-compilation on Linux. Still to do: the first Xcode build (framework link, the generated Swift interface, the Swift code, the XcodeGen project), then a run on a simulator pair and on hardware (HealthKit background delivery, WatchConnectivity background wake-ups).
+- **The iPhone and Apple Watch apps build but have not been run yet.** Verified: CI (`.github/workflows/apple.yml`, macOS runner, Xcode 16.4) generates the project with XcodeGen and builds both apps for the simulator with no Swift errors or warnings; the shared tests pass on the JVM (`HerculesCoreTest`) and on an iOS simulator (Kotlin/Native). Not yet done: running on a simulator pair and on hardware (HealthKit background delivery, WatchConnectivity background wake-ups), and a signed device build.
 - On Apple Watch, resting heart rate comes from the same 10-minute-window rule as Wear OS; Apple Watch records heart rate less often outside workouts, so Recovery leans on sleeping heart rate. HealthKit's own resting-heart-rate type is not used yet.
 - Edits or deletions of past sleep in the Health app are not picked up (new samples are, deleted ones are not removed).
 - Sleep stages (deep/REM) and HRV need the Samsung Health Sensor SDK (partner approval). `Hrv.rmssd` is ready for it.

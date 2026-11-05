@@ -1,7 +1,7 @@
 # Hercules: Smartwatch Body-Sensor Tracker, Design Spec
 
 **Date:** 2026-11-02
-**Status:** Phase 1 (Android: Wear OS + phone) implemented with Kotlin Multiplatform. Phase 5 (iPhone + Apple Watch on the same `:shared`) implemented in `apple/`, not yet built in Xcode. Other phases planned in `docs/superpowers/plans/2026-11-02-hercules-kmp.md`.
+**Status:** Phase 1 (Android: Wear OS + phone) implemented with Kotlin Multiplatform. Phase 5 (iPhone + Apple Watch on the same `:shared`) implemented in `apple/` and building in CI (Xcode, simulator); not yet run on devices. Other phases planned in `docs/superpowers/plans/2026-11-02-hercules-kmp.md`.
 
 ## 1. Goal
 
@@ -112,7 +112,7 @@ Ties: the earliest achievement keeps the record.
 | 2 | Device verification on a Galaxy Watch | Next |
 | 3 | Samsung Health Sensor SDK (IBI → HRV, SpO2, skin temp) | Planned |
 | 4 | Backend + `HttpRemoteSink` (Ktor) + login (device-code flow) | Planned |
-| 5 | iOS app + watchOS app on `:shared` | ✅ Written (SwiftUI, HealthKit, WatchConnectivity), Kotlin side unit-tested and cross-compiled for Apple targets. First Xcode build and device run pending. |
+| 5 | iOS app + watchOS app on `:shared` | ✅ Built (SwiftUI, HealthKit, WatchConnectivity): Xcode simulator build and shared tests on an iOS simulator pass in CI. Run on simulator pair and devices pending. |
 
 ## 11. Out of scope for now
 Watch faces, complications and tiles, ECG, sleep staging, GPS routes, social features.

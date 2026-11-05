@@ -420,6 +420,6 @@ Same specification as the Android apps, on the same `:shared` core:
 - **Gradle:** `watchosDeviceArm64` target added. SKIE was not needed.
 - **apple/:** XcodeGen `project.yml`, SwiftUI iOS app (Today, Plan, event detail, add moment, sleep correction, check-in, Data, guide, onboarding, launch art), SwiftUI watchOS app (HealthKit observer + anchored queries with background delivery, WatchConnectivity sync, home with dial/tracking/moments, sensors, permission), asset catalogs from the existing artwork.
 
-Task 13: Steps 1 and 3 are covered by klib cross-compilation on Linux (`-Pkotlin.native.enableKlibsCrossCompilation=true`); Step 2 (`iosSimulatorArm64Test`) needs a Mac. Tasks 14 and 15: implemented as above, except workouts (`HKWorkoutSession`), which the Android app no longer has either since the pivot to readiness.
+Task 13: done. CI on a macOS runner (`.github/workflows/apple.yml`) runs `iosSimulatorArm64Test` (passes) and builds both apps in Xcode 16.4 (passes); klibs also cross-compile on Linux (`-Pkotlin.native.enableKlibsCrossCompilation=true`). `hercules.apple` stays false by default so Android-only machines don't need Xcode. Tasks 14 and 15: implemented as above, except workouts (`HKWorkoutSession`), which the Android app no longer has either since the pivot to readiness.
 
-Still open: first Xcode build and simulator/device run; HealthKit `restingHeartRate` and sleep deletions; iPhone-side HealthKit backfill.
+Still open: run on a simulator pair and on devices (signed build, HealthKit background delivery, WatchConnectivity wake-ups); HealthKit `restingHeartRate` and sleep deletions; iPhone-side HealthKit backfill.
