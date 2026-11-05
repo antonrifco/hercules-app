@@ -39,7 +39,7 @@ Hercules answers three questions every day:
 4. **Tips** are short headlines; tap one to see the detail.
 5. **The watch is kept simple:** today's score and peak hours, what it is tracking (sleep, heart, steps) and whether that data reached the phone, and a readiness forecast ring for each big moment in the next 7 days. Small animations (the bezel sweeping up to the score, a heart beating at your pulse, a breathing moon while calibrating) make it feel alive without extra battery-heavy assets.
 
-On an **Apple Watch**, sleep comes from the watch's own sleep tracking (turn on a Sleep schedule / Track Sleep with Apple Watch); Hercules reads it, with heart rate and activity, from Health.
+On an **Apple Watch**, sleep comes from the watch's own sleep tracking (turn on a Sleep schedule / Track Sleep with Apple Watch); Hercules reads it, with heart rate and activity, from Health. The iPhone app reads the same Apple Watch data from Health on the phone (it asks once, after onboarding), so the morning score is ready even if the watch app has not been opened.
 
 ## 3. Reading the score
 
@@ -172,7 +172,7 @@ All scoring and coaching logic is in `shared`, so either watch can compute a sco
 | Sleep | `UserActivityInfo` (`USER_ACTIVITY_ASLEEP / PASSIVE / EXERCISE`) | `.sleepAnalysis`, asleep stages (core, deep, REM, unspecified) | `activity_state`: points = state changes (Wear OS), spans = time asleep (HealthKit) | `SleepAnalyzer`: main sleep in the window 18:00 the day before → 14:00, at least 60 min, overlapping stages and sources merged |
 | Steps, calories, distance, floors | passive deltas | `.stepCount`, `.activeEnergyBurned`, `.distanceWalkingRunning`, `.flightsClimbed` (only samples recorded by the watch, so iPhone steps don't double count) | interval samples | Activity, daily stats, records |
 
-Only sensors that are **enabled** (`SensorConfig`) and **supported** by the watch are registered. The watch publishes a `SensorReport` (supported + active) so the phone shows the real state. On Apple Watch, HealthKit is asked for all six once, so switching one on later needs no new prompt.
+Only sensors that are **enabled** (`SensorConfig`) and **supported** by the watch are registered. The watch publishes a `SensorReport` (supported + active) so the phone shows the real state. On Apple Watch and iPhone, Health is asked for all six once, so switching one on later needs no new prompt.
 
 ## Data and sync
 
@@ -181,7 +181,8 @@ Only sensors that are **enabled** (`SensorConfig`) and **supported** by the watc
 - **Phone → watch:** after each batch the phone recomputes readiness and writes `WatchState` (score + next event) to DataClient `/hercules/state`. The watch uses it when it is less than 6 hours old and from today; otherwise it computes locally.
 - **Sensor choice:** `/hercules/sensors/config`, written by either side; the newest `updatedMs` wins. The watch reports back on `/hercules/sensors/report`.
 - **Backend (future):** the phone keeps everything queued (`synced = 0`). Swap `NoopRemoteSink` for an HTTP sink and set `SERVER_SYNC_ENABLED`. The wire contract is in `docs/contracts/sample-batch.v1.schema.json`.
-- **Apple Watch ↔ iPhone (WatchConnectivity):** the same batch JSON goes over `sendMessageData`, and the reply is the ack, so the same "only acked ids are synced" rule holds; sending wakes the iPhone app in the background. Readiness + events (`WatchState`) and the sensor choice travel as `applicationContext` (newest wins, like a Data Layer item). The watch syncs every 15 minutes (background app refresh), when HealthKit delivers new data, and every minute while open. A night that arrives late (the first 14-day backfill, or a watch that was away) is re-analyzed on both devices, so the personal baseline is complete from day one.
+- **Apple Watch ↔ iPhone (WatchConnectivity):** the same batch JSON goes over `sendMessageData`, and the reply is the ack, so the same "only acked ids are synced" rule holds; sending wakes the iPhone app in the background. `sendMessage` only reaches the phone while the watch app is in front, so the watch sends whenever it is open (every minute, and as soon as the phone comes into reach); in the background it only collects. Readiness + events (`WatchState`) and the sensor choice travel as `applicationContext` (newest wins, like a Data Layer item).
+- **iPhone ↔ Health:** Apple syncs the watch's Health data to the phone on its own, so the iPhone also reads it (same `HealthCollector`, observer queries with background delivery, only samples recorded by an Apple Watch). A reading that arrives both ways has the same deterministic id and is stored once. A night that arrives late (the first 14-day backfill, or a watch that was away) is re-analyzed on both devices, so the personal baseline is complete from day one.
 
 ## Build and test
 
@@ -246,10 +247,10 @@ Logs: `adb logcat -s Hercules HerculesSync HerculesState HerculesPhoneSync`.
 
 **iPhone and Apple Watch.** Run the Hercules scheme on an iPhone paired with an Apple Watch (or a paired iPhone + Apple Watch simulator pair). The watch asks once for Health access, reads the last 14 days, and starts sending batches to the phone.
 
-**Try it without a watch (debug builds only):** both schemes have a `-demo` launch argument (Edit Scheme → Run → Arguments, unticked by default). Ticked, the app loads the same 14-day demo as Android; on the watch it also skips the Health prompt so the UI can be checked in the simulator. From the command line:
+**Try it without a watch (debug builds only):** both schemes have a `-demo` launch argument (Edit Scheme → Run → Arguments, unticked by default). Ticked, the app loads the same 14-day demo as Android and skips Health, so the UI can be checked in the simulator. Other debug-only arguments open a screen directly: `-skipOnboarding YES`, `-screen plan|data|guide|add|event` (iPhone) or `-screen sensors` (watch), and `-scroll readout|tips|sleep|checkin|trend` (iPhone Today) or `-scroll tracking|moments` (watch). From the command line:
 
 ```bash
-xcrun simctl launch booted com.hercules.app -demo
+xcrun simctl launch booted com.hercules.app -skipOnboarding YES -demo YES
 ```
 
 The iPhone also has **Data → Developer → Load 14 days of demo data**. Logs: Console.app, subsystems `com.hercules.app` and `com.hercules.app.watchkitapp`.
@@ -260,7 +261,7 @@ The iPhone also has **Data → Developer → Load 14 days of demo data**. Logs: 
 |---|---|---|
 | `MobileGraph`, `WatchSyncListenerService` | `PhoneModel`, `PhoneLink` | Batch in → `HerculesCore.receiveFromWatch` → ack reply → state pushed back |
 | `WearGraph`, `SyncWorker`, `SyncStatus` | `WatchModel` | `HerculesCore.syncToPhone(transport:)` with `WatchSession` as the transport |
-| `PassiveDataService`, `PassiveRegistrar` | `HealthCollector` | Observer queries + background delivery, anchored reads |
+| `PassiveDataService`, `PassiveRegistrar` | `HealthCollector` (watch and iPhone) | Observer queries + background delivery, anchored reads in 2,000-sample chunks |
 | `WatchStateSource` | `HerculesCore.watchState` / `watchHome` | Phone's view when under 6 h old and from today, else computed on the watch |
 | Data Layer items `/hercules/state`, `/hercules/sensors/*` | `applicationContext` keys in `apple/Common/Support.swift` (`WatchLink`) | Each side's context carries all of its keys |
 | Compose screens | SwiftUI screens with the same names, wording, colours and layout | Material Rounded icons → SF Symbols; the watch dial sits around the score instead of on the (round) display edge |
@@ -299,7 +300,7 @@ The UI is designed as a **precision instrument**, not a wellness toy: matte blac
 ## Known gaps
 
 - **Not yet verified on a physical Galaxy Watch.** Verified so far: compiled, unit-tested, lint-clean, and the phone UI was run on an Android emulator with demo data. Watch sleep detection, the phone↔watch state and sensor sync are untested on hardware.
-- **The iPhone and Apple Watch apps build but have not been run yet.** Verified: CI (`.github/workflows/apple.yml`, macOS runner, Xcode 16.4) generates the project with XcodeGen and builds both apps for the simulator with no Swift errors or warnings; the shared tests pass on the JVM (`HerculesCoreTest`) and on an iOS simulator (Kotlin/Native). Not yet done: running on a simulator pair and on hardware (HealthKit background delivery, WatchConnectivity background wake-ups), and a signed device build.
+- **The iPhone and Apple Watch apps run in simulators but not yet on hardware.** On every push that touches them, CI (`.github/workflows/apple.yml`, macOS runner, Xcode 16.4) builds both apps, runs them in an iPhone and an Apple Watch simulator with demo data, screenshots every screen and fails on crashes (`.github/scripts/simulator-smoke.sh`; the screenshots are also force-pushed to the `ci/apple-screenshots` branch). The shared tests pass on the JVM and on an iOS simulator. Not yet verified: a signed build on an iPhone + Apple Watch with real Health data, HealthKit background delivery, and WatchConnectivity between real devices (CI simulators are not paired).
 - On Apple Watch, resting heart rate comes from the same 10-minute-window rule as Wear OS; Apple Watch records heart rate less often outside workouts, so Recovery leans on sleeping heart rate. HealthKit's own resting-heart-rate type is not used yet.
 - Edits or deletions of past sleep in the Health app are not picked up (new samples are, deleted ones are not removed).
 - Sleep stages (deep/REM) and HRV need the Samsung Health Sensor SDK (partner approval). `Hrv.rmssd` is ready for it.

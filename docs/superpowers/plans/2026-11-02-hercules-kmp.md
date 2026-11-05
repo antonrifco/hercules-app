@@ -417,6 +417,8 @@ Same specification as the Android apps, on the same `:shared` core:
 - **Sleep from HealthKit:** stored as `activity_state` *spans* (value asleep, start..end). `SleepAnalyzer` now merges spans with the Wear OS state-change points, so overlapping stages, several sources and out-of-order batches give the same night. Points-only behaviour is unchanged.
 - **History:** nights touched by a batch (HealthKit's 14-day backfill, a watch that was away) are re-analyzed on both devices, so the baseline is complete from day one.
 - **Wire contract:** `activity_state` added to the schema's type enum (it was already sent by Wear OS).
+- **Sync on Apple:** `sendMessage` only reaches the phone while the watch app is in front, so the iPhone also reads the Apple Watch's data from its own Health store (Apple syncs it); identical sample ids keep it to one copy. The watch sends whenever it is open.
+- **Sleep:** only the main sleep block counts (wake-ups up to 2 h stay in the night), so a nap no longer moves the wake time, on Wear OS too.
 - **Gradle:** `watchosDeviceArm64` target added. SKIE was not needed.
 - **apple/:** XcodeGen `project.yml`, SwiftUI iOS app (Today, Plan, event detail, add moment, sleep correction, check-in, Data, guide, onboarding, launch art), SwiftUI watchOS app (HealthKit observer + anchored queries with background delivery, WatchConnectivity sync, home with dial/tracking/moments, sensors, permission), asset catalogs from the existing artwork.
 
