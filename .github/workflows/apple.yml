@@ -1,0 +1,122 @@
+name: Apple apps
+
+# Builds the iPhone and Apple Watch apps in Xcode (simulator, unsigned) and runs the shared Kotlin tests on an
+# iOS simulator. The Android side is checked locally with ./gradlew (see README).
+on:
+  push:
+    paths:
+      - "apple/**"
+      - "shared/**"
+      - "gradle/**"
+      - "*.gradle.kts"
+      - "gradle.properties"
+      - ".github/workflows/apple.yml"
+  pull_request:
+    paths:
+      - "apple/**"
+      - "shared/**"
+      - "gradle/**"
+      - "*.gradle.kts"
+      - "gradle.properties"
+      - ".github/workflows/apple.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: apple-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  xcode:
+    name: Xcode build (iOS + watchOS simulator)
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Cache Kotlin/Native toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+
+      - name: Tools
+        run: |
+          brew install xcodegen
+          xcodebuild -version
+          xcodegen --version
+
+      - name: Generate Xcode project
+        working-directory: apple
+        run: xcodegen generate
+
+      # The Hercules scheme builds the embedded HerculesWatch app too. Each target's pre-build script runs
+      # Gradle (:shared:embedAndSignAppleFrameworkForXcode) for its SDK. arm64 only: the shared module has
+      # Apple Silicon simulator targets, and macos-15 runners are Apple Silicon.
+      - name: Build iPhone + Apple Watch apps
+        run: |
+          set -o pipefail
+          mkdir -p build
+          xcodebuild build \
+            -project apple/Hercules.xcodeproj \
+            -scheme Hercules \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/DerivedData \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee build/xcodebuild.log \
+            | grep -E "error:|warning: .*\.swift|\*\* BUILD|Build shared Kotlin|> Task :shared:link|BUILD (SUCCESSFUL|FAILED)" || true
+          grep -q "\*\* BUILD SUCCEEDED \*\*" build/xcodebuild.log
+
+      - name: Swift errors (if any)
+        if: failure()
+        run: |
+          grep -nE "error:" build/xcodebuild.log | head -100 || true
+          echo "-----"
+          grep -nE "^e: |FAILURE|What went wrong" -A6 build/xcodebuild.log | head -80 || true
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: build/xcodebuild.log
+          if-no-files-found: ignore
+
+  kotlin-native-tests:
+    name: Shared tests on iOS simulator (Kotlin/Native)
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Cache Kotlin/Native toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+
+      - name: commonTest on iosSimulatorArm64
+        run: ./gradlew -Phercules.apple=true :shared:iosSimulatorArm64Test --stacktrace
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kotlin-native-test-reports
+          path: shared/build/reports/tests/
+          if-no-files-found: ignore
