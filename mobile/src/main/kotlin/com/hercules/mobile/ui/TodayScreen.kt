@@ -294,7 +294,7 @@ fun TodayScreen(
         add("peak" to { PeakCard(data.peak, brief?.peak, brief?.peakNow == true, nowMs) })
         add("day" to { Banded(bright = true) { DayStrip(g.cognitive.dayKeys, data, nowMs) } })
         add("sleep" to { SleepBlock(data.sleep, data.sleepWeek, data.today, g) })
-        if (data.trend.size >= 2) add("week" to { Banded { WeekBlock(data.trend, data.sleepWeek, g) } })
+        if (data.trend.size >= 2) add("week" to { Banded { WeekBlock(data.trend, data.sleepWeek, data.today, g) } })
         add("stats" to {
             TodayStats(summary, totals, syncing) {
                 syncing = true
@@ -336,7 +336,7 @@ fun TodayScreen(
                     var rating by remember(reflectId) { mutableStateOf(data.reflections.firstOrNull { it.eventId == reflectId }?.rating) }
                     ReflectContent(ev?.event?.title ?: "Your Moment", r?.score, rating) { v ->
                         rating = v
-                        reflectId?.let { id -> scope.launch { g.cognitive.store.saveReflection(EventReflection(id, v, System.currentTimeMillis())) } }
+                        reflectId?.let { id -> scope.launch { g.cognitive.store.saveReflection(EventReflection(id, v, System.currentTimeMillis())); g.pushToWatch() } }
                     }
                 }
                 Sheet.LEARN -> LearnContent(r)
@@ -362,7 +362,7 @@ private fun AssessCard(brief: DailyBrief, sessions: List<CognitiveSession>, onPl
         Muted(
             when {
                 runs.isEmpty() -> "A 2-minute game that shows how sharp you are. Play any time, as often as you like."
-                else -> "Play as often as you like. Today's score is the median of your games."
+                else -> "Scores are out of 100. 50 is your usual; higher is sharper. Today counts the middle score of your games."
             },
         )
         if (runs.isNotEmpty()) {
@@ -377,8 +377,9 @@ private fun AssessCard(brief: DailyBrief, sessions: List<CognitiveSession>, onPl
                     Text(
                         when {
                             median == null -> "not counted"
-                            scored.size == 1 -> "1 game"
-                            else -> "Median"
+                            median >= 65 -> "Sharp"
+                            median >= 40 -> "Usual"
+                            else -> "Below usual"
                         },
                         style = MaterialTheme.typography.bodySmall, color = Cyan, maxLines = 1,
                     )
@@ -691,6 +692,7 @@ private fun SleepBlock(sleep: SleepNight?, week: List<SleepNight>, today: String
             labels = keys.map { weekdayShort(dk.startOf(it) + 12 * HOUR) },
             colorOf = { scoreColor(sleepScorer.sleepDurationScore(it.toDouble())) },
             target = 7f,
+            valueLabel = { "%.1f".format(UiLocale, it) },
         )
         VSpace(6.dp)
         Muted("Hours asleep per night. The dashed line is the 7h target.")
@@ -761,9 +763,8 @@ private fun CorrectSleepDialog(g: MobileGraph, today: String, sleep: SleepNight?
 
 /** This week against last week, then the 14-day shape. All of it is measured or reported, only the score is an estimate. */
 @Composable
-private fun WeekBlock(trend: List<Readiness>, sleepWeek: List<SleepNight>, g: MobileGraph) {
+private fun WeekBlock(trend: List<Readiness>, sleepWeek: List<SleepNight>, today: String, g: MobileGraph) {
     val dk = g.cognitive.dayKeys
-    val today = trend.last().dayKey
     val keys = (-13..0).map { dk.plusDays(today, it) }
     val byKey = trend.associateBy { it.dayKey }
     val thisWeek = keys.takeLast(7).mapNotNull { byKey[it] }
@@ -789,6 +790,7 @@ private fun WeekBlock(trend: List<Readiness>, sleepWeek: List<SleepNight>, g: Mo
             labels = keys.mapIndexed { i, k -> if (i % 2 == 1) k.takeLast(2) else "" },
             colorOf = { scoreColor(it.roundToInt()) },
             target = 70f,
+            valueLabel = { it.roundToInt().toString() },
             // The month only under the first date shown and wherever it changes.
             subLabels = run {
                 var last = ""
@@ -810,17 +812,18 @@ fun List<EventStatus>.nextRelevant(nowMs: Long): EventStatus? =
 
 @Composable
 internal fun TodayStats(s: DailySummary?, hc: HealthConnectImporter.DayTotals? = null, syncing: Boolean = false, onSync: (() -> Unit)? = null) {
-    // Same order as the score: the Hercules watch when it was worn today, otherwise the phone's Health Connect.
-    // Never summed. The watch's summary row starts at zero, so a watch zero means "not recorded".
+    // Same rule as the score: the Hercules watch (when worn today) and Health Connect are compared and the fuller
+    // reading wins, never summed. The watch's summary row starts at zero, so a watch zero means "not recorded".
     val worn = s != null && s.hrSampleCount > 0
     fun Long.orNull() = takeIf { it > 0 }
     fun Double.orNull() = takeIf { it > 0.0 }
-    val steps = s?.steps?.orNull()?.takeIf { worn } ?: hc?.steps
-    val km = (s?.distanceMeters?.orNull()?.takeIf { worn } ?: hc?.distanceM)?.div(1000)
-    val kcal = s?.calories?.orNull()?.takeIf { worn } ?: hc?.activeKcal
-    val floors = s?.floors?.orNull()?.takeIf { worn } ?: hc?.floors?.roundToInt()?.toLong()
-    val resting = s?.restingHr ?: hc?.restingHr
-    val peak = s?.maxHr ?: hc?.maxHr
+    fun <T : Comparable<T>> fuller(a: T?, b: T?): T? = if (a != null && b != null) maxOf(a, b) else a ?: b
+    val steps = fuller(s?.steps?.orNull()?.takeIf { worn }, hc?.steps)
+    val km = fuller(s?.distanceMeters?.orNull()?.takeIf { worn }, hc?.distanceM)?.div(1000)
+    val kcal = fuller(s?.calories?.orNull()?.takeIf { worn }, hc?.activeKcal)
+    val floors = fuller(s?.floors?.orNull()?.takeIf { worn }, hc?.floors?.roundToInt()?.toLong())
+    val resting = listOfNotNull(s?.restingHr?.toLong(), hc?.restingHr).minOrNull()
+    val peak = fuller(s?.maxHr?.toLong(), hc?.maxHr)
     val stats = listOf(
         Stat(Icons.AutoMirrored.Rounded.DirectionsWalk, "Steps", steps?.let { "%,d".format(UiLocale, it) } ?: "--", "", "Movement today"),
         Stat(Icons.Rounded.Straighten, "Distance", km?.let { "%.1f".format(UiLocale, it) } ?: "--", "km", "Walked and run"),

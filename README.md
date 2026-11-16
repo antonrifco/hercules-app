@@ -40,7 +40,7 @@ Hercules answers three questions, in three menus:
 
 **Reminders** (all optional, in Setup): morning score, Beat the Clock, Moment prep (evening before and shortly ahead), bedtime, after a Moment, and focus start (off by default). **Only one device delivers each reminder:** the watch while it is worn, the phone otherwise.
 
-**Watch:** score with Herc, level, confidence and what it is based on, one next step, Beat the Clock (same rules as the phone), upcoming Moments, and a tracking-status screen.
+**Watch:** score with Herc, level and confidence, one next step, today's pulse, sleep and steps, Beat the Clock (same rules as the phone), upcoming Moments, and a tracking-status screen. A **watch-face complication** ("Hercules score") puts the score on the watch face; tapping it opens the app.
 
 ## 3. Reading the score
 
@@ -66,11 +66,11 @@ It reads like *"Medium confidence · 4 of 5 signals · 5 days of data"*, and bel
 
 | Dimension | Weight | What is measured | Evidence |
 |---|---|---|---|
-| Sleep & Recovery | 40% | 3-night sleep load (0.60 / 0.25 / 0.15; 7–9 h = full marks) 55%, sleep regularity 25%, continuity 20% | Van Dongen 2003, Lim & Dinges 2010, Watson 2015, Phillips 2017 |
+| Sleep & Recovery | 45% | 3-night sleep load (0.60 / 0.25 / 0.15; 7–9 h = full marks) 55%, sleep regularity 25%, continuity 20% | Van Dongen 2003, Lim & Dinges 2010, Watson 2015, Phillips 2017 |
 | Cardiovascular | 20% | HRV (ln RMSSD, 3-night average vs. your 28-day usual) 70%, resting heart rate vs. usual 30% | Plews 2013/2014, Buchheit 2014, Forte 2019 |
 | Physical Activity | 10% | Yesterday's steps, exercise minutes, low-movement hours (more is not always better) | Chang 2012, Wheeler 2020 |
-| Circadian Alignment | 10% | Phone light sensor: bright mornings and days, dim evenings | Brown 2022 |
-| Cognitive Performance | 20% | Today's Beat the Clock: accuracy, consistency, bias | |
+| Circadian Alignment | 5% | Phone light sensor: bright mornings and days, dim evenings | Brown 2022 |
+| Cognitive Performance | 20% | Today's Beat the Clock: accuracy, consistency, bias. One game counts 60% of this weight, two 80%, three or more in full | |
 
 - **Missing is never zero.** A missing dimension is left out and the others are re-weighted; it lowers confidence, not the score.
 - **Optional extras only subtract** (max −10 in total, after 7 days of history): breathing rate or skin temperature clearly above your usual (−5 each), low overnight oxygen (−5), glucose under 3.9 mmol/L in the last 24 hours (−5) or under 3.0 (−10), for about 15 minutes on a CGM (one dip is ignored) or one meter reading. A low glucose reading from the last 3 hours also shows a live banner on Home.
@@ -176,6 +176,7 @@ adb shell am start -n com.hercules.app/com.hercules.mobile.ui.MainActivity --ez 
 ```
 
 You can also use **Setup → Developers → Load demo data**.
+The same page has a **Score check**: how well the body part of your score has tracked your Beat the Clock results (needs 30 days with both).
 
 The watch has the same switch, so its UI can be checked on an unpaired Wear OS emulator (grant the sensor permissions first, or tap Allow):
 

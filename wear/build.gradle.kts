@@ -58,6 +58,7 @@ dependencies {
     implementation(libs.androidx.work)
     implementation(libs.wear.ongoing)
     implementation(libs.wear.remote)
+    implementation(libs.wear.complications) // the score on the watch face
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)

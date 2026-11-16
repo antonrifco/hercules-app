@@ -28,7 +28,7 @@ adb shell am start -n com.hercules.app/com.hercules.mobile.ui.MainActivity --ez 
 
 ## Where things are
 
-- `shared/.../readiness/Scoring.kt`: dimensions, `DefaultScoring` (config v2: 40/20/10/10/20),
+- `shared/.../readiness/Scoring.kt`: dimensions, `DefaultScoring` (config v3: 45/20/10/5/20; one game counts 60%, two 80%, three in full),
   `DimensionScorer` (sleep load, ln-HRV, light curves, `modifiers` for optional extras),
   `ReadinessCalculator.combine` (CRS, coverage, `confidenceFor(coverage, historyDays)`, confidence hint),
   `SCORING_ENGINE_VERSION`.
@@ -54,5 +54,5 @@ adb shell am start -n com.hercules.app/com.hercules.mobile.ui.MainActivity --ez 
 - Changing the formula: bump `SCORING_ENGINE_VERSION`; changing default weights: bump `DefaultScoring.CONFIG_VERSION`.
 - Phone and watch Beat the Clock rules are identical; baselines are per device.
 - Same signal from several sources: the more reliable wins, never summed (SPEC §14). Sleep: staged Health Connect
-  night → Hercules watch → unstaged HC. HRV: HC → watch. Resting HR, steps: watch (if worn that day) → HC.
+  night → Hercules watch → unstaged HC. HRV: HC → watch. Resting HR, steps: watch (if worn that day) and HC compared, the fuller reading wins (higher steps, lower resting HR).
   Light: phone. Without a watch, everything must still work from Health Connect and phone sensors.

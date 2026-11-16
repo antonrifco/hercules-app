@@ -2,6 +2,7 @@ package com.hercules.shared.readiness
 
 import kotlinx.serialization.Serializable
 import kotlin.math.abs
+import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import kotlin.random.Random
@@ -203,6 +204,24 @@ object BeatTheClock {
             id, deviceKind, deviceId, window, dayKey, startMs, endMs, status, practice,
             accErr, conErr, bias, acc, con, bs, total, GAME_VERSION, rounds,
         )
+    }
+
+    /** The quick check's five stress choices, 1 (calm) to 5 (tense). Energy uses Herc's five faces instead. */
+    val STRESS_FACES = listOf("😌", "🙂", "😐", "😟", "😰")
+
+    /** A game score in plain words. 50 is the player's usual, so the words compare against that. */
+    fun verdict(score: Int): String = when {
+        score >= 65 -> "Sharper than usual"
+        score >= 40 -> "About your usual"
+        score >= 20 -> "Below your usual"
+        else -> "Well below your usual"
+    }
+
+    /** The usual error a game was scored against, recovered from its accuracy score (null at the clamped ends). */
+    fun usualError(s: CognitiveSession): Double? {
+        val err = s.accuracyError ?: return null
+        val score = s.accuracyScore?.takeIf { it in 1..99 } ?: return null
+        return maxOf(err, ERROR_FLOOR) / 2.0.pow((50 - score) / 20.0)
     }
 
     fun baselineSessions(history: List<CognitiveSession>, device: DeviceKind, beforeMs: Long): List<CognitiveSession> =

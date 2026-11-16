@@ -174,8 +174,10 @@ class CognitiveService(
 
     /**
      * One value per day for [type], from the more reliable source (spec §14); never summed:
-     * - Steps and resting heart rate: the Hercules watch when it was worn that day (on the body all day beats a
-     *   phone that is often not carried), otherwise Health Connect.
+     * - Steps and resting heart rate: the Hercules watch (when it was worn that day) and Health Connect are compared
+     *   and the fuller reading wins: the higher step count, the lower resting heart rate. Either source can miss
+     *   part of the day (a watch worn for an hour, a phone left on the desk), and a partial day always reads low on
+     *   steps and high on resting heart rate.
      * - HRV: Health Connect first. A wearable's own app measures it overnight at rest, the standard for recovery;
      *   the Hercules watch only has beat-to-beat readings it happens to catch, so it is the fallback.
      */
@@ -196,7 +198,12 @@ class CognitiveService(
             }
             v?.let { d.dayKey to it }
         }.toMap()
-        return if (type == HealthMetricType.HRV_RMSSD) watch + hc else hc + watch
+        return when (type) {
+            HealthMetricType.HRV_RMSSD -> watch + hc
+            HealthMetricType.STEPS_DAILY -> (hc.keys + watch.keys).associateWith { k -> maxOf(hc[k] ?: 0.0, watch[k] ?: 0.0) }
+            HealthMetricType.RESTING_HR -> (hc.keys + watch.keys).associateWith { k -> minOf(hc[k] ?: Double.MAX_VALUE, watch[k] ?: Double.MAX_VALUE) }
+            else -> hc + watch
+        }
     }
 
     private suspend fun nightInputs(fromKey: String, toKey: String) = store.sleepRange(fromKey, toKey).map { it.toInput(dayKeys) }
@@ -313,7 +320,7 @@ class CognitiveService(
         if (runs.isEmpty()) return null
         fun med(f: (CognitiveSession) -> Int?) = Stats.median(runs.mapNotNull { f(it)?.toDouble() })!!.roundToInt()
         val label = if (runs.size == 1) "1 run · ${runs[0].deviceKind.label}" else "Median of ${runs.size} runs"
-        return CognitiveInput(med { it.accuracyScore }, med { it.consistencyScore }, med { it.biasScore }, label)
+        return CognitiveInput(med { it.accuracyScore }, med { it.consistencyScore }, med { it.biasScore }, label, runs.size)
     }
 
     // ---------------------------------------------------------------- refresh
@@ -325,6 +332,12 @@ class CognitiveService(
     suspend fun refresh(atMs: Long = clock()): Evaluation = withContext(Dispatchers.Default) { mutex.withLock {
         val today = dayKeys.of(atMs)
         for (back in RECALC_DAYS downTo 0) resolveSleep(dayKeys.plusDays(today, -back), atMs)
+        // Health Connect hands over its history in one go (30 days on the first import). Give each older night its
+        // resolved row once, so sleep consistency, the 3-night load and the week chart can use it from day one.
+        for (back in RECALC_DAYS + 1..SLEEP_BACKFILL_DAYS) {
+            val day = dayKeys.plusDays(today, -back)
+            if (store.sleep(day) == null && store.sleepSessions(day).any { it.quality == DataQuality.VALID }) resolveSleep(day, atMs)
+        }
 
         rescoreUnscored(today, atMs)
         recalcRecent(today, atMs)
@@ -398,6 +411,12 @@ class CognitiveService(
     // ---------------------------------------------------------------- Beat the Clock
 
     /** Valid, non-practice runs played today, on either device. */
+    /** How well the body part of the score has tracked Beat the Clock over the last [ScoreCheck.WINDOW_DAYS] days. */
+    suspend fun scoreCheck(): ScoreCheck.Result {
+        val from = dayKeys.plusDays(today(), -ScoreCheck.WINDOW_DAYS)
+        return ScoreCheck.run(store.readinessRange(from, today()), store.sessionsFrom(dayKeys.startOf(from)))
+    }
+
     suspend fun playsToday(dayKey: String = today()): Int =
         store.sessionsFrom(dayKeys.startOf(dayKey)).count { it.dayKey == dayKey && it.valid && !it.practice }
 
@@ -617,6 +636,28 @@ class CognitiveService(
     suspend fun clearAll() = store.clearAll()
 
     /**
+     * The user's best days over the last year, from whatever source delivered them (Health Connect, the watch, the
+     * games): highest score, sharpest game, longest sleep, most steps, lowest resting heart rate, highest HRV.
+     */
+    suspend fun personalBests(): List<PersonalBest> {
+        val to = today()
+        val from = dayKeys.plusDays(to, -365)
+        val out = mutableListOf<PersonalBest>()
+        store.readinessRange(from, to).maxByOrNull { it.score }?.let { out += PersonalBest("Highest score", "${it.score}", it.dayKey) }
+        store.sessionsFrom(dayKeys.startOf(from))
+            .filter { it.gameVersion == BeatTheClock.GAME_VERSION && it.valid && it.cognitiveScore != null }
+            .maxByOrNull { it.cognitiveScore!! }?.let { out += PersonalBest("Sharpest Beat the Clock", "${it.cognitiveScore} / 100", it.dayKey) }
+        store.sleepRange(from, to).maxByOrNull { it.asleepMinutes }?.let { out += PersonalBest("Longest sleep", formatDuration(it.asleepMinutes), it.dayKey) }
+        dailyValues(HealthMetricType.STEPS_DAILY, from, to).filterValues { it > 0 }.maxByOrNull { it.value }
+            ?.let { out += PersonalBest("Most steps", "${it.value.roundToInt()}", it.key) }
+        dailyValues(HealthMetricType.RESTING_HR, from, to).minByOrNull { it.value }
+            ?.let { out += PersonalBest("Lowest resting heart rate", "${it.value.roundToInt()} bpm", it.key) }
+        dailyValues(HealthMetricType.HRV_RMSSD, from, to).maxByOrNull { it.value }
+            ?.let { out += PersonalBest("Highest HRV", "${it.value.roundToInt()} ms", it.key) }
+        return out
+    }
+
+    /**
      * The latest glucose reading from the last 3 hours when it is low (under 3.9 mmol/L, IHSG/ADA 2017), else null.
      * Shown live on Home rather than folded into the score: a low is a now-problem, not a day trend.
      */
@@ -627,7 +668,12 @@ class CognitiveService(
 
     companion object {
         const val WAKE_HISTORY_NIGHTS = 14
+        /** How far back a Health Connect night without a resolved row is still picked up. Matches the first import. */
+        const val SLEEP_BACKFILL_DAYS = 30
         const val DEFAULT_WAKE_MINUTE = 7 * 60
         private const val DAY_MS = 24 * HOUR_MS
     }
 }
+
+/** One personal best: what it is, the value in plain words, and the day it happened. */
+data class PersonalBest(val label: String, val value: String, val dayKey: String)

@@ -46,9 +46,13 @@ class MobileGraph(private val context: Context) {
         _lastWatchSync.value = atMs
     }
 
-    /** Pulls new Health Connect records (30 days the first time, then the last 3) and recalculates. */
+    /**
+     * Pulls new Health Connect records and recalculates: 30 days the first time, then the last 3, or back to the last
+     * import when that is longer ago (phone off, or background reading not allowed), so no day is skipped.
+     */
     suspend fun importHealthAndRefresh() {
-        val days = if (healthConnect.lastImportMs() == null) 30 else 3
+        val last = healthConnect.lastImportMs()
+        val days = if (last == null) 30 else ((System.currentTimeMillis() - last) / 86_400_000L + 3).toInt().coerceIn(3, 30)
         runCatching { healthConnect.import(days) }.onFailure { Log.w(TAG, "health import failed", it) }
         refreshAndPushToWatch()
     }

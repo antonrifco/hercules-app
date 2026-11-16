@@ -51,6 +51,7 @@ wear-compose-material3 = { module = "androidx.wear.compose:compose-material3", v
 wear-compose-foundation = { module = "androidx.wear.compose:compose-foundation", version.ref = "wearCompose" }
 wear-compose-navigation = { module = "androidx.wear.compose:compose-navigation", version.ref = "wearCompose" }
 wear-remote = { module = "androidx.wear:wear-remote-interactions", version = "1.1.0" }
+wear-complications = { module = "androidx.wear.watchface:watchface-complications-data-source-ktx", version = "1.2.1" }
 wear-ongoing = { module = "androidx.wear:wear-ongoing", version.ref = "wearOngoing" }
 health-services = { module = "androidx.health:health-services-client", version.ref = "healthServices" }
 play-services-wearable = { module = "com.google.android.gms:play-services-wearable", version.ref = "playWearable" }

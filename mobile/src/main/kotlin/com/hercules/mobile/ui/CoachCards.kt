@@ -155,7 +155,7 @@ fun InsufficientCard(calc: ReadinessCalculation?, onWhy: () -> Unit, onSetup: ()
         Text(calc?.insufficientReason ?: "Waiting on the first reading", style = MaterialTheme.typography.headlineSmall, color = Text1, textAlign = TextAlign.Center)
         VSpace(8.dp)
         Text(
-            calc?.insufficientDetail ?: "Every score starts with last night's sleep. Connect Health Connect or wear the watch to bed.",
+            calc?.insufficientDetail ?: "One reading is enough to start: sleep, heart rate, steps, daylight or a Beat the Clock game.",
             style = MaterialTheme.typography.bodyMedium, color = Text2, textAlign = TextAlign.Center,
             modifier = Modifier.padding(horizontal = 8.dp),
         )

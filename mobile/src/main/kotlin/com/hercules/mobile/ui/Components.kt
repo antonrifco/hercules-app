@@ -42,7 +42,10 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -312,22 +315,33 @@ fun MiniBars(
     barHeight: Dp = 84.dp,
     /** Optional second line under each label (e.g. the month under the date). */
     subLabels: List<String>? = null,
+    /** The number written above each bar. Null = no numbers. */
+    valueLabel: ((Float) -> String)? = null,
 ) {
+    val measurer = rememberTextMeasurer()
+    val valueStyle = TextStyle(fontFamily = Mono, fontSize = 9.sp, color = Text1)
     Column {
-        Canvas(Modifier.fillMaxWidth().height(barHeight)) {
+        Canvas(Modifier.fillMaxWidth().height(if (valueLabel != null) barHeight + 14.dp else barHeight)) {
             val n = values.size.coerceAtLeast(1)
             val slot = size.width / n
             val w = (slot * 0.34f).coerceAtMost(10.dp.toPx())
+            // Room above the tallest bar for its number.
+            val top = if (valueLabel != null) 14.dp.toPx() else 0f
+            val full = size.height - top
             values.forEachIndexed { i, v ->
                 val x = i * slot + (slot - w) / 2
-                drawRect(Hairline, Offset(x + w / 2 - 0.5f, 0f), Size(1f, size.height))
+                drawRect(Hairline, Offset(x + w / 2 - 0.5f, top), Size(1f, full))
                 if (v != null) {
-                    val h = (v / max).coerceIn(0.03f, 1f) * size.height
+                    val h = (v / max).coerceIn(0.03f, 1f) * full
                     drawRoundRect(colorOf(v), Offset(x, size.height - h), Size(w, h), CornerRadius(w / 2))
+                    if (valueLabel != null) {
+                        val t = measurer.measure(valueLabel(v), valueStyle, maxLines = 1, softWrap = false)
+                        drawText(t, topLeft = Offset(i * slot + (slot - t.size.width) / 2, size.height - h - t.size.height - 2.dp.toPx()))
+                    }
                 }
             }
             target?.let {
-                val y = size.height - (it / max).coerceIn(0f, 1f) * size.height
+                val y = size.height - (it / max).coerceIn(0f, 1f) * full
                 drawLine(Text2.copy(alpha = 0.6f), Offset(0f, y), Offset(size.width, y), 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 8f)))
             }
         }

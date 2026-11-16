@@ -67,6 +67,10 @@ import androidx.compose.material.icons.rounded.MonitorHeart
 import androidx.compose.material.icons.rounded.Stairs
 import androidx.compose.material.icons.rounded.Straighten
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import com.google.android.gms.wearable.DataClient
+import com.google.android.gms.wearable.Wearable
+import com.hercules.shared.WearProtocol
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -233,8 +237,18 @@ private fun HerculesWearNav(launch: Intent?, onLaunchHandled: () -> Unit) {
     LaunchedEffect(reload) {
         while (true) {
             state = runCatching { ctx.graph.watchState.current() }.getOrNull() ?: state
+            com.hercules.wear.complication.ScoreComplicationService.refresh(ctx) // keep the watch face in step
             delay(60_000L)
         }
+    }
+    // The phone pushes a new state whenever its score changes: show it at once instead of on the next minute tick.
+    DisposableEffect(Unit) {
+        val client = Wearable.getDataClient(ctx)
+        val listener = DataClient.OnDataChangedListener { events ->
+            if (events.any { it.dataItem.uri.path == WearProtocol.STATE_PATH }) reload++
+        }
+        client.addListener(listener)
+        onDispose { client.removeListener(listener) }
     }
     LaunchedEffect(launch) {
         val i = launch ?: return@LaunchedEffect
@@ -350,6 +364,7 @@ internal fun HomeScreen(
     val schedule = state?.let { s -> s.upcoming.ifEmpty { listOfNotNull(s.nextEvent) } }.orEmpty()
     val listState = rememberScalingLazyListState(initialCenterItemIndex = 0)
     val dk = g.cognitive.dayKeys
+    val screenW = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         Bezel(r?.score, r?.band?.color ?: WText2)
@@ -358,25 +373,33 @@ internal fun HomeScreen(
                 // 1 · How am I doing?
                 item {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(top = 6.dp)) {
-                        if (r == null) {
+                        if (state == null) {
+                            // Still reading today's state: say so, rather than claiming there is no data.
                             Herc(HercMood.SLEEPING, size = 52.dp)
-                            WEyebrow("Insufficient data", WCyan)
-                            val calc = state?.evaluation?.calc
+                            WEyebrow("Loading", WCyan)
+                        } else if (r == null) {
+                            Herc(HercMood.SLEEPING, size = 52.dp)
+                            WEyebrow("No score yet", WCyan)
                             Text(
-                                calc?.insufficientReason ?: "Waiting on the first reading",
-                                fontSize = 10.sp, color = WText2, textAlign = TextAlign.Center, maxLines = 3,
-                                modifier = Modifier.padding(horizontal = 10.dp),
+                                "Wear the watch tonight, or play Beat the Clock now.",
+                                fontSize = 11.sp, color = Color.White, textAlign = TextAlign.Center, maxLines = 3,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp),
                             )
-                            calc?.let { WEyebrow("Coverage ${(it.coverage * 100).roundToInt()}%", WText2) }
                         } else {
-                            Herc(r.band.mood(), size = 40.dp)
-                            CountUp(r.score)
+                            // Herc beside the number, sized to the screen, so the first glance fills the round face
+                            // instead of a thin column down the middle. Then how sure the number is.
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Herc(r.band.mood(), size = (screenW * 0.26f).dp)
+                                Spacer(Modifier.width(8.dp))
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    CountUp(r.score, (screenW * 0.21f).coerceIn(40f, 68f).sp)
+                                    Text(
+                                        r.band.label.uppercase(), color = color, fontSize = 14.sp, letterSpacing = 3.sp, fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.semantics { contentDescription = "Your cognitive state ${r.score}, ${r.band.label}" },
+                                    )
+                                }
+                            }
                             WEyebrow(r.calc.confidence.label, WText2)
-                            Text(r.calc.confidenceBasis, fontSize = 9.sp, color = WText2, textAlign = TextAlign.Center)
-                            Text(
-                                r.band.label.uppercase(), color = color, fontSize = 13.sp, letterSpacing = 3.sp, fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.semantics { contentDescription = "Your cognitive state ${r.score}, ${r.band.label}" },
-                            )
                         }
                         brief?.peak?.let { w ->
                             Spacer(Modifier.height(4.dp))
@@ -397,10 +420,26 @@ internal fun HomeScreen(
                 if (sync?.problem != null) item { SyncLine(sync, pending, now, onClick = onStatus) }
                 // Quick actions
                 item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.padding(top = 8.dp)) {
+                    Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
                         QuickAction(Icons.Rounded.Timer, "Clock", done = (state?.playsToday ?: 0) > 0, onClick = onPlay)
                         QuickAction(Icons.Rounded.Bedtime, "Tonight", onClick = onTonight)
                         QuickAction(Icons.Rounded.MonitorHeart, "Tracking", warn = sync?.problem != null, onClick = onStatus)
+                    }
+                }
+                // Today at a glance, from this watch: latest pulse, last night's sleep, steps so far.
+                item {
+                    val hr by remember { g.repo.observeLatest(MetricType.HEART_RATE) }.collectAsStateWithLifecycle(null)
+                    val daily by remember(dk.of(now)) { g.repo.observeDaily(dk.of(now)) }.collectAsStateWithLifecycle(null)
+                    Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
+                        StatColumn(hr?.takeIf { now - it.startMs < 10 * 60_000L }?.value?.toInt()?.toString() ?: "--", "bpm") {
+                            Icon(Icons.Rounded.Favorite, null, tint = WCyan, modifier = Modifier.size(15.dp))
+                        }
+                        StatColumn(state?.sleepMinutes?.let { formatDuration(it) } ?: "--", "sleep") {
+                            Icon(Icons.Rounded.Bedtime, null, tint = WCyan, modifier = Modifier.size(15.dp))
+                        }
+                        StatColumn(daily?.steps?.takeIf { it > 0 }?.toString() ?: "--", "steps") {
+                            Icon(Icons.AutoMirrored.Rounded.DirectionsWalk, null, tint = WCyan, modifier = Modifier.size(15.dp))
+                        }
                     }
                 }
                 // Moments have their own page, as on the phone: Home stays about today.
@@ -451,12 +490,12 @@ private fun QuickAction(icon: ImageVector, label: String, done: Boolean = false,
     val tint = when { warn -> Color(0xFFFFC857); done -> WCyan; else -> Color.White }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
-            Modifier.size(46.dp).clip(CircleShape).background(WPanel).border(1.dp, if (done) WCyan.copy(alpha = 0.6f) else WLine, CircleShape)
+            Modifier.size(52.dp).clip(CircleShape).background(WPanel).border(1.dp, if (done) WCyan.copy(alpha = 0.6f) else WLine, CircleShape)
                 .clickable(onClick = onClick).semantics { contentDescription = label },
             contentAlignment = Alignment.Center,
         ) { Icon(if (done) Icons.Rounded.CheckCircle else icon, null, tint = tint, modifier = Modifier.size(22.dp)) }
         Spacer(Modifier.height(3.dp))
-        Text(label.uppercase(), fontSize = 8.sp, letterSpacing = 0.8.sp, color = WText2, maxLines = 1)
+        Text(label.uppercase(), fontSize = 9.sp, letterSpacing = 0.8.sp, color = WText2, maxLines = 1)
     }
 }
 
@@ -743,9 +782,9 @@ private fun Bezel(score: Int?, color: Color) {
     var target by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(score) { target = (score ?: 0).toFloat() }
     val fill by animateFloatAsState(target, tween(1400, easing = FastOutSlowInEasing), label = "bezel")
-    val spin = rememberInfiniteTransition(label = "comet")
-    val head by spin.animateFloat(0f, 100f, infiniteRepeatable(tween(4000, easing = LinearEasing)), label = "head")
     val calibrating = score == null
+    // The comet only runs while there is no score: an endless animation keeps the screen redrawing and the watch warm.
+    val head = if (calibrating) rememberInfiniteTransition(label = "comet").animateFloat(0f, 100f, infiniteRepeatable(tween(4000, easing = LinearEasing)), label = "head") else null
     Canvas(Modifier.fillMaxSize()) {
         val c = center
         val r = size.minDimension / 2
@@ -755,7 +794,7 @@ private fun Bezel(score: Int?, color: Color) {
             val r0 = r - if (major) 9.dp.toPx() else 5.dp.toPx()
             val r1 = r - 1.5.dp.toPx()
             val tick = if (calibrating) {
-                val behind = ((head - i) + 100f) % 100f // 0 at the head, growing behind it
+                val behind = (((head?.value ?: 0f) - i) + 100f) % 100f // 0 at the head, growing behind it
                 if (behind < 18f) WCyan.copy(alpha = 1f - behind / 18f) else WLine
             } else if (i <= fill) color else WLine
             drawLine(
@@ -770,72 +809,19 @@ private fun Bezel(score: Int?, color: Color) {
 
 /** The score counts up in step with the bezel. */
 @Composable
-private fun CountUp(score: Int) {
+private fun CountUp(score: Int, size: androidx.compose.ui.unit.TextUnit = 46.sp) {
     var target by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(score) { target = score.toFloat() }
     val v by animateFloatAsState(target, tween(1400, easing = FastOutSlowInEasing), label = "count")
-    Text("${v.roundToInt()}", fontSize = 46.sp, fontWeight = FontWeight.Thin, color = Color.White, letterSpacing = (-2).sp)
-}
-
-/** Breathing crescent moon with twinkling stars: "waiting for a night of data". */
-/** Heart with rings expanding outward, used on the permission screen. */
-/** An icon that beats like a heart at [bpm]. */
-@Composable
-private fun BeatingIcon(icon: ImageVector, bpm: Int, size: Int, tint: Color = WCyan) {
-    val period = (60_000 / bpm.coerceIn(40, 180))
-    val t = rememberInfiniteTransition(label = "beat")
-    val s by t.animateFloat(
-        1f, 1f,
-        infiniteRepeatable(
-            keyframes {
-                durationMillis = period
-                1f at 0
-                1.22f at (period * 0.12f).toInt()
-                1f at (period * 0.28f).toInt()
-                1.1f at (period * 0.38f).toInt()
-                1f at (period * 0.55f).toInt()
-            },
-        ),
-        label = "scale",
-    )
-    Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(size.dp).graphicsLayer { scaleX = s; scaleY = s })
-}
-
-@Composable
-private fun HeartStat(bpm: Int?) {
-    StatColumn(bpm?.toString() ?: "--", "bpm") { BeatingIcon(Icons.Rounded.Favorite, bpm ?: 60, 15) }
-}
-
-@Composable
-private fun SleepStat(value: String) {
-    val t = rememberInfiniteTransition(label = "moon")
-    val a by t.animateFloat(0.55f, 1f, infiniteRepeatable(tween(1800), RepeatMode.Reverse), label = "glow")
-    val tilt by t.animateFloat(-8f, 8f, infiniteRepeatable(tween(2600, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "tilt")
-    StatColumn(value, "sleep") {
-        Icon(Icons.Rounded.Bedtime, contentDescription = null, tint = WCyan.copy(alpha = a), modifier = Modifier.size(15.dp).graphicsLayer { rotationZ = tilt })
-    }
-}
-
-@Composable
-private fun StepsStat(steps: Long) {
-    val t = rememberInfiniteTransition(label = "walk")
-    val bob by t.animateFloat(0f, 1f, infiniteRepeatable(tween(520, easing = LinearEasing), RepeatMode.Reverse), label = "bob")
-    StatColumn("$steps", "steps") {
-        Icon(
-            Icons.AutoMirrored.Rounded.DirectionsWalk,
-            contentDescription = null,
-            tint = WCyan,
-            modifier = Modifier.size(15.dp).graphicsLayer { translationY = -bob * 2.dp.toPx(); rotationZ = (bob - 0.5f) * 6f },
-        )
-    }
+    Text("${v.roundToInt()}", fontSize = size, lineHeight = size, fontWeight = FontWeight.Thin, color = Color.White, letterSpacing = (-2).sp)
 }
 
 @Composable
 private fun StatColumn(value: String, label: String, icon: @Composable () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) { icon() }
-        Text(value, fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = Color.White)
-        Text(label.uppercase(), fontSize = 8.sp, letterSpacing = 1.sp, color = WText2)
+        Text(value, fontFamily = FontFamily.Monospace, fontSize = 16.sp, color = Color.White)
+        Text(label.uppercase(), fontSize = 9.sp, letterSpacing = 1.sp, color = WText2)
     }
 }
 

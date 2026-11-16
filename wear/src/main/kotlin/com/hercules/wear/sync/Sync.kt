@@ -56,6 +56,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             g.retention.apply(System.currentTimeMillis())
             val out = g.phoneSync.syncOnce()
             SyncStatus.record(applicationContext, out.stoppedReason, delivered = out.samplesSynced + out.sessionsSynced + out.assessmentsSynced)
+            com.hercules.wear.complication.ScoreComplicationService.refresh(applicationContext)
             Log.i(TAG, "sync: newRecords=${broken.size} samples=${out.samplesSynced} sessions=${out.sessionsSynced} assessments=${out.assessmentsSynced} stopped=${out.stoppedReason}")
             Result.success()
         } catch (e: Exception) {
