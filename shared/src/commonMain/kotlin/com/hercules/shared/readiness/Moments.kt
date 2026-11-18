@@ -228,12 +228,16 @@ class MomentPreparationEngine {
                 )
                 out += PrepTask("no_exertion", "Save your energy", "Keep training light so you peak on the day.", RecCategory.RECOVERY, 30 + boost, if (strained) "Recovery signals are below your usual." else null)
                 out += PrepTask("dim_evening", "Dim the lights in the evening", "Avoid bright light in the last two hours before bed.", RecCategory.LIGHT, 45 + boost, null)
+                out += PrepTask("no_alcohol", "Skip alcohol", "Even a little fragments sleep and raises your sleeping heart rate.", RecCategory.RECOVERY, 35 + boost, null)
+                if (c.daysUntil == 1) out += PrepTask("caffeine_cut", "No caffeine after 14:00", "Caffeine late in the day delays and lightens sleep.", RecCategory.SLEEP, 20 + boost, null)
             }
             PrepPhase.DAY -> {
                 val before = c.eventStartMs > c.nowMs
                 if (before) {
-                    out += PrepTask("no_rush", "Build in time. No rushing.", "Plan to be ready well before ${c.clock(c.eventStartMs)}.", RecCategory.EVENT_DAY, 10 + boost, null)
-                    out += PrepTask("distractions", "Kill distractions", "Silence notifications and clear your space before you start.", RecCategory.EVENT_DAY, 20 + boost, null)
+                    // Only what Hercules can see or influence: movement, breathing and light. Nothing about the content
+                    // of the Moment itself.
+                    out += PrepTask("walk", "Take a 10-minute walk", "Light movement before ${c.clock(c.eventStartMs)} lifts alertness and settles nerves.", RecCategory.EVENT_DAY, 10 + boost, null)
+                    out += PrepTask("breathing", "2 minutes of box breathing", "In for 4, hold 4, out for 4, hold 4. It lowers your heart rate before you start.", RecCategory.EVENT_DAY, 20 + boost, null)
                     peakTask(c)?.let { out += it.copy(priority = it.priority + boost) }
                     if (c.nowMs < c.eventStartMs - HOUR && c.clockHour(c.nowMs) < 12) out += morningLight(boost, c.lightScore)
                 }
@@ -257,10 +261,10 @@ class MomentPreparationEngine {
 
     private fun peakTask(c: PrepContext): PrepTask? = when (peakAlignment(c)) {
         PeakAlignment.WITHIN_PEAK -> PrepTask("peak_within", "Your moment falls in your peak window", "You tend to perform best at this time of day.", RecCategory.COGNITIVE, 40, "Based on your Beat the Clock history.")
-        PeakAlignment.NEAR_PEAK -> PrepTask("peak_near", "Do your final preparation in your peak window", "It's close to the moment: use it for a last focused run-through.", RecCategory.COGNITIVE, 40, "Based on your Beat the Clock history.")
+        PeakAlignment.NEAR_PEAK -> PrepTask("peak_near", "Your moment is close to your peak window", "You tend to be near your sharpest around this time.", RecCategory.COGNITIVE, 40, "Based on your Beat the Clock history.")
         PeakAlignment.OUTSIDE_PEAK -> c.peak?.window?.let { w ->
             val wake = c.eventDayWakeMs ?: return null
-            PrepTask("peak_outside", "Use ${c.clock(w.startMs(wake))}–${c.clock(w.endMs(wake))} for your hardest preparation", "That's when you tend to perform best. The moment itself stays where it is.", RecCategory.COGNITIVE, 40, "Based on your Beat the Clock history.")
+            PrepTask("peak_outside", "Your moment is outside your peak window (${c.clock(w.startMs(wake))}–${c.clock(w.endMs(wake))})", "A walk and a few slow breaths beforehand help you arrive sharper.", RecCategory.COGNITIVE, 40, "Based on your Beat the Clock history.")
         }
         PeakAlignment.UNKNOWN -> null
     }

@@ -8,7 +8,7 @@ import kotlin.math.roundToInt
 /** Version of the scoring engine (formulas, normalization, missing-data rules). Stored with every score. */
 private const val DAY_MS = 86_400_000L
 
-const val SCORING_ENGINE_VERSION = "3.1.0"
+const val SCORING_ENGINE_VERSION = "3.2.0"
 
 /** The five readiness dimensions of the CRS (spec §2.3). */
 @Serializable
@@ -541,6 +541,9 @@ enum class ReadinessConfidence(val label: String) {
     INSUFFICIENT("Not enough data"),
 }
 
+/** Why there is no score between midnight and waking: the day's score starts with the night behind it. */
+const val REASON_BEFORE_WAKE = "Today's score starts when you wake up"
+
 /** Full earlier days of data for Medium confidence. */
 const val MIN_CONFIDENT_DAYS = 3
 /** Full earlier days of data for High confidence. */
@@ -595,9 +598,9 @@ data class ReadinessCalculation(
     val modifiers: List<ScoreModifier> = emptyList(),
 )
 
-/** "4 of 5 signals · 6 days of data", shown next to the confidence level. */
+/** "4 of 5 score parts · 6 days of data", shown next to the confidence level. */
 val ReadinessCalculation.confidenceBasis: String
-    get() = "$signalsIn of $signalsTotal signals · " + if (historyDays == 0) "first day of data" else "$historyDays ${if (historyDays == 1) "day" else "days"} of data"
+    get() = "$signalsIn of $signalsTotal score parts · " + if (historyDays == 0) "first day of data" else "$historyDays ${if (historyDays == 1) "day" else "days"} of data"
 
 /** What adding each missing signal takes, in words that point at an action. */
 private val Dimension.toAdd: String
@@ -632,6 +635,9 @@ private fun List<String>.inWords(): String = when (size) {
 val ReadinessCalculation.insufficientDetail: String?
     get() {
         if (score != null) return null
+        if (insufficientReason == REASON_BEFORE_WAKE) {
+            return "It's still night. Today's score appears after you wake up, from last night's sleep and recovery."
+        }
         return "Nothing has come in for today yet. One reading is enough to start: last night's sleep, heart rate, " +
             "steps, daylight or a Beat the Clock game. Connect Health Connect, wear the watch, or play a game."
     }

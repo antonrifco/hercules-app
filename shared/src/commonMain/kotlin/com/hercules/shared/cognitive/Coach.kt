@@ -68,6 +68,8 @@ data class SleepAdvice(
     /** Estimated score tomorrow if you sleep 6 h / the target tonight, everything else unchanged. */
     val ifShort: Int?,
     val ifTarget: Int?,
+    /** The day you wake up on after this night. One bedtime reminder per night is keyed to it. */
+    val wakeDayKey: String = "",
 )
 
 /** Beat the Clock today. Optional and any time: play once or several times; the day uses the median. */
@@ -155,10 +157,14 @@ class Coach(private val dayKeys: DayKeys) {
         sleepTargetMinutes: Int = (ScoringParams.V1.sleepTargetHours * 60).toInt(),
     ): SleepAdvice {
         val today = dayKeys.of(nowMs)
-        val tomorrow = dayKeys.plusDays(today, 1)
+        val wakeMinute = baselineWakeMinute ?: r?.let { dayKeys.minuteOfDay(it.wakeMs) } ?: (7 * 60)
+        // After midnight and not yet up, "tonight" is the night you are in: plan for this morning's wake-up, not for
+        // the night after it.
+        val stillTonight = lastNight?.dayKey != today && nowMs < dayKeys.startOf(today) + wakeMinute * MIN_MS
+        val tomorrow = if (stillTonight) today else dayKeys.plusDays(today, 1)
         val tomorrowStart = dayKeys.startOf(tomorrow)
         val tomorrowEvent = events.firstOrNull { dayKeys.of(it.event.startMs) == tomorrow && it.phase != PrepPhase.DONE }
-        val usualWake = tomorrowStart + (baselineWakeMinute ?: r?.let { dayKeys.minuteOfDay(it.wakeMs) } ?: (7 * 60)) * MIN_MS
+        val usualWake = tomorrowStart + wakeMinute * MIN_MS
         val wake = tomorrowEvent?.let { minOf(usualWake, it.event.startMs - (2.5 * HOUR_MS).toLong()) } ?: usualWake
         val bed = wake - sleepTargetMinutes * MIN_MS - 15 * MIN_MS
         val shift = lastNight?.let {
@@ -167,7 +173,7 @@ class Coach(private val dayKeys: DayKeys) {
             val diff = ((usualBed - plan) + 24 * 60) % (24 * 60)
             if (diff in 10..120 && it.asleepMinutes < sleepTargetMinutes - 30) (diff / 10) * 10 else null
         }
-        val note = tomorrowEvent?.let { "Tomorrow: ${it.event.title} at ${dayKeys.clock(it.event.startMs)}." }
+        val note = tomorrowEvent?.let { "${if (stillTonight) "Today" else "Tomorrow"}: ${it.event.title} at ${dayKeys.clock(it.event.startMs)}." }
         return SleepAdvice(
             bedtimeMs = bed,
             targetMinutes = sleepTargetMinutes,
@@ -175,6 +181,7 @@ class Coach(private val dayKeys: DayKeys) {
             tomorrowNote = note,
             ifShort = r?.let { projectTomorrow(it, 6.0) },
             ifTarget = r?.let { projectTomorrow(it, sleepTargetMinutes / 60.0) },
+            wakeDayKey = tomorrow,
         )
     }
 

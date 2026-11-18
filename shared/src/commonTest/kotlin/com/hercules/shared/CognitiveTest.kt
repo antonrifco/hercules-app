@@ -133,7 +133,7 @@ class ScoringTest {
         assertNotNull(c.score)
         assertEquals(ReadinessConfidence.LOW, c.confidence)
         assertEquals(0, c.historyDays)
-        assertEquals("1 of 5 signals · first day of data", c.confidenceBasis)
+        assertEquals("1 of 5 score parts · first day of data", c.confidenceBasis)
         assertTrue(c.confidenceHint!!.contains("3 more days"))
     }
 
@@ -153,7 +153,7 @@ class ScoringTest {
         val week = calc.calculate(withDays(7), DefaultScoring.DEFAULT)
         assertEquals(ReadinessConfidence.HIGH, week.confidence)
         assertNull(week.confidenceHint)
-        assertEquals("5 of 5 signals · 7 days of data", week.confidenceBasis)
+        assertEquals("5 of 5 score parts · 7 days of data", week.confidenceBasis)
     }
 
     @Test fun extrasOnlySubtractAndAreCapped() {
@@ -490,7 +490,10 @@ class MomentsTest {
         assertTrue(e.recommendations(ctx(6)).any { it.id == "sleep_schedule" })
         assertTrue(e.recommendations(ctx(1)).any { it.id == "sleep_opportunity" })
         assertTrue(e.recommendations(ctx(1)).none { it.id == "sleep_schedule" })
-        assertTrue(e.recommendations(ctx(0)).any { it.id == "no_rush" })
+        assertTrue(e.recommendations(ctx(0)).any { it.id == "walk" })
+        // Nothing about the content of the Moment: only sleep, recovery, movement, breathing, light and the peak window.
+        val allowed = setOf("sleep_schedule", "recovery", "move_sustainably", "morning_light", "keep_routine", "check_readiness", "sleep_opportunity", "no_exertion", "dim_evening", "no_alcohol", "caffeine_cut", "walk", "breathing", "peak_within", "peak_near", "peak_outside")
+        (0..7).forEach { d -> assertTrue(e.recommendations(ctx(d)).all { it.id in allowed }, "day $d") }
         assertTrue(e.recommendations(ctx(-1)).isEmpty())
     }
 

@@ -45,7 +45,7 @@ class WatchReminderWorker(context: Context, params: WorkerParameters) : Coroutin
             nowMs = now,
             readiness = state.readiness,
             sleep = g.cognitive.store.sleep(today),
-            events = state.upcoming,
+            events = state.upcoming + state.ended,
             reflectedIds = state.reflectedIds,
             baselineWakeMinute = g.cognitive.typicalWakeMinute(today),
             prefs = state.reminders,

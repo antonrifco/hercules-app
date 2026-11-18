@@ -74,6 +74,24 @@ class MobileGraph(private val context: Context) {
         }.onFailure { Log.w(TAG, "could not push state to watch", it) }
     }
 
+    /**
+     * Asks every linked watch to send its data now. The watch also syncs on its own, but a phone that limits
+     * background starts (Xiaomi Autostart, battery saver) can drop those; while this app is running it can always receive.
+     * At most every [ASK_WATCH_EVERY_MS], and not at all when there is no link (airplane mode, Bluetooth off, watch away).
+     */
+    suspend fun askWatchToSync(nowMs: Long = System.currentTimeMillis()) {
+        if (nowMs - prefs.getLong(KEY_LAST_ASK, 0L) < ASK_WATCH_EVERY_MS) return
+        val airplane = android.provider.Settings.Global.getInt(context.contentResolver, android.provider.Settings.Global.AIRPLANE_MODE_ON, 0) != 0
+        if (airplane) return
+        runCatching {
+            val nodes = Wearable.getNodeClient(context).connectedNodes.await()
+            if (nodes.isEmpty()) return
+            prefs.edit { putLong(KEY_LAST_ASK, nowMs) }
+            val messages = Wearable.getMessageClient(context)
+            nodes.forEach { node -> runCatching { messages.sendMessage(node.id, WearProtocol.SYNC_REQUEST_PATH, ByteArray(0)).await() } }
+        }.onFailure { Log.w(TAG, "could not ask the watch to sync", it) }
+    }
+
     /** Current sensor choice (newest written by either device) and the watch's last report. */
     suspend fun sensorState(): Pair<SensorConfig, SensorReport?> {
         val items = Wearable.getDataClient(context).dataItems.await()
@@ -101,6 +119,8 @@ class MobileGraph(private val context: Context) {
     private companion object {
         const val TAG = "Hercules"
         const val KEY_LAST_SYNC = "last_watch_sync"
+        const val KEY_LAST_ASK = "last_watch_ask"
+        const val ASK_WATCH_EVERY_MS = 15 * 60_000L
     }
 }
 

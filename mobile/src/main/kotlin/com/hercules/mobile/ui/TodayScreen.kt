@@ -175,7 +175,7 @@ private fun ConfidenceExplainer(calc: ReadinessCalculation) {
         VSpace(12.dp)
         Text("Coverage · $pct%", style = MaterialTheme.typography.bodyLarge, color = Text1)
         Text(
-            "${calc.signalsIn} of ${calc.signalsTotal} signals have data today, carrying $pct% of the score's weight. " +
+            "${calc.signalsIn} of ${calc.signalsTotal} parts of the score (sleep, heart, activity, light, game) have data today, carrying $pct% of the score's weight. " +
                 "Missing ones are left out, not counted as zero.",
             style = MaterialTheme.typography.bodySmall, color = LocalSubtle.current,
         )

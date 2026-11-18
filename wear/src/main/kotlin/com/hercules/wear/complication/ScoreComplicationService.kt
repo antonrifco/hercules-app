@@ -67,6 +67,13 @@ class ScoreComplicationService : SuspendingComplicationDataSourceService() {
         }
     }
 
+    /** The phone recalculated and sent a new state: put the new score on the watch face straight away. */
+    class StateListener : com.google.android.gms.wearable.WearableListenerService() {
+        override fun onDataChanged(events: com.google.android.gms.wearable.DataEventBuffer) {
+            if (events.any { it.dataItem.uri.path == com.hercules.shared.WearProtocol.STATE_PATH }) refresh(applicationContext)
+        }
+    }
+
     companion object {
         /** Ask the watch face to redraw the score now (after a sync, a game, or a new score from the phone). */
         fun refresh(ctx: Context) {

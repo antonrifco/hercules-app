@@ -42,12 +42,28 @@ class WatchSyncListenerService : WearableListenerService() {
             }
             // New sleep/HR data can change today's score: recompute and send it back to the watch. After the ack, so
             // a failure here can't try to complete the reply a second time.
-            runCatching { applicationContext.graph.refreshAndPushToWatch() }.onFailure { Log.w(TAG, "refresh after sync failed", it) }
+            recalculateSoon(applicationContext.graph)
         }
         return result.task
     }
 
     private companion object {
         const val TAG = "HerculesPhoneSync"
+        const val SETTLE_MS = 3_000L
+        private val recalcScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        private var pending: kotlinx.coroutines.Job? = null
+
+        /**
+         * A watch sync arrives as many small batches. One recalculation after the last of them, not one per batch:
+         * each new batch restarts a short wait.
+         */
+        @Synchronized
+        fun recalculateSoon(g: com.hercules.mobile.MobileGraph) {
+            pending?.cancel()
+            pending = recalcScope.launch {
+                kotlinx.coroutines.delay(SETTLE_MS)
+                runCatching { g.refreshAndPushToWatch() }.onFailure { Log.w(TAG, "refresh after sync failed", it) }
+            }
+        }
     }
 }

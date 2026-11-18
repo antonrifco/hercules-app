@@ -233,7 +233,7 @@ fun DataScreen(g: MobileGraph, today: String, padding: PaddingValues, onLoadDemo
                 }
             }
         }
-        item { AssessmentsBlock() }
+        item { AssessmentsBlock(g, today, onPlay) }
         item { BaselinesBlock(g) }
         item {
             // Bests from any source (Health Connect, watch, games), then the workout ones only the watch records.
@@ -456,7 +456,7 @@ private fun HealthBlock(g: MobileGraph, caps: List<CapabilityState>, onChanged: 
                 }
                 Muted(
                     (message?.let { "$it " } ?: "") +
-                        "Syncs automatically when you open Hercules" + (if (bgMissing) "" else " and about every hour in the background") +
+                        "Syncs automatically when you open Hercules" + (if (bgMissing) "" else " and about every 15 minutes in the background") +
                         ". Last sync " + (lastImport?.let { DateUtils.getRelativeTimeSpanString(it).toString().lowercase() } ?: "never") + ".",
                 )
                 if (bgMissing) {
@@ -645,6 +645,18 @@ private fun WatchBlock(watches: List<String>?, lastSync: Long?, cap: CapabilityS
                 if (!watches.isNullOrEmpty()) Cyan else cap?.status?.tint ?: Text2,
             )
         }
+        // Linked over Bluetooth, yet nothing arrived for a day: on Xiaomi and similar phones, background starts are blocked.
+        val stale = lastSync == null || System.currentTimeMillis() - lastSync > 86_400_000L
+        if (!watches.isNullOrEmpty() && stale) {
+            VSpace(8.dp)
+            Text(
+                "No data from the Hercules watch app yet. Open Hercules on the watch once, and keep this app open for a minute." +
+                    if (android.os.Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true))
+                        " On this phone, also turn on Autostart for Hercules and set its battery saver to No restrictions (Settings › Apps › Hercules)."
+                    else " If it stays empty, allow Hercules to run in the background (Settings › Apps › Hercules › Battery).",
+                style = MaterialTheme.typography.bodySmall, color = Color(0xFFFFC857),
+            )
+        }
         if (linked) {
             VSpace(10.dp)
             Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
@@ -685,12 +697,50 @@ private fun sensorOffEffect(k: SensorKind): String = when (k) {
     else -> "The watch stops recording ${k.label.lowercase()}. Only your daily stats lose it; your score is not affected."
 } + " You can turn it back on at any time."
 
-/** Assessment settings: the usual wake time (used when no sleep was recorded) and the fixed game rules. */
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Beat the Clock: where today stands (games played, how much of the game weight they carry), games per device,
+ * and a way to play. The rules themselves are fixed, so there is nothing to set.
+ */
 @Composable
-private fun AssessmentsBlock() {
+private fun AssessmentsBlock(g: MobileGraph, today: String, onPlay: () -> Unit) {
+    val dk = g.cognitive.dayKeys
+    val sessions by remember(today) { g.cognitive.store.observeSessionsFrom(dk.startOf(today)) }.collectAsStateWithLifecycle(emptyList())
+    val todays = sessions.filter { it.dayKey == today && it.scored }
+    var totals by remember { mutableStateOf(0 to 0) }
+    LaunchedEffect(sessions.size) {
+        totals = runCatching {
+            g.cognitive.store.completedOnDevice(com.hercules.shared.readiness.DeviceKind.PHONE) to
+                g.cognitive.store.completedOnDevice(com.hercules.shared.readiness.DeviceKind.WATCH)
+        }.getOrDefault(0 to 0)
+    }
+    val n = todays.size
+    // Same steps as the scoring: one game counts 60% of the game weight, two 80%, three or more in full.
+    val counts = when (n) { 0 -> 0; 1 -> 60; 2 -> 80; else -> 100 }
     Section("Beat the Clock") {
-        Muted("Nothing to set. Play any time, as often as you like; today's score is the median of your games. Each game is 3 rounds of 15 to 30 seconds, getting longer each round. Your first game is scored against a typical player; after 3 games it is all about your own normal. Phone and watch use the same rules.")
+        Text(
+            when (n) { 0 -> "No game today"; 1 -> "1 game today"; else -> "$n games today" },
+            style = MaterialTheme.typography.bodyLarge, color = Text1,
+        )
+        Muted(
+            when {
+                n == 0 -> "Your score leaves the game out until you play. One game counts 60% of its weight."
+                counts < 100 -> "Counts $counts% of its weight. ${3 - n} more for the full weight."
+                else -> "Counts in full. Today's result is the median of your games."
+            },
+        )
+        todays.maxByOrNull { it.endMs }?.let { last ->
+            VSpace(4.dp)
+            Muted("Last: ${clockOf(last.endMs)} on the ${last.deviceKind.label.lowercase()} · score ${last.cognitiveScore}")
+        }
+        VSpace(4.dp)
+        Muted("All time: ${totals.first} on the phone, ${totals.second} on the watch.")
+        if (counts < 100) {
+            VSpace(12.dp)
+            Button(
+                onClick = onPlay, modifier = Modifier.fillMaxWidth().height(46.dp), shape = RoundedCornerShape(6.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Ink),
+            ) { Text("PLAY NOW", letterSpacing = 1.2.sp, fontWeight = FontWeight.SemiBold) }
+        }
     }
 }
 

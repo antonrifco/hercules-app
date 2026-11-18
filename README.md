@@ -28,7 +28,7 @@ Hercules answers three questions, in three menus:
 
 ## 2. Daily flow
 
-1. **Data arrives on its own.** Health Connect is read when the app opens, every 5 minutes while it is open, and about once an hour in the background (the watch records its sensors continuously and syncs every 15 minutes). "Sync now" is optional. The Hercules watch is one more provider.
+1. **Data arrives on its own.** Health Connect is read when the app opens, every 5 minutes while it is open, and about every 15 minutes in the background (the watch records its sensors continuously and hands new readings to the phone within about 10 minutes; the phone also asks the watch for them every 15 minutes while it is connected). Every new batch of data recalculates the score. "Sync now" is optional. The Hercules watch is one more provider.
 2. **A score appears from the first data point.** One night of sleep or one Beat the Clock game is enough. The confidence line under the score says how far to trust it.
 3. **Beat the Clock (optional, any time, ~2 minutes).** Three rounds: hold a target of 15–19 s, then 20–24 s, then 25–30 s, and tap STOP when you think the time is up. Each round counts "1… 2… 3…" so you get the pace, then the count disappears. The first game is scored against a typical-player reference; from the third game on, against your own baseline. Phone and watch keep separate baselines.
 4. **One next step.** The coach (`Coach.kt`) picks the single most useful action: play, prepare for a Moment, reflect on one, sleep earlier, or use your peak window. Phone and watch say the same thing.
@@ -60,7 +60,7 @@ Hercules answers three questions, in three menus:
 | ≥ 70% | ≥ 3 | Medium |
 | less | | Low |
 
-It reads like *"Medium confidence · 4 of 5 signals · 5 days of data"*, and below High it says what would raise it (*"To raise it: add a Beat the Clock game; 2 more days of data."*). **Why this score** opens from the score and shows every dimension, metric, deduction and the configuration used.
+It reads like *"Medium confidence · 4 of 5 score parts · 5 days of data"*, and below High it says what would raise it (*"To raise it: add a Beat the Clock game; 2 more days of data."*). **Why this score** opens from the score and shows every dimension, metric, deduction and the configuration used.
 
 ## 4. How the score is built (default configuration v2)
 

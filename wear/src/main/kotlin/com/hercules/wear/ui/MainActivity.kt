@@ -225,7 +225,12 @@ private fun HerculesWearNav(launch: Intent?, onLaunchHandled: () -> Unit) {
     }
 
     LaunchedEffect(Unit) {
-        if (!PassiveRegistrar.isEnabled(ctx)) runCatching { PassiveRegistrar.enable(ctx) }
+        // Always re-register: some watches (Xiaomi) silently stop delivering to an old registration overnight.
+        // Separate from the loop below: on some watches Health Services can hang, and that must not stop syncing.
+        launch {
+            runCatching { kotlinx.coroutines.withTimeout(20_000) { PassiveRegistrar.enable(ctx) } }
+                .onFailure { android.util.Log.w("Hercules", "passive re-register failed", it) }
+        }
         // While the app is visible: keep summaries fresh and hand tracked data to the phone.
         while (true) {
             runCatching { ctx.graph.insights.refresh() }
@@ -236,7 +241,7 @@ private fun HerculesWearNav(launch: Intent?, onLaunchHandled: () -> Unit) {
     // One shared view of "today" for every screen, refreshed each minute and after Beat the Clock.
     LaunchedEffect(reload) {
         while (true) {
-            state = runCatching { ctx.graph.watchState.current() }.getOrNull() ?: state
+            state = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { ctx.graph.watchState.current() } }.getOrNull() ?: state
             com.hercules.wear.complication.ScoreComplicationService.refresh(ctx) // keep the watch face in step
             delay(60_000L)
         }
@@ -354,9 +359,13 @@ internal fun HomeScreen(
     val ctx = LocalContext.current
     val g = ctx.graph
     val pending by remember { g.repo.observePendingSampleCount() }.collectAsStateWithLifecycle(0L)
+    // Collected here, not inside a list item: an item that scrolls out and back in would query the database again.
+    val hr by remember { g.repo.observeLatest(MetricType.HEART_RATE) }.collectAsStateWithLifecycle(null)
     val sync by remember { SyncStatus.flow(ctx) }.collectAsStateWithLifecycle()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(30_000L) } }
+    val dayKey = g.cognitive.dayKeys.of(now)
+    val daily by remember(dayKey) { g.repo.observeDaily(dayKey) }.collectAsStateWithLifecycle(null)
     val r = state?.readiness
     val brief = state?.brief
     val level = r?.band?.level
@@ -428,8 +437,6 @@ internal fun HomeScreen(
                 }
                 // Today at a glance, from this watch: latest pulse, last night's sleep, steps so far.
                 item {
-                    val hr by remember { g.repo.observeLatest(MetricType.HEART_RATE) }.collectAsStateWithLifecycle(null)
-                    val daily by remember(dk.of(now)) { g.repo.observeDaily(dk.of(now)) }.collectAsStateWithLifecycle(null)
                     Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
                         StatColumn(hr?.takeIf { now - it.startMs < 10 * 60_000L }?.value?.toInt()?.toString() ?: "--", "bpm") {
                             Icon(Icons.Rounded.Favorite, null, tint = WCyan, modifier = Modifier.size(15.dp))

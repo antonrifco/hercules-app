@@ -31,6 +31,8 @@ import com.hercules.shared.readiness.PrepContext
 import com.hercules.shared.readiness.PrepPhase
 import com.hercules.shared.readiness.PrepTask
 import com.hercules.shared.readiness.ReadinessCalculator
+import com.hercules.shared.readiness.REASON_BEFORE_WAKE
+import com.hercules.shared.readiness.ReadinessConfidence
 import com.hercules.shared.readiness.SCORING_ENGINE_VERSION
 import com.hercules.shared.readiness.ScoringConfiguration
 import com.hercules.shared.readiness.ScoringParams
@@ -343,7 +345,13 @@ class CognitiveService(
         recalcRecent(today, atMs)
         val config = store.activeConfig()
         val input = inputs(today, atMs)
-        val calc = calculator.calculate(input, config)
+        // A day's score starts at wake-up. Between midnight and waking there is no night behind it yet, and whatever
+        // has trickled in (ten minutes of pulse, yesterday's steps) would pass for a score. Withhold it until then.
+        val beforeWake = input.lastNight == null && atMs < wakeMs(today)
+        val calc = calculator.calculate(input, config).let { c ->
+            if (!beforeWake || c.score == null) c
+            else c.copy(score = null, confidence = ReadinessConfidence.INSUFFICIENT, insufficientReason = REASON_BEFORE_WAKE, confidenceHint = null, modifiers = emptyList())
+        }
         val evaluation = save(today, calc, atMs)
 
         saveBaselines(input, atMs)
@@ -517,7 +525,7 @@ class CognitiveService(
         fun dim(d: Dimension) = calc?.dimensions?.firstOrNull { it.dimension == d }?.score
         val consistency = calc?.dimensions?.flatMap { it.metrics }?.firstOrNull { it.key == MetricKey.SLEEP_CONSISTENCY }?.score
         val recent = store.sleepRange(dayKeys.plusDays(today, -2), today)
-        val wakeMinute = store.sleep(today)?.let { dayKeys.minuteOfDay(it.endMs) } ?: typicalWakeMinute(today) ?: DEFAULT_WAKE_MINUTE
+        val wakeMinute = typicalWakeMinute(today) ?: store.sleep(today)?.let { dayKeys.minuteOfDay(it.endMs) } ?: DEFAULT_WAKE_MINUTE
         return PrepContext(
             nowMs = nowMs,
             daysUntil = dayKeys.daysBetween(today, eventDay),
@@ -566,6 +574,17 @@ class CognitiveService(
         val ev = evaluation(dayKeys.of(nowMs))
         val pk = store.latestPeak()
         return moments().filter { it.status == MomentStatus.ACTIVE }.sortedBy { it.startMs }.map { eventStatus(it, nowMs, ev, pk) }
+    }
+
+    /**
+     * Moments that started in the last [hours] hours and were not cancelled. They are no longer "upcoming", so the
+     * "how did it go?" reminder needs them handed over separately.
+     */
+    suspend fun recentlyEnded(nowMs: Long = clock(), hours: Int = 12): List<EventStatus> {
+        val ev = evaluation(dayKeys.of(nowMs))
+        val pk = store.latestPeak()
+        return moments().filter { it.status != MomentStatus.CANCELLED && it.startMs <= nowMs && nowMs - it.startMs <= hours * HOUR_MS }
+            .sortedBy { it.startMs }.map { eventStatus(it, nowMs, ev, pk) }
     }
 
     /** Today's recommendations across all active Moments: Critical and sooner first, duplicates merged. */
@@ -626,6 +645,7 @@ class CognitiveService(
             peak = store.latestPeak(),
             playsToday = playsToday(today),
             wakeMs = wakeMs(today),
+            ended = recentlyEnded(),
         )
     }
 

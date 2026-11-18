@@ -65,7 +65,7 @@ object HealthPermissions {
     val display: Set<String> = setOf(DistanceRecord::class, ActiveCaloriesBurnedRecord::class, FloorsClimbedRecord::class)
         .map { HealthPermission.getReadPermission(it) }.toSet()
 
-    /** Lets the hourly background job read Health Connect while Hercules isn't open. */
+    /** Lets the background job (every 15 minutes) read Health Connect while Hercules isn't open. */
     const val BACKGROUND = HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND
 }
 

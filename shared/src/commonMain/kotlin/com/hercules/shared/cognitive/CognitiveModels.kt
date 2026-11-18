@@ -173,6 +173,8 @@ data class WatchState(
     /** Today's evaluation, including why there's no score yet. */
     val evaluation: Evaluation? = null,
     val peak: PeakWindowPrediction? = null,
+    /** Moments that started in the last hours, for the "how did it go?" reminder on the wrist. */
+    val ended: List<EventStatus> = emptyList(),
     /** Beat the Clock runs played today on either device. */
     val playsToday: Int = 0,
     /** Wake time the phone uses today, so both devices file runs under the same part of the day. */

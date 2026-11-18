@@ -116,3 +116,10 @@ object SyncStatus {
         )
     }
 }
+
+/** The phone app asks for a sync while it is running (so it can receive even where background starts are limited). */
+class SyncRequestListener : com.google.android.gms.wearable.WearableListenerService() {
+    override fun onMessageReceived(event: com.google.android.gms.wearable.MessageEvent) {
+        if (event.path == WearProtocol.SYNC_REQUEST_PATH) SyncWorker.runNow(applicationContext)
+    }
+}

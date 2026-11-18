@@ -83,7 +83,7 @@ class ReminderWorker(context: Context, params: WorkerParameters) : CoroutineWork
             nowMs = now,
             readiness = c.evaluation(today)?.readiness,
             sleep = c.store.sleep(today),
-            events = c.upcoming(now),
+            events = c.upcoming(now) + c.recentlyEnded(now),
             reflectedIds = c.store.reflections().map { it.eventId }.toSet(),
             baselineWakeMinute = c.typicalWakeMinute(today),
             prefs = prefs,

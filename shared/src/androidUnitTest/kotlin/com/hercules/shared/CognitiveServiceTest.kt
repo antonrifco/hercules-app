@@ -239,6 +239,24 @@ class CognitiveServiceTest {
         assertNotNull(ev.calc.dimensions.first { it.dimension == Dimension.SLEEP }.metrics.first { it.key == com.hercules.shared.readiness.MetricKey.SLEEP_CONSISTENCY }.score)
     }
 
+    @Test fun noScoreBetweenMidnightAndWaking() = runTest {
+        // 00:30 with yesterday's steps on record: enough for a number, but the day has not started.
+        val night = dk.startOf("2026-11-10") + 30 * 60_000L
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        HerculesDatabase.Schema.create(driver)
+        val db = HerculesDatabase(driver)
+        val cognitive = CognitiveService(HerculesRepository(db, Dispatchers.Unconfined), CognitiveStore(db, Dispatchers.Unconfined), dk, clock = { night })
+        cognitive.store.upsertMetrics(listOf(
+            HealthMetric("hc:steps:2026-11-09", HealthMetricType.STEPS_DAILY, 9000.0, night - 86_400_000L, night, night, "2026-11-09", "phone.app", null, DataQuality.VALID, CollectionMethod.HEALTH_CONNECT),
+        ))
+        val ev = cognitive.refresh()
+        assertNull(ev.calc.score)
+        assertEquals(com.hercules.shared.readiness.REASON_BEFORE_WAKE, ev.calc.insufficientReason)
+        // The same data after the usual wake-up time (07:00 by default) gives a score.
+        val morning = CognitiveService(HerculesRepository(db, Dispatchers.Unconfined), CognitiveStore(db, Dispatchers.Unconfined), dk, clock = { night + 8 * 3_600_000L })
+        assertNotNull(morning.refresh().calc.score)
+    }
+
     @Test fun noDataMeansInsufficientNotZero() = runTest {
         val (_, _, cognitive) = services()
         val ev = cognitive.refresh()

@@ -131,10 +131,49 @@ object Permissions {
 class PassiveDataService : PassiveListenerService() {
     override fun onNewDataPointsReceived(dataPoints: DataPointContainer) {
         val g = applicationContext.graph
-        val samples = HealthMapper.toSamples(dataPoints, SampleSource.PASSIVE, g.deviceId)
+        val samples = thinPulse(HealthMapper.toSamples(dataPoints, SampleSource.PASSIVE, g.deviceId))
         if (samples.isEmpty()) return
         // Small batches; block briefly so the write completes before the system unbinds us.
         runBlocking(Dispatchers.IO) { g.repo.insertSamples(samples) }
+        onNewData()
+    }
+
+    /**
+     * New readings change the score: hand them to the phone (which recalculates and sends the new state back) and
+     * refresh the watch face. At most every [RECALC_EVERY_MS]: pulse readings arrive every few seconds, and a
+     * recalculation on each one would drain the battery for nothing.
+     */
+    private fun onNewData() {
+        val prefs = applicationContext.getSharedPreferences("hercules", Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        if (now - prefs.getLong(KEY_LAST_RECALC, 0L) < RECALC_EVERY_MS) return
+        prefs.edit { putLong(KEY_LAST_RECALC, now) }
+        com.hercules.wear.sync.SyncWorker.runNow(applicationContext)
+    }
+
+    /**
+     * Some watches report pulse every second or two. Resting and sleeping heart rate need nowhere near that, and
+     * storing it all makes every sync and recalculation slower. Keep one background reading per [PULSE_EVERY_MS].
+     */
+    private fun thinPulse(samples: List<com.hercules.shared.model.Sample>): List<com.hercules.shared.model.Sample> {
+        val prefs = applicationContext.getSharedPreferences("hercules", Context.MODE_PRIVATE)
+        var last = prefs.getLong(KEY_LAST_PULSE, 0L)
+        val out = samples.sortedBy { it.startMs }.filter { s ->
+            if (s.type != com.hercules.shared.model.MetricType.HEART_RATE) return@filter true
+            // A reading from before the last kept one is late-delivered history: keep it.
+            val keep = s.startMs < last || s.startMs - last >= PULSE_EVERY_MS
+            if (keep && s.startMs > last) last = s.startMs
+            keep
+        }
+        prefs.edit { putLong(KEY_LAST_PULSE, last) }
+        return out
+    }
+
+    private companion object {
+        const val KEY_LAST_PULSE = "last_pulse_kept"
+        const val PULSE_EVERY_MS = 20_000L
+        const val KEY_LAST_RECALC = "last_recalc_on_data"
+        const val RECALC_EVERY_MS = 10 * 60_000L
     }
 
     override fun onUserActivityInfoReceived(info: UserActivityInfo) {

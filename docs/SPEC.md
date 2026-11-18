@@ -190,6 +190,20 @@ No verdict below 30 days. It only measures; it never changes a score.
 **Screen stays on.** While a round is being timed, phone and watch keep the screen on; otherwise the display
 times out, the app pauses and the round is marked interrupted.
 
+**Moment preparation stays in scope.** Prep tasks cover only sleep, recovery, light, stress and sensors, never the content of the Moment: final stretch adds skipping alcohol and no caffeine after 14:00 the day before; the day itself suggests a 10-minute walk and 2 minutes of box breathing. Reminders: the bedtime reminder is keyed to the wake-up day, so it fires once per night even past midnight; "how did it go?" reads Moments that started in the last 12 hours.
+
+**A day's score starts at wake-up (engine 3.2.0).** Between midnight and waking, when no night has been recorded for
+the new day and it is before the usual wake time, no score is published ("Today's score starts when you wake up").
+Otherwise ten minutes of pulse or yesterday's steps would pass for a score.
+
+**Watch sleep episodes.** The night is the longest sleep episode in the window. Awakenings up to 60 minutes stay in
+the episode as time awake; a longer gap starts a new episode, so a nap is never merged into the night. A night still
+in progress is not reported. If the watch never reports waking, the night ends at its last pulse reading.
+
+**Recalculation.** Every new batch of data recalculates: a watch sync on the phone, Health Connect every 15 minutes
+in the background and every 5 minutes while open, a game, a sleep correction. The watch hands new readings to the
+phone at most every 10 minutes and keeps one background pulse reading per 20 seconds. The phone app also asks the watch for its data at most every 15 minutes, only while a watch is connected (never in airplane mode), because phones that block background starts (Xiaomi Autostart) can drop the watch's own deliveries.
+
 **Sleep history.** `refresh()` also resolves any night in the last 30 days that has a valid Health Connect session
 but no resolved night yet, so the first import (30 days) feeds sleep consistency and the 3-night load at once.
 Stored scores of older days are still never recalculated.
@@ -310,7 +324,7 @@ never mixed without normalization.
 | ≥ 70% | ≥ 3 | Medium |
 | otherwise | | Low |
 
-- Next to the score: the level, "N of M signals · D days of data", and below High what would raise it
+- Next to the score: the level, "N of M score parts · D days of data" (parts = sleep, heart, activity, light, game; not the data sources Setup counts), and below High what would raise it
   ("To raise it: add a Beat the Clock game; 2 more days of data."). Phone (Home and Why this score) and watch.
 
 Confidence and classification are independent.
