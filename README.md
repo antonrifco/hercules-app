@@ -28,7 +28,7 @@ Hercules answers three questions, in three menus:
 
 ## 2. Daily flow
 
-1. **Data arrives on its own.** Health Connect is read when the app opens, every 5 minutes while it is open, and about once an hour in the background (the watch records its sensors continuously and syncs every 15 minutes). "Sync now" is optional. The Hercules watch is one more provider.
+1. **Data arrives on its own.** Health Connect is read when the app opens, every 5 minutes while it is open, and about every 15 minutes in the background (the watch records its sensors continuously and hands new readings to the phone within about 10 minutes; the phone also asks the watch for them every 15 minutes while it is connected). Every new batch of data recalculates the score. "Sync now" is optional. The Hercules watch is one more provider.
 2. **A score appears from the first data point.** One night of sleep or one Beat the Clock game is enough. The confidence line under the score says how far to trust it.
 3. **Beat the Clock (optional, any time, ~2 minutes).** Three rounds: hold a target of 15–19 s, then 20–24 s, then 25–30 s, and tap STOP when you think the time is up. Each round counts "1… 2… 3…" so you get the pace, then the count disappears. The first game is scored against a typical-player reference; from the third game on, against your own baseline. Phone and watch keep separate baselines.
 4. **One next step.** The coach (`Coach.kt`) picks the single most useful action: play, prepare for a Moment, reflect on one, sleep earlier, or use your peak window. Phone and watch say the same thing.
@@ -40,7 +40,7 @@ Hercules answers three questions, in three menus:
 
 **Reminders** (all optional, in Setup): morning score, Beat the Clock, Moment prep (evening before and shortly ahead), bedtime, after a Moment, and focus start (off by default). **Only one device delivers each reminder:** the watch while it is worn, the phone otherwise.
 
-**Watch:** score with Herc, level, confidence and what it is based on, one next step, Beat the Clock (same rules as the phone), upcoming Moments, and a tracking-status screen.
+**Watch:** score with Herc, level and confidence, one next step, today's pulse, sleep and steps, Beat the Clock (same rules as the phone), upcoming Moments, and a tracking-status screen. A **watch-face complication** ("Hercules score") puts the score on the watch face; tapping it opens the app.
 
 ## 3. Reading the score
 
@@ -60,17 +60,17 @@ Hercules answers three questions, in three menus:
 | ≥ 70% | ≥ 3 | Medium |
 | less | | Low |
 
-It reads like *"Medium confidence · 4 of 5 signals · 5 days of data"*, and below High it says what would raise it (*"To raise it: add a Beat the Clock game; 2 more days of data."*). **Why this score** opens from the score and shows every dimension, metric, deduction and the configuration used.
+It reads like *"Medium confidence · 4 of 5 score parts · 5 days of data"*, and below High it says what would raise it (*"To raise it: add a Beat the Clock game; 2 more days of data."*). **Why this score** opens from the score and shows every dimension, metric, deduction and the configuration used.
 
 ## 4. How the score is built (default configuration v2)
 
 | Dimension | Weight | What is measured | Evidence |
 |---|---|---|---|
-| Sleep & Recovery | 40% | 3-night sleep load (0.60 / 0.25 / 0.15; 7–9 h = full marks) 55%, sleep regularity 25%, continuity 20% | Van Dongen 2003, Lim & Dinges 2010, Watson 2015, Phillips 2017 |
+| Sleep & Recovery | 45% | 3-night sleep load (0.60 / 0.25 / 0.15; 7–9 h = full marks) 55%, sleep regularity 25%, continuity 20% | Van Dongen 2003, Lim & Dinges 2010, Watson 2015, Phillips 2017 |
 | Cardiovascular | 20% | HRV (ln RMSSD, 3-night average vs. your 28-day usual) 70%, resting heart rate vs. usual 30% | Plews 2013/2014, Buchheit 2014, Forte 2019 |
 | Physical Activity | 10% | Yesterday's steps, exercise minutes, low-movement hours (more is not always better) | Chang 2012, Wheeler 2020 |
-| Circadian Alignment | 10% | Phone light sensor: bright mornings and days, dim evenings | Brown 2022 |
-| Cognitive Performance | 20% | Today's Beat the Clock: accuracy, consistency, bias | |
+| Circadian Alignment | 5% | Phone light sensor: bright mornings and days, dim evenings | Brown 2022 |
+| Cognitive Performance | 20% | Today's Beat the Clock: accuracy, consistency, bias. One game counts 60% of this weight, two 80%, three or more in full | |
 
 - **Missing is never zero.** A missing dimension is left out and the others are re-weighted; it lowers confidence, not the score.
 - **Optional extras only subtract** (max −10 in total, after 7 days of history): breathing rate or skin temperature clearly above your usual (−5 each), low overnight oxygen (−5), glucose under 3.9 mmol/L in the last 24 hours (−5) or under 3.0 (−10), for about 15 minutes on a CGM (one dip is ignored) or one meter reading. A low glucose reading from the last 3 hours also shows a live banner on Home.
@@ -176,6 +176,7 @@ adb shell am start -n com.hercules.app/com.hercules.mobile.ui.MainActivity --ez 
 ```
 
 You can also use **Setup → Developers → Load demo data**.
+The same page has a **Score check**: how well the body part of your score has tracked your Beat the Clock results (needs 30 days with both).
 
 The watch has the same switch, so its UI can be checked on an unpaired Wear OS emulator (grant the sensor permissions first, or tap Allow):
 

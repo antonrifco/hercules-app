@@ -13,13 +13,14 @@ import com.hercules.shared.readiness.LightContext
 import java.util.concurrent.TimeUnit
 
 /**
- * Hourly background work: one opportunistic light reading, a Health Connect import, recalculation and a push to
+ * Background work every 15 minutes (the shortest WorkManager allows): one opportunistic light reading, a Health Connect import, recalculation and a push to
  * the watch. Old light readings are pruned after 60 days.
  */
 class HealthWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val g = applicationContext.graph
         runCatching { g.light.sampleOnce(LightContext.BACKGROUND) }
+        g.askWatchToSync()
         g.importHealthAndRefresh()
         runCatching { g.cognitive.store.deleteLightBefore(System.currentTimeMillis() - 60 * 86_400_000L) }
         return Result.success()
@@ -27,8 +28,9 @@ class HealthWorker(context: Context, params: WorkerParameters) : CoroutineWorker
 
     companion object {
         fun schedule(ctx: Context) {
-            val req = PeriodicWorkRequestBuilder<HealthWorker>(1, TimeUnit.HOURS).build()
-            WorkManager.getInstance(ctx).enqueueUniquePeriodicWork("hercules-health", ExistingPeriodicWorkPolicy.KEEP, req)
+            // UPDATE, not KEEP: phones that already scheduled the old hourly job move to the new period.
+            val req = PeriodicWorkRequestBuilder<HealthWorker>(15, TimeUnit.MINUTES).build()
+            WorkManager.getInstance(ctx).enqueueUniquePeriodicWork("hercules-health", ExistingPeriodicWorkPolicy.UPDATE, req)
         }
 
         /** Right after permissions are granted: import now instead of waiting for the hourly run. */

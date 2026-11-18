@@ -65,7 +65,7 @@ object HealthPermissions {
     val display: Set<String> = setOf(DistanceRecord::class, ActiveCaloriesBurnedRecord::class, FloorsClimbedRecord::class)
         .map { HealthPermission.getReadPermission(it) }.toSet()
 
-    /** Lets the hourly background job read Health Connect while Hercules isn't open. */
+    /** Lets the background job (every 15 minutes) read Health Connect while Hercules isn't open. */
     const val BACKGROUND = HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND
 }
 
@@ -259,14 +259,16 @@ class HealthConnectImporter(private val context: Context, private val store: Cog
         val list = readAll(c, SleepSessionRecord::class, range).map { r ->
             val total = (Duration.between(r.startTime, r.endTime).toMillis() / 60_000L).toInt()
             val staged = r.stages.isNotEmpty()
-            val asleep = if (staged) minutes(r.stages.filter { it.stage in asleepStages }) else total
+            val awake = minutes(r.stages.filter { it.stage in awakeStages })
+            // Some trackers write stages without a type: then the session length minus time awake is the best reading.
+            val asleep = if (staged) minutes(r.stages.filter { it.stage in asleepStages }).takeIf { it > 0 } ?: (total - awake) else total
             SleepRecord(
                 id = "hc:${r.metadata.id}",
                 dayKey = dayKeys.of(r.endTime.toEpochMilli()),
                 startMs = r.startTime.toEpochMilli(),
                 endMs = r.endTime.toEpochMilli(),
                 asleepMinutes = asleep,
-                awakeMinutes = if (staged) minutes(r.stages.filter { it.stage in awakeStages }) else null,
+                awakeMinutes = if (staged) awake else null,
                 deepMinutes = if (staged) minutes(r.stages.filter { it.stage == SleepSessionRecord.STAGE_TYPE_DEEP }) else null,
                 remMinutes = if (staged) minutes(r.stages.filter { it.stage == SleepSessionRecord.STAGE_TYPE_REM }) else null,
                 lightMinutes = if (staged) minutes(r.stages.filter { it.stage == SleepSessionRecord.STAGE_TYPE_LIGHT }) else null,

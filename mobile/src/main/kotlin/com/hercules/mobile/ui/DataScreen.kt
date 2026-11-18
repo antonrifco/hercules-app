@@ -76,6 +76,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -100,8 +101,11 @@ import com.hercules.mobile.health.HealthPermissions
 import com.hercules.mobile.health.HealthWorker
 import com.hercules.mobile.notify.Notifier
 import com.hercules.mobile.notify.ReminderSettings
+import com.hercules.shared.cognitive.PersonalBest
+import com.hercules.shared.cognitive.ScoreCheck
 import com.hercules.shared.cognitive.NudgePrefs
 import com.hercules.shared.cognitive.StoredBaseline
+import com.hercules.shared.model.RecordKind
 import com.hercules.shared.model.RecordText
 import com.hercules.shared.readiness.CapabilityCategory
 import com.hercules.shared.readiness.CapabilityState
@@ -180,7 +184,7 @@ fun DataScreen(g: MobileGraph, today: String, padding: PaddingValues, onLoadDemo
                 SetupPage.WEIGHTS -> WeightsBlock(g)
                 SetupPage.REMINDERS -> RemindersBlock(g)
                 SetupPage.DATA -> DataBlock(g) { page = null; onCleared() }
-                SetupPage.DEVELOPER -> DeveloperBlock(onLoad = { page = null; onLoadDemo() }, onRemove = { page = null; onRemoveDemo() })
+                SetupPage.DEVELOPER -> DeveloperBlock(g, onLoad = { page = null; onLoadDemo() }, onRemove = { page = null; onRemoveDemo() })
             }
         }
         return
@@ -229,18 +233,27 @@ fun DataScreen(g: MobileGraph, today: String, padding: PaddingValues, onLoadDemo
                 }
             }
         }
-        item { AssessmentsBlock() }
+        item { AssessmentsBlock(g, today, onPlay) }
         item { BaselinesBlock(g) }
         item {
+            // Bests from any source (Health Connect, watch, games), then the workout ones only the watch records.
+            val bests by produceState(emptyList<PersonalBest>(), today, records) { value = runCatching { g.cognitive.personalBests() }.getOrDefault(emptyList()) }
+            val covered = setOf(RecordKind.MAX_DAILY_STEPS, RecordKind.LOWEST_RESTING_HR, RecordKind.HIGHEST_HRV_RMSSD)
+            val rows = bests.map { Triple(it.label, it.value, shortDate(g.cognitive.dayKeys.startOf(it.dayKey) + 12 * 3_600_000L)) } +
+                records.filter { it.kind !in covered }.map { Triple(RecordText.label(it.kind), RecordText.value(it), null) }
             Section("Personal bests") {
-                if (records.isEmpty()) Muted("None yet. Keep wearing your watch and they'll show up.")
-                records.forEachIndexed { i, r ->
+                if (rows.isEmpty()) Muted("None yet. Your best score, sleep, steps and game show up after your first day of data.")
+                rows.forEachIndexed { i, (label, value, date) ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(RecordText.label(r.kind), style = MaterialTheme.typography.bodyMedium, color = Text1, modifier = Modifier.weight(1f))
-                        Text(RecordText.value(r), fontFamily = Mono, fontSize = 14.sp, color = Cyan)
+                        Column(Modifier.weight(1f)) {
+                            Text(label, style = MaterialTheme.typography.bodyMedium, color = Text1)
+                            date?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Text2) }
+                        }
+                        Text(value, fontFamily = Mono, fontSize = 14.sp, color = Cyan)
                     }
-                    if (i < records.lastIndex) Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
+                    if (i < rows.lastIndex) Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
                 }
+                if (rows.isNotEmpty()) { VSpace(6.dp); Muted("Your best days in the last year.") }
             }
         }
         item {
@@ -311,8 +324,29 @@ private fun MenuRow(icon: ImageVector, title: String, hint: String, hintTint: Co
 private fun MenuDivider() = Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
 
 @Composable
-private fun DeveloperBlock(onLoad: () -> Unit, onRemove: () -> Unit) {
+private fun DeveloperBlock(g: MobileGraph, onLoad: () -> Unit, onRemove: () -> Unit) {
     var confirm by remember { mutableStateOf<Boolean?>(null) } // true = load, false = remove
+    val check by produceState<ScoreCheck.Result?>(null) { value = g.cognitive.scoreCheck() }
+    Section("Score check") {
+        Muted("Does the body part of your score (sleep, heart, activity, light) track your Beat the Clock results? Days with both, last ${ScoreCheck.WINDOW_DAYS} days. Demo data counts too.")
+        VSpace(10.dp)
+        check?.let { c ->
+            Row(Modifier.fillMaxWidth()) {
+                LabeledValue("Days", "${c.days} / ${ScoreCheck.MIN_DAYS}", Modifier.weight(1f))
+                LabeledValue("Correlation", c.correlation?.let { "%+.2f".format(UiLocale, it) } ?: "--", Modifier.weight(1f))
+            }
+            VSpace(8.dp)
+            Muted(
+                when (c.link) {
+                    ScoreCheck.Link.NOT_ENOUGH_DATA -> "Not enough yet. Needs ${ScoreCheck.MIN_DAYS} days with a score and a game; any number shown before that is mostly noise."
+                    ScoreCheck.Link.CLEAR -> if (c.correlation!! > 0) "Clear link: higher body scores go with better games." else "Clear link, but backwards: higher body scores go with worse games."
+                    ScoreCheck.Link.WEAK -> "Weak link. Too faint to learn personal weights from."
+                    ScoreCheck.Link.NONE -> "No link found. The score and the game don't move together."
+                },
+            )
+        }
+    }
+    VSpace(18.dp)
     Section("Demo data") {
         Muted("Fills the app with three weeks of made-up sleep, scores, Beat the Clock games and two Moments, so every screen has something to show. It's added next to your own data.")
         VSpace(12.dp)
@@ -422,7 +456,7 @@ private fun HealthBlock(g: MobileGraph, caps: List<CapabilityState>, onChanged: 
                 }
                 Muted(
                     (message?.let { "$it " } ?: "") +
-                        "Syncs automatically when you open Hercules" + (if (bgMissing) "" else " and about every hour in the background") +
+                        "Syncs automatically when you open Hercules" + (if (bgMissing) "" else " and about every 15 minutes in the background") +
                         ". Last sync " + (lastImport?.let { DateUtils.getRelativeTimeSpanString(it).toString().lowercase() } ?: "never") + ".",
                 )
                 if (bgMissing) {
@@ -611,6 +645,18 @@ private fun WatchBlock(watches: List<String>?, lastSync: Long?, cap: CapabilityS
                 if (!watches.isNullOrEmpty()) Cyan else cap?.status?.tint ?: Text2,
             )
         }
+        // Linked over Bluetooth, yet nothing arrived for a day: on Xiaomi and similar phones, background starts are blocked.
+        val stale = lastSync == null || System.currentTimeMillis() - lastSync > 86_400_000L
+        if (!watches.isNullOrEmpty() && stale) {
+            VSpace(8.dp)
+            Text(
+                "No data from the Hercules watch app yet. Open Hercules on the watch once, and keep this app open for a minute." +
+                    if (android.os.Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true))
+                        " On this phone, also turn on Autostart for Hercules and set its battery saver to No restrictions (Settings › Apps › Hercules)."
+                    else " If it stays empty, allow Hercules to run in the background (Settings › Apps › Hercules › Battery).",
+                style = MaterialTheme.typography.bodySmall, color = Color(0xFFFFC857),
+            )
+        }
         if (linked) {
             VSpace(10.dp)
             Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
@@ -646,17 +692,55 @@ private fun WatchBlock(watches: List<String>?, lastSync: Long?, cap: CapabilityS
 /** What switching a sensor off costs, said before it happens. */
 private fun sensorOffEffect(k: SensorKind): String = when (k) {
     SensorKind.HEART_RATE -> "The watch stops reading your heart rate. Without Health Connect, Cardiovascular Readiness may drop out of your score."
-    SensorKind.SLEEP -> "The watch stops tracking your sleep. Without another sleep source in Health Connect, most days you won't get a score."
+    SensorKind.SLEEP -> "The watch stops tracking your sleep. Without another sleep source in Health Connect, sleep drops out of your score and it becomes less sure."
     SensorKind.STEPS -> "The watch stops counting steps. Health Connect steps are still used when available."
     else -> "The watch stops recording ${k.label.lowercase()}. Only your daily stats lose it; your score is not affected."
 } + " You can turn it back on at any time."
 
-/** Assessment settings: the usual wake time (used when no sleep was recorded) and the fixed game rules. */
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Beat the Clock: where today stands (games played, how much of the game weight they carry), games per device,
+ * and a way to play. The rules themselves are fixed, so there is nothing to set.
+ */
 @Composable
-private fun AssessmentsBlock() {
+private fun AssessmentsBlock(g: MobileGraph, today: String, onPlay: () -> Unit) {
+    val dk = g.cognitive.dayKeys
+    val sessions by remember(today) { g.cognitive.store.observeSessionsFrom(dk.startOf(today)) }.collectAsStateWithLifecycle(emptyList())
+    val todays = sessions.filter { it.dayKey == today && it.scored }
+    var totals by remember { mutableStateOf(0 to 0) }
+    LaunchedEffect(sessions.size) {
+        totals = runCatching {
+            g.cognitive.store.completedOnDevice(com.hercules.shared.readiness.DeviceKind.PHONE) to
+                g.cognitive.store.completedOnDevice(com.hercules.shared.readiness.DeviceKind.WATCH)
+        }.getOrDefault(0 to 0)
+    }
+    val n = todays.size
+    // Same steps as the scoring: one game counts 60% of the game weight, two 80%, three or more in full.
+    val counts = when (n) { 0 -> 0; 1 -> 60; 2 -> 80; else -> 100 }
     Section("Beat the Clock") {
-        Muted("Nothing to set. Play any time, as often as you like; today's score is the median of your games. Each game is 3 rounds of 15 to 30 seconds, getting longer each round. Your first game is scored against a typical player; after 3 games it is all about your own normal. Phone and watch use the same rules.")
+        Text(
+            when (n) { 0 -> "No game today"; 1 -> "1 game today"; else -> "$n games today" },
+            style = MaterialTheme.typography.bodyLarge, color = Text1,
+        )
+        Muted(
+            when {
+                n == 0 -> "Your score leaves the game out until you play. One game counts 60% of its weight."
+                counts < 100 -> "Counts $counts% of its weight. ${3 - n} more for the full weight."
+                else -> "Counts in full. Today's result is the median of your games."
+            },
+        )
+        todays.maxByOrNull { it.endMs }?.let { last ->
+            VSpace(4.dp)
+            Muted("Last: ${clockOf(last.endMs)} on the ${last.deviceKind.label.lowercase()} · score ${last.cognitiveScore}")
+        }
+        VSpace(4.dp)
+        Muted("All time: ${totals.first} on the phone, ${totals.second} on the watch.")
+        if (counts < 100) {
+            VSpace(12.dp)
+            Button(
+                onClick = onPlay, modifier = Modifier.fillMaxWidth().height(46.dp), shape = RoundedCornerShape(6.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Ink),
+            ) { Text("PLAY NOW", letterSpacing = 1.2.sp, fontWeight = FontWeight.SemiBold) }
+        }
     }
 }
 
@@ -751,10 +835,10 @@ private fun baselineLabel(b: StoredBaseline): String {
 
 private fun baselineValue(b: StoredBaseline): String = when (b.metric) {
     MetricKey.HRV.name -> "${b.value.median.roundToInt()} ms ±${b.value.mad.roundToInt()}"
-    MetricKey.RESTING_HR.name -> "${b.value.median.roundToInt()} bpm ±${"%.1f".format(b.value.mad)}"
+    MetricKey.RESTING_HR.name -> "${b.value.median.roundToInt()} bpm ±${"%.1f".format(UiLocale, b.value.mad)}"
     MetricKey.STEPS.name -> "${b.value.median.roundToInt()} ±${b.value.mad.roundToInt()}"
-    MetricKey.BTC_ACCURACY.name -> "${"%.1f".format(b.value.median * 100)}% error"
-    else -> "${"%.2f".format(b.value.median)} ±${"%.2f".format(b.value.mad)}"
+    MetricKey.BTC_ACCURACY.name -> "${"%.1f".format(UiLocale, b.value.median * 100)}% error"
+    else -> "${"%.2f".format(UiLocale, b.value.median)} ±${"%.2f".format(UiLocale, b.value.mad)}"
 }
 
 /** Personal baselines (spec §7): median, spread, how many observations and how personal they already are. */
@@ -777,7 +861,7 @@ private fun BaselinesBlock(g: MobileGraph) {
             if (i < list.lastIndex) Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
         }
         VSpace(6.dp)
-        Muted("Reference values for the first 7 days, then more of your own history each day (80% after 3 weeks). Beat the Clock baselines are separate per device and window. Changing weights never resets them.")
+        Muted("Reference values for the first 7 days, then more of your own history each day (80% after 3 weeks). Beat the Clock baselines are separate for phone and watch. Changing weights never resets them.")
     }
 }
 

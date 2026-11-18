@@ -12,6 +12,10 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,6 +53,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -137,6 +142,12 @@ fun BeatTheClockScreen(g: MobileGraph, padding: PaddingValues, onClose: () -> Un
         onDispose { owner.lifecycle.removeObserver(obs) }
     }
     BackHandler(enabled = stage != Stage.SAVING) { onClose() }
+    // A round has no touches for up to 30 s: without this the screen times out, the app pauses and the round is lost.
+    val view = LocalView.current
+    DisposableEffect(stage == Stage.RUNNING) {
+        view.keepScreenOn = stage == Stage.RUNNING
+        onDispose { view.keepScreenOn = false }
+    }
 
     Column(
         Modifier.fillMaxSize().background(Ink).padding(padding).padding(horizontal = 24.dp).verticalScroll(rememberScrollState()),
@@ -265,6 +276,9 @@ private fun HowStep(n: Int, text: String) {
     }
 }
 
+/** Energy 1 (drained) to 5 (charged) as one of Herc's five faces. */
+private fun energyMood(v: Int) = listOf(HercMood.DRAINED, HercMood.LOW, HercMood.FAIR, HercMood.GOOD, HercMood.PRIME)[v - 1]
+
 private const val DEFAULT_FEEL = 3
 /** The break after this many rounds asks how you feel, before the last round, never while a round is being timed. */
 private const val FEEL_AFTER_ROUND = 2
@@ -278,31 +292,41 @@ private fun FeelCheck(energy: Int, stress: Int, onEnergy: (Int) -> Unit, onStres
             VSpace(4.dp)
             Muted("How are you feeling right now? Skip it if you like.")
             VSpace(12.dp)
-            FeelRow("Energy", "Drained", "Charged", energy, onEnergy)
-            VSpace(12.dp)
-            FeelRow("Stress", "Calm", "Tense", stress, onStress)
+            FeelRow("Energy", listOf("Drained", "Low", "Okay", "Good", "Charged"), null, energy, onEnergy)
+            VSpace(16.dp)
+            FeelRow("Stress", listOf("Calm", "Easy", "Neutral", "Tense", "Very tense"), BeatTheClock.STRESS_FACES, stress, onStress)
         }
     }
 }
 
 @Composable
-private fun FeelRow(label: String, low: String, high: String, value: Int, onPick: (Int) -> Unit) {
+private fun FeelRow(label: String, words: List<String>, faces: List<String>?, value: Int, onPick: (Int) -> Unit) {
+    // The label says what the chosen face means, so nobody has to guess a face.
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = MaterialTheme.typography.bodyMedium, color = Text1, modifier = Modifier.weight(1f))
-        Text("$low · $high", style = MaterialTheme.typography.bodySmall, color = Text2)
+        Text(words[value - 1], style = MaterialTheme.typography.bodyMedium, color = Cyan, fontWeight = FontWeight.SemiBold)
     }
-    VSpace(6.dp)
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    VSpace(8.dp)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         (1..5).forEach { v ->
             val on = v == value
             Box(
-                Modifier.weight(1f).height(40.dp).clip(RoundedCornerShape(6.dp))
+                Modifier.weight(1f).height(60.dp).clip(RoundedCornerShape(8.dp))
                     .background(if (on) Cyan.copy(alpha = 0.16f) else androidx.compose.ui.graphics.Color.Transparent)
                     .border(BorderStroke(1.dp, if (on) Cyan else Hairline), RoundedCornerShape(6.dp))
-                    .clickable(onClickLabel = "$label $v of 5") { onPick(v) },
+                    .clickable(onClickLabel = "$label: ${words[v - 1]}") { onPick(v) },
                 contentAlignment = Alignment.Center,
-            ) { Text("$v", fontFamily = Mono, fontSize = 16.sp, color = if (on) Cyan else Text1) }
+            ) {
+                // Energy is Herc himself, from drained to prime; stress uses plain faces.
+                if (faces == null) Herc(energyMood(v), Modifier.alpha(if (on) 1f else 0.5f), size = 52.dp)
+                else Text(faces[v - 1], fontSize = 30.sp, modifier = Modifier.alpha(if (on) 1f else 0.5f))
+            }
         }
+    }
+    VSpace(4.dp)
+    Row(Modifier.fillMaxWidth()) {
+        Text(words.first(), fontSize = 10.sp, color = Text2, modifier = Modifier.weight(1f))
+        Text(words.last(), fontSize = 10.sp, color = Text2)
     }
 }
 
@@ -346,41 +370,63 @@ private fun BigButton(running: Boolean, onClick: () -> Unit) {
 
 private val MomentOrange = androidx.compose.ui.graphics.Color(0xFFFF8C4C)
 
+/** Where a game score sits from 0 to 100, with the "usual" mark at 50. */
+@Composable
+private fun ScoreScale(score: Int) {
+    val color = scoreColor(score)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+        Canvas(Modifier.fillMaxWidth().height(14.dp)) {
+            val y = size.height / 2
+            drawLine(Hairline, Offset(0f, y), Offset(size.width, y), 4.dp.toPx(), cap = StrokeCap.Round)
+            drawLine(Text2, Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), 1.dp.toPx())
+            drawCircle(color, 6.dp.toPx(), Offset(size.width * score / 100f, y))
+        }
+        VSpace(2.dp)
+        Row(Modifier.fillMaxWidth()) {
+            Text("0 · far off", fontSize = 10.sp, color = Text2, modifier = Modifier.weight(1f))
+            Text("50 · usual", fontSize = 10.sp, color = Text2, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+            Text("100 · sharp", fontSize = 10.sp, color = Text2, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
+        }
+    }
+}
+
 @Composable
 private fun Result(s: CognitiveSession, playsAfter: Int, onClose: () -> Unit) {
     VSpace(12.dp)
     Herc(if (s.status == SessionStatus.INVALID) HercMood.FAIR else HercMood.GOOD, size = 96.dp)
     VSpace(6.dp)
-    Text(
-        when {
-            s.status == SessionStatus.INVALID -> "Not enough rounds counted"
-            else -> "Your score: ${s.cognitiveScore ?: "--"}"
-        },
-        style = MaterialTheme.typography.headlineSmall, color = Text1, textAlign = TextAlign.Center,
-    )
-    VSpace(6.dp)
-    Muted(
-        when {
-            s.status == SessionStatus.INVALID -> "At least 2 of the 3 rounds need to count. Stay in the app while a round runs."
-            playsAfter > 1 -> "50 is average; higher means sharper. Today's score is the median of your $playsAfter games."
-            else -> "50 is average; higher means sharper. After 3 games, average means your own usual."
-        },
-        Modifier.padding(horizontal = 4.dp),
-    )
-    if (s.cognitiveScore != null) {
-        VSpace(16.dp)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            listOf("Accuracy" to s.accuracyScore, "Consistency" to s.consistencyScore, "Bias" to s.biasScore).forEach { (label, v) ->
-                Column(Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).border(BorderStroke(1.dp, Hairline), RoundedCornerShape(6.dp)).padding(10.dp)) {
-                    Text("${v ?: "--"}", fontFamily = Mono, fontSize = 22.sp, color = Text1)
-                    Text(label.uppercase(UiLocale), fontSize = 10.sp, letterSpacing = 1.sp, color = Text2)
-                }
-            }
+    val score = s.cognitiveScore
+    if (s.status == SessionStatus.INVALID || score == null) {
+        Text("Not enough rounds counted", style = MaterialTheme.typography.headlineSmall, color = Text1, textAlign = TextAlign.Center)
+        VSpace(6.dp)
+        Muted("At least 2 of the 3 rounds need to count. Stay in the app while a round runs.", Modifier.padding(horizontal = 4.dp))
+    } else {
+        Text(BeatTheClock.verdict(score), style = MaterialTheme.typography.headlineSmall, color = Text1, textAlign = TextAlign.Center)
+        VSpace(4.dp)
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text("$score", fontFamily = Mono, fontSize = 40.sp, color = scoreColor(score))
+            Text(" / 100", fontFamily = Mono, fontSize = 16.sp, color = Text2, modifier = Modifier.padding(bottom = 7.dp))
         }
+        VSpace(10.dp)
+        ScoreScale(score)
+        VSpace(10.dp)
+        // What the number is made of, as real quantities.
+        val off = s.accuracyError?.let { (it * 100).roundToInt() }
+        val usual = BeatTheClock.usualError(s)?.let { (it * 100).roundToInt() }
+        Muted(
+            buildString {
+                if (off != null) append("Your stops were off by $off% of the goal time")
+                if (off != null && usual != null) append("; your usual is about $usual%")
+                if (off != null) append(". ")
+                append("50 means your usual, higher means closer.")
+                append(if (playsAfter > 1) " Today counts the middle score of your $playsAfter games." else " For your first 3 games, usual means a typical player.")
+            },
+            Modifier.padding(horizontal = 4.dp),
+        )
     }
     if (s.energy != null || s.stress != null) {
         VSpace(10.dp)
-        Muted("You felt: energy ${s.energy ?: "–"}/5 · stress ${s.stress ?: "–"}/5")
+        Muted("You felt: energy ${s.energy?.let { "$it/5" } ?: "–"} · stress ${s.stress?.let { BeatTheClock.STRESS_FACES[it - 1] } ?: "–"}")
     }
     VSpace(18.dp)
     Section("How close you got") {

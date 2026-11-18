@@ -122,7 +122,7 @@ class NudgePlanner(private val dayKeys: DayKeys, private val coach: Coach) {
         if (prefs.evening) {
             val advice = coach.sleepAdvice(nowMs, readiness, sleep, baselineWakeMinute, events)
             out += Nudge(
-                "evening:$today", NudgeKind.EVENING, advice.bedtimeMs - 60 * MIN_MS,
+                "evening:${advice.wakeDayKey}", NudgeKind.EVENING, advice.bedtimeMs - 60 * MIN_MS,
                 "Lights out by ${dayKeys.clock(advice.bedtimeMs)}",
                 listOfNotNull(advice.tomorrowNote, advice.shiftEarlierMinutes?.let { "Aim $it min earlier than last night." }).joinToString(" ").ifEmpty { "A strong night powers tomorrow's score." },
                 NudgeTarget.SLEEP,

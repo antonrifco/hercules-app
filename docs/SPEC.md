@@ -117,16 +117,18 @@ Product categories, not clinically validated thresholds.
 
 | Dimension | Default |
 |---|---:|
-| Sleep & Recovery (S) | 40% |
+| Sleep & Recovery (S) | 45% |
 | Cardiovascular Readiness (H) | 20% |
 | Physical Activity (A) | 10% |
-| Circadian Alignment (C) | 10% |
+| Circadian Alignment (C) | 5% |
 | Cognitive Performance (T) | 20% |
 
-`CRS = 0.40·S + 0.20·H + 0.10·A + 0.10·C + 0.20·T − extras`, each dimension normalized to 0–100 (default
-configuration v2). Sleep leads because it is the only signal with causal evidence for next-day cognition (Van Dongen
+`CRS = 0.45·S + 0.20·H + 0.10·A + 0.05·C + 0.20·T − extras`, each dimension normalized to 0–100 (default
+configuration v3). v3 moved 5 points from light to sleep: light is read by the phone only while it is out and in
+use, the weakest measurement of the five. The Beat the Clock weight counts 60% after one game in a day, 80% after
+two and in full from three (engine 3.1.0): one 2-minute game is a noisy reading. Sleep leads because it is the only signal with causal evidence for next-day cognition (Van Dongen
 2003, Belenky 2003, Lim & Dinges 2010); heart signals are associations (Forte 2019, Buchheit 2014). The weights
-remain product hypotheses, not validated values. A stored v1 default follows v2; custom weights are kept. The engine never hardcodes them: it
+remain product hypotheses, not validated values. A stored older default follows v3; custom weights are kept. The engine never hardcodes them: it
 reads the active `ScoringConfiguration`.
 
 ## 2.4 Sleep & Recovery
@@ -176,6 +178,35 @@ Missing samples never mean darkness. Time of day is not a CRS bonus, and sleep c
 
 `T = 0.70·Accuracy + 0.20·Consistency + 0.10·Bias` from the latest valid, scored Beat the Clock session of the
 day. Without one, the dimension is unavailable.
+
+The result is shown as `T / 100` with a verdict against the player's usual (50): ≥ 65 "Sharper than usual", ≥ 40
+"About your usual", ≥ 20 "Below your usual", else "Well below your usual" (`BeatTheClock.verdict`), plus the
+real error ("off by N% of the goal time; your usual is about M%"). Phone and watch use the same words.
+
+**Score check (debug builds, Setup → Developers).** `ScoreCheck` reports Spearman's rank correlation between the
+score without the cognitive dimension and the day's median game score, over days in the last 90 that have both.
+No verdict below 30 days. It only measures; it never changes a score.
+
+**Screen stays on.** While a round is being timed, phone and watch keep the screen on; otherwise the display
+times out, the app pauses and the round is marked interrupted.
+
+**Moment preparation stays in scope.** Prep tasks cover only sleep, recovery, light, stress and sensors, never the content of the Moment: final stretch adds skipping alcohol and no caffeine after 14:00 the day before; the day itself suggests a 10-minute walk and 2 minutes of box breathing. Reminders: the bedtime reminder is keyed to the wake-up day, so it fires once per night even past midnight; "how did it go?" reads Moments that started in the last 12 hours.
+
+**A day's score starts at wake-up (engine 3.2.0).** Between midnight and waking, when no night has been recorded for
+the new day and it is before the usual wake time, no score is published ("Today's score starts when you wake up").
+Otherwise ten minutes of pulse or yesterday's steps would pass for a score.
+
+**Watch sleep episodes.** The night is the longest sleep episode in the window. Awakenings up to 60 minutes stay in
+the episode as time awake; a longer gap starts a new episode, so a nap is never merged into the night. A night still
+in progress is not reported. If the watch never reports waking, the night ends at its last pulse reading.
+
+**Recalculation.** Every new batch of data recalculates: a watch sync on the phone, Health Connect every 15 minutes
+in the background and every 5 minutes while open, a game, a sleep correction. The watch hands new readings to the
+phone at most every 10 minutes and keeps one background pulse reading per 20 seconds. The phone app also asks the watch for its data at most every 15 minutes, only while a watch is connected (never in airplane mode), because phones that block background starts (Xiaomi Autostart) can drop the watch's own deliveries.
+
+**Sleep history.** `refresh()` also resolves any night in the last 30 days that has a valid Health Connect session
+but no resolved night yet, so the first import (30 days) feeds sleep consistency and the 3-night load at once.
+Stored scores of older days are still never recalculated.
 
 ---
 
@@ -293,7 +324,7 @@ never mixed without normalization.
 | ≥ 70% | ≥ 3 | Medium |
 | otherwise | | Low |
 
-- Next to the score: the level, "N of M signals · D days of data", and below High what would raise it
+- Next to the score: the level, "N of M score parts · D days of data" (parts = sleep, heart, activity, light, game; not the data sources Setup counts), and below High what would raise it
   ("To raise it: add a Beat the Clock game; 2 more days of data."). Phone (Home and Why this score) and watch.
 
 Confidence and classification are independent.
@@ -483,7 +514,7 @@ refreshes.
 |---|---|---|
 | Sleep | a wearable's staged night in Health Connect → Hercules watch → other Health Connect session | Vendor sleep algorithms are validated; Hercules' detection is simpler; unstaged sessions are often phone estimates |
 | HRV | Health Connect → Hercules watch | Vendors measure overnight at rest; the Hercules watch only catches random beat-to-beat readings |
-| Resting heart rate, steps | Hercules watch (when worn that day) → Health Connect | On the body all day; a phone isn't always carried |
+| Resting heart rate, steps | Hercules watch (when worn that day) and Health Connect compared: higher steps, lower resting heart rate | Either can miss part of the day, and a partial day reads low on steps and high on resting heart rate |
 | Ambient light | phone | Only the phone has the sensor |
 
 Sources are never summed. Health Connect has no heart or HRV sensor of its own; those values come from another wearable's app.

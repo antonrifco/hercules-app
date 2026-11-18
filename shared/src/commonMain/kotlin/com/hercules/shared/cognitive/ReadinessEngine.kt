@@ -11,7 +11,9 @@ import com.hercules.shared.readiness.ReadinessCalculation
 
 /**
  * Derives the main sleep from the Hercules watch's activity-state transitions and the heart rate during it.
- * The "night of dayKey" is sleep inside [dayKey-1 18:00, dayKey 14:00]. Gaps between asleep intervals are time awake.
+ * The "night of dayKey" is the longest sleep episode inside [dayKey-1 18:00, dayKey 14:00]. Awakenings of up to
+ * [MAX_AWAKE_GAP_MS] stay inside one episode and count as time awake; a longer gap starts a new episode, so an
+ * evening nap is not glued onto the night. A night still in progress is not reported until the watch sees you awake.
  */
 class SleepAnalyzer(private val dayKeys: DayKeys) {
 
@@ -34,6 +36,27 @@ class SleepAnalyzer(private val dayKeys: DayKeys) {
             val b = minOf(next, end)
             if (b > a) intervals += a to b
         }
+        if (intervals.isEmpty()) return null
+        // Still asleep (no later state) and the window is still open: wait for the wake-up rather than score half a night.
+        val open = states.lastOrNull()?.value == ActivityState.ASLEEP
+        if (open && nowMs < to) return null
+        if (open) {
+            // The watch never reported waking (taken off, flat battery): the night ends at its last pulse reading.
+            val lastHr = samples.filter { it.type == MetricType.HEART_RATE && it.startMs in intervals.last().first..to }.maxOfOrNull { it.startMs }
+            val (a, b) = intervals.removeAt(intervals.lastIndex)
+            val capped = minOf(b, lastHr ?: a)
+            if (capped > a) intervals += a to capped
+            if (intervals.isEmpty()) return null
+        }
+        // Group into episodes, then keep the one with the most sleep.
+        val episodes = mutableListOf<MutableList<Pair<Long, Long>>>()
+        for (iv in intervals) {
+            if (episodes.isEmpty() || iv.first - episodes.last().last().second > MAX_AWAKE_GAP_MS) episodes += mutableListOf(iv)
+            else episodes.last() += iv
+        }
+        val main = episodes.maxBy { e -> e.sumOf { it.second - it.first } }
+        intervals.clear()
+        intervals += main
         val asleepMs = intervals.sumOf { it.second - it.first }
         if (asleepMs < 60 * MIN_MS) return null
 
@@ -54,6 +77,11 @@ class SleepAnalyzer(private val dayKeys: DayKeys) {
             awakeMinutes = ((stop - start) / MIN_MS).toInt() - asleepMin,
             provider = "Hercules watch",
         )
+    }
+
+    companion object {
+        /** Longer than this awake and the sleep before it is a separate episode (a nap, or a split night). */
+        const val MAX_AWAKE_GAP_MS = 60 * MIN_MS
     }
 }
 

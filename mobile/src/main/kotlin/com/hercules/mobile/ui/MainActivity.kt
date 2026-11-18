@@ -144,6 +144,7 @@ private fun HerculesApp(loadDemoOnStart: Boolean, launch: android.content.Intent
         lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
             while (true) {
                 runCatching { g.light.sampleOnce(LightContext.FOREGROUND) }
+                g.askWatchToSync()
                 g.importHealthAndRefresh()
                 nowMs = System.currentTimeMillis()
                 tick++

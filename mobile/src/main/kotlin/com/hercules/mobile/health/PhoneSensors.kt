@@ -87,8 +87,10 @@ class PhoneCapabilities(
         val out = mutableListOf<CapabilityState>()
         for (cap in HealthPermissions.byCapability.keys) {
             val latest: Long? = when (cap) {
-                SensorCapability.HC_SLEEP -> store.sleep(dayKeys.of(now))?.endMs
-                    ?: store.sleepRange(dayKeys.of(now - 3 * DAY), dayKeys.of(now)).lastOrNull()?.endMs
+                // Health Connect's own sessions only: a night from the Hercules watch or typed in by hand says
+                // nothing about whether Health Connect delivers sleep.
+                SensorCapability.HC_SLEEP -> (0..3).flatMap { store.sleepSessions(dayKeys.of(now - it * DAY)) }
+                    .filter { it.quality == DataQuality.VALID }.maxOfOrNull { it.endMs }
                 SensorCapability.HC_EXERCISE -> store.exerciseBetween(now - 14 * DAY, now).maxOfOrNull { it.endMs }
                 else -> metricOf[cap]?.let { stats[it]?.latestMs }
             }

@@ -183,7 +183,7 @@ fun Onboarding(onDone: () -> Unit) {
                 modifier = Modifier.height(48.dp),
                 shape = RoundedCornerShape(6.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Ink),
-            ) { Text(if (last) "ALLOW & START" else "NEXT", letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold) }
+            ) { Text(if (!last) "NEXT" else if (android.os.Build.VERSION.SDK_INT >= 33 && !com.hercules.mobile.notify.Notifier.canPost(ctx)) "ALLOW & START" else "START", letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold) }
         }
     }
 }

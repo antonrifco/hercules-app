@@ -148,6 +148,13 @@ internal fun BeatTheClockScreen(state: WatchState?, onDone: () -> Unit) {
         onDispose { owner.lifecycle.removeObserver(obs) }
     }
 
+    // A round has no touches for up to 30 s: keep the screen on, or the watch dims, the app pauses and the round is lost.
+    val view = androidx.compose.ui.platform.LocalView.current
+    DisposableEffect(stage == WStage.RUNNING) {
+        view.keepScreenOn = stage == WStage.RUNNING
+        onDispose { view.keepScreenOn = false }
+    }
+
     when (stage) {
         WStage.INTRO -> Intro(info) { sessionStartMs = System.currentTimeMillis(); stage = WStage.ROUND }
         WStage.ROUND, WStage.RUNNING -> Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
@@ -240,21 +247,23 @@ private fun FeelCheck(energy: Int, stress: Int, last: CognitiveRound?, onEnergy:
             if (last != null && last.validity == RoundValidity.VALID) item { Text("Stopped at ${offBy(last)}", fontSize = 10.sp, color = Color.White, textAlign = TextAlign.Center) }
             item { Text("QUICK CHECK · OPTIONAL", fontSize = 9.sp, letterSpacing = 1.2.sp, color = BCyan) }
             item { Text("How do you feel?", style = MaterialTheme.typography.titleSmall, color = Color.White) }
-            item { Stepper("Energy", energy, onEnergy) }
-            item { Stepper("Stress", stress, onStress) }
+            item { Stepper("Energy", null, energy, onEnergy) }
+            item { Stepper("Stress", BeatTheClock.STRESS_FACES, stress, onStress) }
             item { Button(onClick = onNext, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) { Text("Next round") } }
         }
     }
 }
 
 @Composable
-private fun Stepper(label: String, value: Int, onChange: (Int) -> Unit) {
+private fun Stepper(label: String, faces: List<String>?, value: Int, onChange: (Int) -> Unit) {
     // Centred label over a centred stepper: nothing sits near the round edge.
     Column(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(label.uppercase(), fontSize = 9.sp, letterSpacing = 1.2.sp, color = BText2)
         Row(verticalAlignment = Alignment.CenterVertically) {
             StepButton("−", "Less $label", enabled = value > 1) { onChange(value - 1) }
-            Text("$value", fontFamily = FontFamily.Monospace, fontSize = 18.sp, color = BCyan, modifier = Modifier.padding(horizontal = 14.dp))
+            // Energy is Herc himself, from drained to prime; stress uses plain faces.
+            if (faces == null) Herc(listOf(HercMood.DRAINED, HercMood.LOW, HercMood.FAIR, HercMood.GOOD, HercMood.PRIME)[value - 1], Modifier.padding(horizontal = 8.dp), size = 34.dp)
+            else Text(faces[value - 1], fontSize = 22.sp, modifier = Modifier.padding(horizontal = 12.dp))
             StepButton("+", "More $label", enabled = value < 5) { onChange(value + 1) }
         }
     }
@@ -302,7 +311,7 @@ private fun Result(s: CognitiveSession, onDone: () -> Unit) {
                 Text(
                     when {
                         s.status == SessionStatus.INVALID -> "Not enough rounds counted"
-                        else -> "${s.cognitiveScore ?: "--"}"
+                        else -> "${s.cognitiveScore ?: "--"}/100"
                     },
                     fontSize = if (s.cognitiveScore != null) 36.sp else 15.sp, fontWeight = if (s.cognitiveScore != null) FontWeight.Thin else FontWeight.Medium,
                     color = Color.White, textAlign = TextAlign.Center,
@@ -312,7 +321,7 @@ private fun Result(s: CognitiveSession, onDone: () -> Unit) {
                 Text(
                     when {
                         s.status == SessionStatus.INVALID -> "2 of the 3 rounds must count."
-                        else -> "50 is average. Higher is sharper."
+                        else -> "${s.cognitiveScore?.let { BeatTheClock.verdict(it) } ?: ""}\n50 is your usual. Higher is sharper."
                     },
                     fontSize = 10.sp, color = BText2, textAlign = TextAlign.Center,
                 )

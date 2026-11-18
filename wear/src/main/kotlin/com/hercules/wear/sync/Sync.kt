@@ -56,6 +56,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             g.retention.apply(System.currentTimeMillis())
             val out = g.phoneSync.syncOnce()
             SyncStatus.record(applicationContext, out.stoppedReason, delivered = out.samplesSynced + out.sessionsSynced + out.assessmentsSynced)
+            com.hercules.wear.complication.ScoreComplicationService.refresh(applicationContext)
             Log.i(TAG, "sync: newRecords=${broken.size} samples=${out.samplesSynced} sessions=${out.sessionsSynced} assessments=${out.assessmentsSynced} stopped=${out.stoppedReason}")
             Result.success()
         } catch (e: Exception) {
@@ -113,5 +114,12 @@ object SyncStatus {
             lastAttemptMs = p.getLong("attempt", 0L).takeIf { it > 0 },
             problem = p.getString("problem", null),
         )
+    }
+}
+
+/** The phone app asks for a sync while it is running (so it can receive even where background starts are limited). */
+class SyncRequestListener : com.google.android.gms.wearable.WearableListenerService() {
+    override fun onMessageReceived(event: com.google.android.gms.wearable.MessageEvent) {
+        if (event.path == WearProtocol.SYNC_REQUEST_PATH) SyncWorker.runNow(applicationContext)
     }
 }

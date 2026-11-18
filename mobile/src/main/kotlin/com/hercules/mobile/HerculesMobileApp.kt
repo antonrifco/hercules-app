@@ -46,9 +46,13 @@ class MobileGraph(private val context: Context) {
         _lastWatchSync.value = atMs
     }
 
-    /** Pulls new Health Connect records (30 days the first time, then the last 3) and recalculates. */
+    /**
+     * Pulls new Health Connect records and recalculates: 30 days the first time, then the last 3, or back to the last
+     * import when that is longer ago (phone off, or background reading not allowed), so no day is skipped.
+     */
     suspend fun importHealthAndRefresh() {
-        val days = if (healthConnect.lastImportMs() == null) 30 else 3
+        val last = healthConnect.lastImportMs()
+        val days = if (last == null) 30 else ((System.currentTimeMillis() - last) / 86_400_000L + 3).toInt().coerceIn(3, 30)
         runCatching { healthConnect.import(days) }.onFailure { Log.w(TAG, "health import failed", it) }
         refreshAndPushToWatch()
     }
@@ -68,6 +72,24 @@ class MobileGraph(private val context: Context) {
             }.asPutDataRequest().setUrgent()
             Wearable.getDataClient(context).putDataItem(req).await()
         }.onFailure { Log.w(TAG, "could not push state to watch", it) }
+    }
+
+    /**
+     * Asks every linked watch to send its data now. The watch also syncs on its own, but a phone that limits
+     * background starts (Xiaomi Autostart, battery saver) can drop those; while this app is running it can always receive.
+     * At most every [ASK_WATCH_EVERY_MS], and not at all when there is no link (airplane mode, Bluetooth off, watch away).
+     */
+    suspend fun askWatchToSync(nowMs: Long = System.currentTimeMillis()) {
+        if (nowMs - prefs.getLong(KEY_LAST_ASK, 0L) < ASK_WATCH_EVERY_MS) return
+        val airplane = android.provider.Settings.Global.getInt(context.contentResolver, android.provider.Settings.Global.AIRPLANE_MODE_ON, 0) != 0
+        if (airplane) return
+        runCatching {
+            val nodes = Wearable.getNodeClient(context).connectedNodes.await()
+            if (nodes.isEmpty()) return
+            prefs.edit { putLong(KEY_LAST_ASK, nowMs) }
+            val messages = Wearable.getMessageClient(context)
+            nodes.forEach { node -> runCatching { messages.sendMessage(node.id, WearProtocol.SYNC_REQUEST_PATH, ByteArray(0)).await() } }
+        }.onFailure { Log.w(TAG, "could not ask the watch to sync", it) }
     }
 
     /** Current sensor choice (newest written by either device) and the watch's last report. */
@@ -97,6 +119,8 @@ class MobileGraph(private val context: Context) {
     private companion object {
         const val TAG = "Hercules"
         const val KEY_LAST_SYNC = "last_watch_sync"
+        const val KEY_LAST_ASK = "last_watch_ask"
+        const val ASK_WATCH_EVERY_MS = 15 * 60_000L
     }
 }
 

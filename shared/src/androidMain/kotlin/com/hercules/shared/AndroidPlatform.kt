@@ -8,6 +8,8 @@ object WearProtocol {
     /** Declared by the phone app in res/values/wear.xml. */
     const val PHONE_CAPABILITY = "hercules_phone"
     const val SYNC_PATH = "/hercules/sync/v1"
+    /** Message from the phone asking the watch to send what it has now (the phone app is running, so it can receive). */
+    const val SYNC_REQUEST_PATH = "/hercules/sync/request"
     /** DataClient item the phone writes with the latest readiness + next event (key [STATE_KEY], JSON). */
     const val STATE_PATH = "/hercules/state"
     const val STATE_KEY = "json"

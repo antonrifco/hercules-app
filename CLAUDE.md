@@ -28,7 +28,7 @@ adb shell am start -n com.hercules.app/com.hercules.mobile.ui.MainActivity --ez 
 
 ## Where things are
 
-- `shared/.../readiness/Scoring.kt`: dimensions, `DefaultScoring` (config v2: 40/20/10/10/20),
+- `shared/.../readiness/Scoring.kt`: dimensions, `DefaultScoring` (config v3: 45/20/10/5/20; one game counts 60%, two 80%, three in full),
   `DimensionScorer` (sleep load, ln-HRV, light curves, `modifiers` for optional extras),
   `ReadinessCalculator.combine` (CRS, coverage, `confidenceFor(coverage, historyDays)`, confidence hint),
   `SCORING_ENGINE_VERSION`.
@@ -51,8 +51,13 @@ adb shell am start -n com.hercules.app/com.hercules.mobile.ui.MainActivity --ez 
 - Optional extras (respiratory rate, skin temp, SpO₂, glucose lows; CGM lows must last ~3 readings) only subtract, capped at −10 total.
 - Stored scores keep their config id/version and engine version. `refresh()` recalculates today plus the previous
   `RECALC_DAYS` (2) days with each day's own stamped weights (late data); older days are never touched.
+- A day's score starts at wake-up: between midnight and waking (no night recorded yet, before the usual wake time)
+  no score is published (`REASON_BEFORE_WAKE`). Watch sleep is the longest episode in the window (awake gaps over
+  60 min split episodes); a night in progress is not reported.
+- New data recalculates: watch batch on the phone, Health Connect every 15 min in the background, 5 min while open;
+  the watch syncs on new readings at most every 10 min and keeps one background pulse reading per 20 s. The phone also asks the watch to sync (`SYNC_REQUEST_PATH`) at most every 15 min, only when a watch is connected and not in airplane mode.
 - Changing the formula: bump `SCORING_ENGINE_VERSION`; changing default weights: bump `DefaultScoring.CONFIG_VERSION`.
 - Phone and watch Beat the Clock rules are identical; baselines are per device.
 - Same signal from several sources: the more reliable wins, never summed (SPEC §14). Sleep: staged Health Connect
-  night → Hercules watch → unstaged HC. HRV: HC → watch. Resting HR, steps: watch (if worn that day) → HC.
+  night → Hercules watch → unstaged HC. HRV: HC → watch. Resting HR, steps: watch (if worn that day) and HC compared, the fuller reading wins (higher steps, lower resting HR).
   Light: phone. Without a watch, everything must still work from Health Connect and phone sensors.

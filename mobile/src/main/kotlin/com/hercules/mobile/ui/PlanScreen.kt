@@ -97,6 +97,7 @@ import com.hercules.shared.readiness.MomentRules
 import com.hercules.shared.readiness.MomentStatus
 import com.hercules.shared.readiness.PeakAlignment
 import com.hercules.shared.readiness.PeakResult
+import com.hercules.shared.readiness.PeakWindowPrediction
 import com.hercules.shared.readiness.PrepPhase
 import com.hercules.shared.readiness.Urgency
 import kotlinx.coroutines.delay
@@ -468,7 +469,7 @@ fun EventDetail(
             item {
                 Section("How did you do?") {
                     FacesRow(myReflection?.rating) { v ->
-                        scope.launch { g.cognitive.store.saveReflection(EventReflection(s.event.id, v, System.currentTimeMillis())); onChanged() }
+                        scope.launch { g.cognitive.store.saveReflection(EventReflection(s.event.id, v, System.currentTimeMillis())); g.pushToWatch(); onChanged() }
                     }
                     myReflection?.let { rf ->
                         val score = s.history.lastOrNull { it.score != null }?.score
@@ -607,7 +608,7 @@ fun GuideContent(weights: Map<Dimension, Double> = DefaultScoring.DEFAULT.weight
             HSpace(10.dp)
             Column {
                 Eyebrow("Insufficient data", color = InsufficientColor)
-                Text("No sleep yet, or under 70% of the data. Herc won't guess, so no number is shown.", style = MaterialTheme.typography.bodyMedium, color = Text1)
+                Text("Nothing has come in for today yet. One reading is enough to start; until then Herc won't guess.", style = MaterialTheme.typography.bodyMedium, color = Text1)
             }
         }
         VSpace(18.dp)
@@ -639,7 +640,7 @@ fun GuideContent(weights: Map<Dimension, Double> = DefaultScoring.DEFAULT.weight
             }
         }
         VSpace(8.dp)
-        Muted("After 14 days with enough runs in every part of the day, Herc predicts your peak focus window.")
+        Muted("After ${PeakWindowPrediction.MIN_OBSERVATION_DAYS} days with at least ${PeakWindowPrediction.MIN_SESSIONS_PER_WINDOW} runs in every part of the day, Herc predicts your peak focus window.")
         VSpace(18.dp)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Rounded.Info, null, tint = Text2, modifier = Modifier.size(14.dp))

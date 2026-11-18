@@ -17,6 +17,7 @@ import com.hercules.shared.readiness.Dimension
 import com.hercules.shared.readiness.MomentRules
 import com.hercules.shared.readiness.MomentStatus
 import com.hercules.shared.readiness.PeakResult
+import com.hercules.shared.readiness.DefaultScoring
 import com.hercules.shared.readiness.PrepPhase
 import com.hercules.shared.readiness.PrepStatus
 import com.hercules.shared.readiness.RoundValidity
@@ -64,7 +65,7 @@ class CognitiveServiceTest {
         val r = assertNotNull(ev.readiness, ev.calc.insufficientReason)
         assertTrue(r.score in 30..75, "score=${r.score}")
         assertTrue(ev.calc.coverage >= 0.7)
-        assertEquals("default-v2", ev.calc.stamp.configId)
+        assertEquals(DefaultScoring.DEFAULT.id, ev.calc.stamp.configId)
         assertTrue(r.suggestions.any { it.title.startsWith("Short on sleep") })
         assertTrue(cognitive.store.readinessRange("2026-10-27", "2026-11-10").size >= 10)
 
@@ -92,7 +93,7 @@ class CognitiveServiceTest {
         val (repo, insights, cognitive) = services()
         DemoData.load(repo, insights, cognitive, now)
         val yesterday = cognitive.store.readiness("2026-11-09")!!
-        assertEquals("default-v2", yesterday.calc.stamp.configId)
+        assertEquals(DefaultScoring.DEFAULT.id, yesterday.calc.stamp.configId)
 
         val bad = cognitive.saveWeights(Dimension.entries.associateWith { 0.3 })
         assertIs<WeightValidation.Invalid>(bad)
@@ -223,6 +224,37 @@ class CognitiveServiceTest {
         assertEquals(com.hercules.shared.cognitive.SleepNight.SOURCE_HEALTH_CONNECT, cognitive.store.sleep(day)?.source)
         assertNotNull(ev.calc.dimensions.first { it.dimension == Dimension.SLEEP }.score)
         assertNotNull(ev.calc.dimensions.first { it.dimension == Dimension.CARDIO }.score)
+    }
+
+    @Test fun aMonthOfHealthConnectSleepIsUsedFromTheFirstDay() = runTest {
+        val (_, _, cognitive) = services()
+        // The first import brings 30 nights at once; all of them must become nights, not only the last three.
+        cognitive.store.upsertSleepSessions((0..20).map { back ->
+            val day = dk.plusDays("2026-11-10", -back)
+            val start = dk.startOf(day) - 2 * 3_600_000L
+            SleepSessionRecord("hc:$back", day, start, start + 8 * 3_600_000L, 450, 30, null, null, null, "phone.app", null, DataQuality.VALID)
+        })
+        val ev = cognitive.refresh()
+        assertEquals(21, cognitive.store.sleepRange("2026-10-01", "2026-11-10").size)
+        assertNotNull(ev.calc.dimensions.first { it.dimension == Dimension.SLEEP }.metrics.first { it.key == com.hercules.shared.readiness.MetricKey.SLEEP_CONSISTENCY }.score)
+    }
+
+    @Test fun noScoreBetweenMidnightAndWaking() = runTest {
+        // 00:30 with yesterday's steps on record: enough for a number, but the day has not started.
+        val night = dk.startOf("2026-11-10") + 30 * 60_000L
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        HerculesDatabase.Schema.create(driver)
+        val db = HerculesDatabase(driver)
+        val cognitive = CognitiveService(HerculesRepository(db, Dispatchers.Unconfined), CognitiveStore(db, Dispatchers.Unconfined), dk, clock = { night })
+        cognitive.store.upsertMetrics(listOf(
+            HealthMetric("hc:steps:2026-11-09", HealthMetricType.STEPS_DAILY, 9000.0, night - 86_400_000L, night, night, "2026-11-09", "phone.app", null, DataQuality.VALID, CollectionMethod.HEALTH_CONNECT),
+        ))
+        val ev = cognitive.refresh()
+        assertNull(ev.calc.score)
+        assertEquals(com.hercules.shared.readiness.REASON_BEFORE_WAKE, ev.calc.insufficientReason)
+        // The same data after the usual wake-up time (07:00 by default) gives a score.
+        val morning = CognitiveService(HerculesRepository(db, Dispatchers.Unconfined), CognitiveStore(db, Dispatchers.Unconfined), dk, clock = { night + 8 * 3_600_000L })
+        assertNotNull(morning.refresh().calc.score)
     }
 
     @Test fun noDataMeansInsufficientNotZero() = runTest {
