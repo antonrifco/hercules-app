@@ -27,7 +27,7 @@ class WearGraph(context: Context) {
     val cognitive = CognitiveService(repo, cognitiveStore, clock = System::currentTimeMillis)
     val watchState = WatchStateSource(context, cognitive)
     val phoneSync = SyncService(
-        // Beat the Clock sessions played on the watch travel in the same batches as samples, acked by id.
+        // Reaction Test sessions played on the watch travel in the same batches as samples, acked by id.
         store = object : SyncStore by repo {
             override suspend fun pendingAssessments(limit: Long) = cognitiveStore.pendingSessions(limit)
             override suspend fun markAssessmentsSynced(ids: List<String>) = cognitiveStore.markSessionsSynced(ids)

@@ -52,6 +52,7 @@ import androidx.compose.material.icons.rounded.RateReview
 import androidx.compose.material.icons.rounded.Sensors
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.Widgets
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material.icons.rounded.Watch
 import androidx.compose.material.icons.rounded.WbSunny
@@ -143,7 +144,8 @@ fun DataScreen(g: MobileGraph, today: String, padding: PaddingValues, onLoadDemo
     var refreshTick by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
     var page by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<SetupPage?>(null) }
-    androidx.activity.compose.BackHandler(enabled = page != null) { page = null }
+    var signal by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<SignalKind?>(null) }
+    androidx.activity.compose.BackHandler(enabled = page != null) { if (signal != null) signal = null else page = null }
     var playedOnce by remember { mutableStateOf(false) }
     // "Played once" on either device completes the step (there are no practice games any more).
     LaunchedEffect(Unit) {
@@ -169,13 +171,19 @@ fun DataScreen(g: MobileGraph, today: String, padding: PaddingValues, onLoadDemo
     val active by remember { g.cognitive.store.observeActiveConfig() }.collectAsStateWithLifecycle(DefaultScoring.DEFAULT)
     val reminders = remember(page) { ReminderSettings.load(ctx) }
 
+    signal?.let { k ->
+        SetupSubPage(k.title, "The last 7 days, from every source Hercules reads.", "Sensors & data", padding, onBack = { signal = null }) {
+            SignalHistoryTable(g, k)
+        }
+        return
+    }
     page?.let { p ->
         SetupSubPage(p, padding, onBack = { page = null }) {
             when (p) {
                 SetupPage.SENSORS -> {
                     HealthBlock(g, caps.filter { it.capability.category == CapabilityCategory.HEALTH_CONNECT_RECORD }) { scope.launch { delay(1500); refreshTick++ } }
                     VSpace(18.dp)
-                    SensorsBlock(g, caps, watches, lastSync, config, report) { kind, on ->
+                    SensorsBlock(g, caps, watches, lastSync, config, report, onOpen = { signal = it }) { kind, on ->
                         val next = config.with(kind, on, System.currentTimeMillis())
                         config = next
                         scope.launch { runCatching { g.setSensors(next) } }
@@ -183,6 +191,7 @@ fun DataScreen(g: MobileGraph, today: String, padding: PaddingValues, onLoadDemo
                 }
                 SetupPage.WEIGHTS -> WeightsBlock(g)
                 SetupPage.REMINDERS -> RemindersBlock(g)
+                SetupPage.WIDGETS -> WidgetsBlock()
                 SetupPage.DATA -> DataBlock(g) { page = null; onCleared() }
                 SetupPage.DEVELOPER -> DeveloperBlock(g, onLoad = { page = null; onLoadDemo() }, onRemove = { page = null; onRemoveDemo() })
             }
@@ -226,6 +235,8 @@ fun DataScreen(g: MobileGraph, today: String, padding: PaddingValues, onLoadDemo
                 val on = listOf(reminders.morning, reminders.assess, reminders.event, reminders.evening, reminders.reflect, reminders.focus).count { it }
                 MenuRow(Icons.Rounded.Notifications, "Reminders", if (on == 0) "All off" else "$on of 6 on") { page = SetupPage.REMINDERS }
                 MenuDivider()
+                MenuRow(Icons.Rounded.Widgets, "Home screen widgets", "Score, today and this week") { page = SetupPage.WIDGETS }
+                MenuDivider()
                 MenuRow(Icons.Rounded.DeleteForever, "Clear data", "Wipe everything Hercules stored on this phone", tint = Color(0xFFFF4D6D)) { page = SetupPage.DATA }
                 if (BuildConfig.DEBUG) {
                     MenuDivider()
@@ -242,7 +253,7 @@ fun DataScreen(g: MobileGraph, today: String, padding: PaddingValues, onLoadDemo
             val rows = bests.map { Triple(it.label, it.value, shortDate(g.cognitive.dayKeys.startOf(it.dayKey) + 12 * 3_600_000L)) } +
                 records.filter { it.kind !in covered }.map { Triple(RecordText.label(it.kind), RecordText.value(it), null) }
             Section("Personal bests") {
-                if (rows.isEmpty()) Muted("None yet. Your best score, sleep, steps and game show up after your first day of data.")
+                if (rows.isEmpty()) Muted("None yet. Your best score, sleep, steps and Reaction Test show up after your first day of data.")
                 rows.forEachIndexed { i, (label, value, date) ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -273,12 +284,17 @@ private enum class SetupPage(val title: String, val blurb: String) {
     SENSORS("Sensors & data", "Every signal Herc uses and where it comes from: Health Connect, this phone, your watch."),
     WEIGHTS("Scoring weights", "Decide what drives your score."),
     REMINDERS("Reminders", "Only the nudges you want."),
+    WIDGETS("Home screen widgets", "Herc on your home screen, without opening the app."),
     DATA("Clear data", "Start over from zero."),
     DEVELOPER("Developers", "Tools for testing. Debug builds only."),
 }
 
 @Composable
-private fun SetupSubPage(page: SetupPage, padding: PaddingValues, onBack: () -> Unit, content: @Composable () -> Unit) {
+private fun SetupSubPage(page: SetupPage, padding: PaddingValues, onBack: () -> Unit, content: @Composable () -> Unit) =
+    SetupSubPage(page.title, page.blurb, "Setup", padding, onBack, content)
+
+@Composable
+private fun SetupSubPage(title: String, blurb: String, back: String, padding: PaddingValues, onBack: () -> Unit, content: @Composable () -> Unit) {
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()),
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = padding.calculateBottomPadding() + 32.dp),
@@ -292,12 +308,12 @@ private fun SetupSubPage(page: SetupPage, padding: PaddingValues, onBack: () -> 
                 ) {
                     Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = Cyan, modifier = Modifier.size(20.dp))
                     HSpace(8.dp)
-                    Eyebrow("Setup", color = Cyan)
+                    Eyebrow(back, color = Cyan)
                 }
                 VSpace(6.dp)
-                Text(page.title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Light, color = Text1)
+                Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Light, color = Text1)
                 VSpace(4.dp)
-                Muted(page.blurb)
+                Muted(blurb)
             }
         }
         item { content() }
@@ -328,7 +344,7 @@ private fun DeveloperBlock(g: MobileGraph, onLoad: () -> Unit, onRemove: () -> U
     var confirm by remember { mutableStateOf<Boolean?>(null) } // true = load, false = remove
     val check by produceState<ScoreCheck.Result?>(null) { value = g.cognitive.scoreCheck() }
     Section("Score check") {
-        Muted("Does the body part of your score (sleep, heart, activity, light) track your Beat the Clock results? Days with both, last ${ScoreCheck.WINDOW_DAYS} days. Demo data counts too.")
+        Muted("Does the body part of your score (sleep, heart, activity, light) track your Reaction Test results? Days with both, last ${ScoreCheck.WINDOW_DAYS} days. Demo data counts too.")
         VSpace(10.dp)
         check?.let { c ->
             Row(Modifier.fillMaxWidth()) {
@@ -338,17 +354,17 @@ private fun DeveloperBlock(g: MobileGraph, onLoad: () -> Unit, onRemove: () -> U
             VSpace(8.dp)
             Muted(
                 when (c.link) {
-                    ScoreCheck.Link.NOT_ENOUGH_DATA -> "Not enough yet. Needs ${ScoreCheck.MIN_DAYS} days with a score and a game; any number shown before that is mostly noise."
-                    ScoreCheck.Link.CLEAR -> if (c.correlation!! > 0) "Clear link: higher body scores go with better games." else "Clear link, but backwards: higher body scores go with worse games."
+                    ScoreCheck.Link.NOT_ENOUGH_DATA -> "Not enough yet. Needs ${ScoreCheck.MIN_DAYS} days with a score and a Reaction Test; any number shown before that is mostly noise."
+                    ScoreCheck.Link.CLEAR -> if (c.correlation!! > 0) "Clear link: higher body scores go with faster reactions." else "Clear link, but backwards: higher body scores go with slower reactions."
                     ScoreCheck.Link.WEAK -> "Weak link. Too faint to learn personal weights from."
-                    ScoreCheck.Link.NONE -> "No link found. The score and the game don't move together."
+                    ScoreCheck.Link.NONE -> "No link found. The score and your reactions don't move together."
                 },
             )
         }
     }
     VSpace(18.dp)
     Section("Demo data") {
-        Muted("Fills the app with three weeks of made-up sleep, scores, Beat the Clock games and two Moments, so every screen has something to show. It's added next to your own data.")
+        Muted("Fills the app with three weeks of made-up sleep, scores, reaction tests and two Moments, so every screen has something to show. It's added next to your own data.")
         VSpace(12.dp)
         Button(
             onClick = { confirm = true }, modifier = Modifier.fillMaxWidth().height(46.dp), shape = RoundedCornerShape(6.dp),
@@ -494,9 +510,14 @@ private fun SensorsBlock(
     lastSync: Long?,
     config: SensorConfig,
     report: SensorReport?,
+    onOpen: (SignalKind) -> Unit,
     onToggle: (SensorKind, Boolean) -> Unit,
 ) {
     val now = System.currentTimeMillis()
+    // Newest reading per signal, from any source.
+    val latest by androidx.compose.runtime.produceState(emptyMap<SignalKind, Latest>(), caps, lastSync) {
+        value = SignalKind.entries.mapNotNull { k -> runCatching { latestReading(g, k) }.getOrNull()?.let { k to it } }.toMap()
+    }
     fun cap(c: SensorCapability) = caps.firstOrNull { it.capability == c }
     val watchFresh = lastSync != null && now - lastSync < 86_400_000L
     fun watchLive(k: SensorKind) = watchFresh && report?.active?.contains(k) == true
@@ -509,19 +530,19 @@ private fun SensorsBlock(
     }
 
     val signals = listOf(
-        Signal(Icons.Rounded.Bedtime, "Sleep", listOf(Src.Hc(cap(SensorCapability.HC_SLEEP)), Src.Watch(watchLive(SensorKind.SLEEP)))),
-        Signal(Icons.Rounded.MonitorHeart, "Heart rate variability", listOf(Src.Hc(cap(SensorCapability.HC_HRV)))),
-        Signal(Icons.Rounded.Favorite, "Resting heart rate", listOf(Src.Hc(cap(SensorCapability.HC_RESTING_HR)), Src.Watch(watchLive(SensorKind.HEART_RATE)))),
-        Signal(Icons.AutoMirrored.Rounded.DirectionsWalk, "Steps", listOf(Src.Hc(cap(SensorCapability.HC_STEPS)), Src.Watch(watchLive(SensorKind.STEPS)))),
-        Signal(Icons.Rounded.FitnessCenter, "Workouts", listOf(Src.Hc(cap(SensorCapability.HC_EXERCISE)))),
-        Signal(Icons.Rounded.LightMode, "Ambient light", listOf(Src.Phone(light, lux))),
+        Signal(SignalKind.SLEEP, Icons.Rounded.Bedtime, "Sleep", listOf(Src.Hc(cap(SensorCapability.HC_SLEEP)), Src.Watch(watchLive(SensorKind.SLEEP)))),
+        Signal(SignalKind.HRV, Icons.Rounded.MonitorHeart, "Heart rate variability", listOf(Src.Hc(cap(SensorCapability.HC_HRV)))),
+        Signal(SignalKind.RESTING_HR, Icons.Rounded.Favorite, "Resting heart rate", listOf(Src.Hc(cap(SensorCapability.HC_RESTING_HR)), Src.Watch(watchLive(SensorKind.HEART_RATE)))),
+        Signal(SignalKind.STEPS, Icons.AutoMirrored.Rounded.DirectionsWalk, "Steps", listOf(Src.Hc(cap(SensorCapability.HC_STEPS)), Src.Watch(watchLive(SensorKind.STEPS)))),
+        Signal(SignalKind.WORKOUTS, Icons.Rounded.FitnessCenter, "Workouts", listOf(Src.Hc(cap(SensorCapability.HC_EXERCISE)))),
+        Signal(SignalKind.LIGHT, Icons.Rounded.LightMode, "Ambient light", listOf(Src.Phone(light, lux))),
     )
     val live = signals.count { it.live }
     Section("Signals", trailing = { Text("$live/${signals.size} live", fontFamily = Mono, fontSize = 12.sp, color = if (live > 0) Cyan else Text2) }) {
-        Muted("These make up your score. One live source per signal is enough.")
+        Muted("These make up your score. One live source per signal is enough. Tap one for its last 7 days.")
         VSpace(6.dp)
         signals.forEach { s ->
-            SignalRow(s, onClick = null)
+            SignalRow(s, latest[s.kind]) { onOpen(s.kind) }
         }
         if (light?.status == CapabilityStatus.AVAILABLE || light?.status == CapabilityStatus.NO_RECENT_DATA) {
             Muted("Light: ${luxCount ?: 0} readings in the last 24 h, taken while Hercules is open plus the odd background check. Gaps never count as darkness.")
@@ -533,16 +554,16 @@ private fun SensorsBlock(
     // Optional extras: they can only lower the score when clearly off your usual (spec §6.1). Ordinary heart rate is
     // stored but used for nothing, so it isn't listed.
     val extras = listOf(
-        Signal(Icons.Rounded.Air, "Respiratory rate", listOf(Src.Hc(cap(SensorCapability.HC_RESPIRATORY_RATE)))),
-        Signal(Icons.Rounded.Thermostat, "Skin temperature", listOf(Src.Hc(cap(SensorCapability.HC_SKIN_TEMPERATURE)))),
-        Signal(Icons.Rounded.WaterDrop, "Blood oxygen", listOf(Src.Hc(cap(SensorCapability.HC_SPO2)))),
-        Signal(Icons.Rounded.Bloodtype, "Glucose", listOf(Src.Hc(cap(SensorCapability.HC_BLOOD_GLUCOSE)))),
+        Signal(SignalKind.RESPIRATORY, Icons.Rounded.Air, "Respiratory rate", listOf(Src.Hc(cap(SensorCapability.HC_RESPIRATORY_RATE)))),
+        Signal(SignalKind.SKIN_TEMP, Icons.Rounded.Thermostat, "Skin temperature", listOf(Src.Hc(cap(SensorCapability.HC_SKIN_TEMPERATURE)))),
+        Signal(SignalKind.SPO2, Icons.Rounded.WaterDrop, "Blood oxygen", listOf(Src.Hc(cap(SensorCapability.HC_SPO2)))),
+        Signal(SignalKind.GLUCOSE, Icons.Rounded.Bloodtype, "Glucose", listOf(Src.Hc(cap(SensorCapability.HC_BLOOD_GLUCOSE)))),
     )
     val extrasLive = extras.count { it.live }
     Section("Optional extras", trailing = { Text("$extrasLive/${extras.size} live", fontFamily = Mono, fontSize = 12.sp, color = if (extrasLive > 0) Cyan else Text2) }) {
         Muted("Never add points. They only lower the score when clearly off your usual, like a raised breathing rate or a glucose low. Low glucose also shows a warning on Home.")
         VSpace(6.dp)
-        extras.forEach { SignalRow(it, onClick = null) }
+        extras.forEach { SignalRow(it, latest[it.kind]) { onOpen(it.kind) } }
     }
 }
 
@@ -581,12 +602,12 @@ private sealed interface Src {
     }
 }
 
-private class Signal(val icon: ImageVector, val name: String, val sources: List<Src>) {
+private class Signal(val kind: SignalKind, val icon: ImageVector, val name: String, val sources: List<Src>) {
     val live get() = sources.any { it.live }
 }
 
 @Composable
-private fun SignalRow(s: Signal, onClick: (() -> Unit)?) {
+private fun SignalRow(s: Signal, latest: Latest?, onClick: (() -> Unit)?) {
     val tint = if (s.live) Cyan else Text2
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).padding(vertical = 8.dp),
@@ -603,7 +624,12 @@ private fun SignalRow(s: Signal, onClick: (() -> Unit)?) {
                     .replace("Watch: live", "Watch"),
                 style = MaterialTheme.typography.bodySmall, color = if (s.live) Cyan else Amber,
             )
+            Text(
+                latest?.let { "Last: ${it.text} · ${stampOf(it.atMs)}" } ?: "No reading yet",
+                style = MaterialTheme.typography.bodySmall, color = Text2,
+            )
         }
+        if (onClick != null) Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = Text2, modifier = Modifier.size(18.dp))
     }
 }
 
@@ -630,10 +656,7 @@ private fun WatchBlock(watches: List<String>?, lastSync: Long?, cap: CapabilityS
             HSpace(12.dp)
             Column(Modifier.weight(1f)) {
                 Text(watches?.takeIf { it.isNotEmpty() }?.joinToString() ?: "Hercules watch", style = MaterialTheme.typography.bodyLarge, color = Text1)
-                Muted(
-                    if (linked) "Last data " + (lastSync?.let { DateUtils.getRelativeTimeSpanString(it).toString().lowercase() } ?: "never")
-                    else "Optional. Adds sleep tracking and Beat the Clock on your wrist.",
-                )
+                Muted(if (linked) "Its readings show under each signal above." else "Optional. Adds sleep tracking and the Reaction Test on your wrist.")
             }
             Pill(
                 when {
@@ -698,9 +721,74 @@ private fun sensorOffEffect(k: SensorKind): String = when (k) {
 } + " You can turn it back on at any time."
 
 /**
- * Beat the Clock: where today stands (games played, how much of the game weight they carry), games per device,
+ * Reaction Test: where today stands (games played, how much of the game weight they carry), games per device,
  * and a way to play. The rules themselves are fixed, so there is nothing to set.
  */
+/** Adds Hercules widgets to the home screen. The launcher asks to confirm and lets you place it. */
+@Composable
+private fun WidgetsBlock() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var manual by remember { mutableStateOf(false) }
+    var tried by remember { mutableStateOf(false) }
+    var confirm by remember { mutableStateOf<com.hercules.mobile.widget.Widgets.Kind?>(null) }
+    val xiaomi = android.os.Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true)
+    Section("Widgets") {
+        com.hercules.mobile.widget.Widgets.Kind.entries.forEachIndexed { i, k ->
+            if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
+            Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(k.title, style = MaterialTheme.typography.bodyMedium, color = Text1)
+                    Text("${k.size} · ${k.blurb}", style = MaterialTheme.typography.bodySmall, color = Text2)
+                }
+                HSpace(12.dp)
+                androidx.compose.material3.OutlinedButton(
+                    onClick = { confirm = k },
+                    shape = RoundedCornerShape(6.dp), contentPadding = PaddingValues(horizontal = 14.dp),
+                ) { Text("ADD", color = Cyan, letterSpacing = 1.2.sp, fontSize = 12.sp) }
+            }
+        }
+        VSpace(4.dp)
+        Muted(
+            if (manual) "Your launcher can't add widgets from an app. Long-press an empty spot on your home screen, tap Widgets, and find Hercules."
+            else "Your phone asks you to confirm and where to place it. They update whenever your score does.",
+        )
+        confirm?.let { k ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { confirm = null },
+                title = { Text("Add ${k.title} widget?") },
+                text = { Text("A ${k.size} widget on your home screen: ${k.blurb.replaceFirstChar { it.lowercase() }} Your phone then asks where to place it.") },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        confirm = null
+                        tried = true
+                        if (!com.hercules.mobile.widget.Widgets.requestPin(ctx, k)) manual = true
+                    }) { Text("Add", color = Cyan) }
+                },
+                dismissButton = { androidx.compose.material3.TextButton(onClick = { confirm = null }) { Text("Cancel", color = Text2) } },
+                containerColor = Panel,
+            )
+        }
+        // Xiaomi's launcher silently refuses until Hercules may add to the home screen ("Home screen shortcuts").
+        if (tried && xiaomi) {
+            VSpace(10.dp)
+            Muted("Nothing appeared? Xiaomi blocks this until you allow it: Other permissions › Home screen shortcuts › Allow. Then tap ADD again.")
+            VSpace(8.dp)
+            androidx.compose.material3.OutlinedButton(
+                onClick = { openXiaomiPermissions(ctx) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(6.dp),
+            ) { Text("OPEN PERMISSIONS", color = Cyan, letterSpacing = 1.2.sp, fontSize = 12.sp) }
+        }
+    }
+}
+
+/** Xiaomi's own per-app permission page (where "Home screen shortcuts" lives), or the standard app settings. */
+private fun openXiaomiPermissions(ctx: android.content.Context) {
+    val miui = android.content.Intent("miui.intent.action.APP_PERM_EDITOR")
+        .setClassName("com.miui.securitycenter", "com.miui.permcenter.permissions.PermissionsEditorActivity")
+        .putExtra("extra_pkgname", ctx.packageName)
+    val plain = android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.fromParts("package", ctx.packageName, null))
+    runCatching { ctx.startActivity(miui) }.recoverCatching { ctx.startActivity(plain) }
+}
+
 @Composable
 private fun AssessmentsBlock(g: MobileGraph, today: String, onPlay: () -> Unit) {
     val dk = g.cognitive.dayKeys
@@ -716,16 +804,16 @@ private fun AssessmentsBlock(g: MobileGraph, today: String, onPlay: () -> Unit) 
     val n = todays.size
     // Same steps as the scoring: one game counts 60% of the game weight, two 80%, three or more in full.
     val counts = when (n) { 0 -> 0; 1 -> 60; 2 -> 80; else -> 100 }
-    Section("Beat the Clock") {
+    Section("Reaction Test") {
         Text(
-            when (n) { 0 -> "No game today"; 1 -> "1 game today"; else -> "$n games today" },
+            when (n) { 0 -> "No test today"; 1 -> "1 test today"; else -> "$n tests today" },
             style = MaterialTheme.typography.bodyLarge, color = Text1,
         )
         Muted(
             when {
-                n == 0 -> "Your score leaves the game out until you play. One game counts 60% of its weight."
+                n == 0 -> "Your score leaves the test out until you take one. One test counts 60% of its weight."
                 counts < 100 -> "Counts $counts% of its weight. ${3 - n} more for the full weight."
-                else -> "Counts in full. Today's result is the median of your games."
+                else -> "Counts in full. Today's result is the median of your tests."
             },
         )
         todays.maxByOrNull { it.endMs }?.let { last ->
@@ -739,7 +827,7 @@ private fun AssessmentsBlock(g: MobileGraph, today: String, onPlay: () -> Unit) 
             Button(
                 onClick = onPlay, modifier = Modifier.fillMaxWidth().height(46.dp), shape = RoundedCornerShape(6.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Ink),
-            ) { Text("PLAY NOW", letterSpacing = 1.2.sp, fontWeight = FontWeight.SemiBold) }
+            ) { Text("TEST NOW", letterSpacing = 1.2.sp, fontWeight = FontWeight.SemiBold) }
         }
     }
 }
@@ -826,7 +914,7 @@ private fun WeightsBlock(g: MobileGraph) {
 private fun baselineLabel(b: StoredBaseline): String {
     val key = runCatching { MetricKey.valueOf(b.metric) }.getOrNull()
     val name = when (key) {
-        MetricKey.BTC_ACCURACY -> "Beat the Clock"
+        MetricKey.BTC_SPEED -> "Reaction Test"
         null -> b.metric
         else -> key.label
     }
@@ -837,7 +925,7 @@ private fun baselineValue(b: StoredBaseline): String = when (b.metric) {
     MetricKey.HRV.name -> "${b.value.median.roundToInt()} ms ±${b.value.mad.roundToInt()}"
     MetricKey.RESTING_HR.name -> "${b.value.median.roundToInt()} bpm ±${"%.1f".format(UiLocale, b.value.mad)}"
     MetricKey.STEPS.name -> "${b.value.median.roundToInt()} ±${b.value.mad.roundToInt()}"
-    MetricKey.BTC_ACCURACY.name -> "${"%.1f".format(UiLocale, b.value.median * 100)}% error"
+    MetricKey.BTC_SPEED.name -> "${(1000 / b.value.median).roundToInt()} ms"
     else -> "${"%.2f".format(UiLocale, b.value.median)} ±${"%.2f".format(UiLocale, b.value.mad)}"
 }
 
@@ -861,7 +949,7 @@ private fun BaselinesBlock(g: MobileGraph) {
             if (i < list.lastIndex) Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
         }
         VSpace(6.dp)
-        Muted("Reference values for the first 7 days, then more of your own history each day (80% after 3 weeks). Beat the Clock baselines are separate for phone and watch. Changing weights never resets them.")
+        Muted("Reference values for the first 7 days, then more of your own history each day (80% after 3 weeks). Reaction Test baselines are separate for phone and watch. Changing weights never resets them.")
     }
 }
 
@@ -884,7 +972,7 @@ private fun DataBlock(g: MobileGraph, onCleared: () -> Unit) {
             onDismissRequest = { confirm = false },
             containerColor = Panel,
             title = { Text("Delete all Hercules data?", color = Text1) },
-            text = { Text("Scores, sleep, Beat the Clock runs, baselines, Moments and settings on this phone are deleted. Health Connect keeps its own data. This can't be undone.", color = Text2) },
+            text = { Text("Scores, sleep, reaction tests, baselines, Moments and settings on this phone are deleted. Health Connect keeps its own data. This can't be undone.", color = Text2) },
             confirmButton = {
                 TextButton(onClick = { scope.launch { g.cognitive.clearAll(); g.pushToWatch(); confirm = false; onCleared() } }) { Text("DELETE", letterSpacing = 1.sp, color = Color(0xFFFF4D6D)) }
             },
@@ -939,7 +1027,7 @@ private fun RemindersBlock(g: MobileGraph) {
             VSpace(8.dp)
         }
         ReminderRow(Icons.Rounded.WbSunny, "Morning score", "Your cognitive state and when you'll peak.", prefs.morning) { update(prefs.copy(morning = it)) }
-        ReminderRow(Icons.Rounded.Timer, "Beat the Clock", "When a window opens to test your edge.", prefs.assess) { update(prefs.copy(assess = it)) }
+        ReminderRow(Icons.Rounded.Timer, "Reaction Test", "When a window opens to test your edge.", prefs.assess) { update(prefs.copy(assess = it)) }
         ReminderRow(Icons.Rounded.Flag, "Moment prep", "The evening before, and 2 hours ahead.", prefs.event) { update(prefs.copy(event = it)) }
         ReminderRow(Icons.Rounded.Bedtime, "Bedtime", "An hour before lights out.", prefs.evening) { update(prefs.copy(evening = it)) }
         ReminderRow(Icons.Rounded.RateReview, "After a Moment", "One tap to say how you did.", prefs.reflect) { update(prefs.copy(reflect = it)) }

@@ -15,7 +15,7 @@ import kotlinx.coroutines.tasks.await
  * fresh, otherwise a state computed on the watch from its own data. The watch therefore keeps working without the
  * phone, just without the moments.
  *
- * A Beat the Clock session played on the watch counts at once here, so the score and next step update before the
+ * A Reaction Test session played on the watch counts at once here, so the score and next step update before the
  * phone has had a chance to reply.
  */
 class WatchStateSource(context: Context, private val cognitive: CognitiveService) {

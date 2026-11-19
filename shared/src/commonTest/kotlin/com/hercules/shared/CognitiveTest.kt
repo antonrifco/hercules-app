@@ -42,6 +42,10 @@ import com.hercules.shared.readiness.confidenceFor
 import com.hercules.shared.readiness.validateWeights
 import kotlin.math.abs
 import kotlin.random.Random
+import com.hercules.shared.readiness.ReactionRun
+import com.hercules.shared.readiness.TrialPhase
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -66,7 +70,7 @@ class ScoringTest {
         rhr: Double? = 58.0,
         activity: ActivityInput? = ActivityInput(8000, 30, 3, 14),
         light: LightInput? = LightInput(listOf(3000.0, 2500.0), listOf(500.0, 400.0), listOf(20.0, 15.0)),
-        cognitive: CognitiveInput? = CognitiveInput(60, 55, 80, "Phone · Morning"),
+        cognitive: CognitiveInput? = CognitiveInput(60, "Phone · Morning"),
     ) = DayInputs(
         "d0", night, (1..13).map { night(-it, mid = 180.0 + (it % 3) * 10) },
         hrv, List(25) { 44.0 + it % 5 }, rhr, List(25) { 57.0 + it % 3 }, List(25) { 8000.0 + it * 10 }, activity, light, cognitive,
@@ -102,8 +106,9 @@ class ScoringTest {
 
     @Test fun missingCognitiveRenormalizesAndLowersCoverage() {
         val c = calc.calculate(full(cognitive = null), DefaultScoring.DEFAULT)
-        assertEquals(0.80, c.coverage, 1e-9)
-        assertEquals(ReadinessConfidence.MEDIUM, c.confidence)
+        assertEquals(0.90, c.coverage, 1e-9)
+        // Everything but the game is 90%: High once there is a week of history.
+        assertEquals(ReadinessConfidence.HIGH, c.confidence)
         val avail = c.dimensions.filter { it.available }
         val expected = avail.sumOf { it.weight * it.score!! } / avail.sumOf { it.weight }
         assertEquals(kotlin.math.round(expected).toInt(), c.score)
@@ -116,19 +121,26 @@ class ScoringTest {
         assertNull(c.insufficientReason)
     }
 
-    @Test fun lowCoverageScoresWithLowConfidenceAndANote() {
-        // Sleep 40 + activity 10 + light 10 = 60%.
+    @Test fun sleepActivityAndLightGiveMediumConfidenceAndANote() {
+        // Sleep 65 + activity 10 + light 5 = 80%: three of five parts, with sleep in, is Medium.
         val c = calc.calculate(full(hrv = null, rhr = null, cognitive = null), DefaultScoring.DEFAULT)
-        assertEquals(0.60, c.coverage, 1e-9)
+        assertEquals(0.80, c.coverage, 1e-9)
         assertNotNull(c.score)
-        assertEquals(ReadinessConfidence.LOW, c.confidence)
+        assertEquals(ReadinessConfidence.MEDIUM, c.confidence)
         assertEquals(3, c.signalsIn)
         assertEquals(5, c.signalsTotal)
-        assertEquals("To raise it: add overnight heart data and a Beat the Clock game.", c.confidenceHint)
+        assertEquals("To raise it: add overnight heart data and a Reaction Test.", c.confidenceHint)
+    }
+
+    @Test fun withoutSleepConfidenceIsLow() {
+        // Heart 10 + activity 10 + light 5 = 25%.
+        val c = calc.calculate(full(night = null, cognitive = null), DefaultScoring.DEFAULT)
+        assertNotNull(c.score)
+        assertEquals(ReadinessConfidence.LOW, c.confidence)
     }
 
     @Test fun oneReadingIsEnoughForAScore() {
-        val only = DayInputs("d0", null, emptyList(), null, emptyList(), null, emptyList(), emptyList(), null, null, CognitiveInput(60, 55, 80, "Phone"))
+        val only = DayInputs("d0", null, emptyList(), null, emptyList(), null, emptyList(), emptyList(), null, null, CognitiveInput(60, "Phone"))
         val c = calc.calculate(only, DefaultScoring.DEFAULT)
         assertNotNull(c.score)
         assertEquals(ReadinessConfidence.LOW, c.confidence)
@@ -196,8 +208,8 @@ class ScoringTest {
         assertEquals(ReadinessConfidence.HIGH, confidenceFor(0.90, 7))
         assertEquals(ReadinessConfidence.MEDIUM, confidenceFor(0.90, 6))
         assertEquals(ReadinessConfidence.MEDIUM, confidenceFor(0.89, 30))
-        assertEquals(ReadinessConfidence.MEDIUM, confidenceFor(0.70, 3))
-        assertEquals(ReadinessConfidence.LOW, confidenceFor(0.69, 30))
+        assertEquals(ReadinessConfidence.MEDIUM, confidenceFor(0.50, 3))
+        assertEquals(ReadinessConfidence.LOW, confidenceFor(0.49, 30))
         assertEquals(ReadinessConfidence.LOW, confidenceFor(0.95, 2))
         assertEquals(ReadinessConfidence.LOW, confidenceFor(0.20, 0))
     }
@@ -205,7 +217,7 @@ class ScoringTest {
     @Test fun weightValidationRejectsInvalidAndNeverNormalizes() {
         val d = DefaultScoring.DEFAULT.weights
         assertIs<WeightValidation.Valid>(validateWeights(d))
-        assertIs<WeightValidation.Invalid>(validateWeights(d + (Dimension.SLEEP to 0.50))) // 105%
+        assertIs<WeightValidation.Invalid>(validateWeights(d + (Dimension.SLEEP to 0.70))) // 105%
         assertIs<WeightValidation.Invalid>(validateWeights(d + (Dimension.SLEEP to -0.05)))
         assertIs<WeightValidation.Invalid>(validateWeights(Dimension.entries.associateWith { 0.0 }))
         assertIs<WeightValidation.Invalid>(validateWeights(d - Dimension.CARDIO))
@@ -213,10 +225,10 @@ class ScoringTest {
     }
 
     @Test fun oneGameCountsLessThanThree() {
-        fun mind(runs: Int) = calc.calculate(full(cognitive = CognitiveInput(10, 10, 10, "Phone", runs)), DefaultScoring.DEFAULT)
-        assertEquals(0.12, mind(1).dimensions.first { it.dimension == Dimension.COGNITIVE }.weight, 1e-9)
-        assertEquals(0.16, mind(2).dimensions.first { it.dimension == Dimension.COGNITIVE }.weight, 1e-9)
-        assertEquals(0.20, mind(5).dimensions.first { it.dimension == Dimension.COGNITIVE }.weight, 1e-9)
+        fun mind(runs: Int) = calc.calculate(full(cognitive = CognitiveInput(10, "Phone", runs)), DefaultScoring.DEFAULT)
+        assertEquals(0.06, mind(1).dimensions.first { it.dimension == Dimension.COGNITIVE }.weight, 1e-9)
+        assertEquals(0.08, mind(2).dimensions.first { it.dimension == Dimension.COGNITIVE }.weight, 1e-9)
+        assertEquals(0.10, mind(5).dimensions.first { it.dimension == Dimension.COGNITIVE }.weight, 1e-9)
         // The same bad game pulls the score down less when it is the only one.
         assertTrue(mind(1).score!! > mind(3).score!!)
     }
@@ -293,93 +305,87 @@ class BaselineTest {
 }
 
 class BeatTheClockTest {
-    private fun r(i: Int, target: Long, actual: Long, v: RoundValidity = RoundValidity.VALID) = CognitiveRound("r$i", "s", i, target, actual, v)
+    /** A test of [n] reactions at [ms] each, plus [early] false starts. */
+    private fun rounds(ms: Long, n: Int = 40, early: Int = 0): List<CognitiveRound> =
+        (0 until n).map { BeatTheClock.reaction("r$it", "s", it, 2_000, ms) } +
+            (0 until early).map { BeatTheClock.falseStart("f$it", "s", n + it, 2_000) }
 
-    private val targets = listOf(15_000L, 22_000L, 28_000L)
-    private fun rounds(err: Double) = targets
-        .mapIndexed { i, t -> r(i, t, (t * (1 + if (i % 2 == 0) err else -err * 0.5)).toLong()) }
+    private fun session(id: String, device: DeviceKind, window: AssessmentWindow, startMs: Long, ms: Long, history: List<CognitiveSession>, early: Int = 0) =
+        BeatTheClock.finish(id, device, "dev", window, "d", startMs, startMs + 180_000, rounds(ms, early = early), history)
 
-    private fun session(id: String, device: DeviceKind, window: AssessmentWindow, startMs: Long, err: Double, history: List<CognitiveSession>) =
-        BeatTheClock.finish(id, device, "dev", window, "d", startMs, startMs + 60_000, rounds(err), history)
-
-    @Test fun planIsThreeRoundsGettingLongerBetween15And30Seconds() {
-        repeat(200) { seed ->
-            val p = BeatTheClock.plan(Random(seed))
-            assertEquals(3, p.size)
-            assertTrue(p.all { it in 15_000L..30_000L && it % 1_000L == 0L })
-            assertTrue(p[0] < p[1] && p[1] < p[2], "rounds must get longer: $p")
-        }
-        // Goals vary between games so they can't be memorised.
-        assertTrue((0 until 20).map { BeatTheClock.plan(Random(it)) }.distinct().size > 1)
+    @Test fun delaysAreRandomBetweenOneAndFourSeconds() {
+        val r = Random(1)
+        val d = (0 until 500).map { BeatTheClock.nextDelay(r) }
+        assertTrue(d.all { it in 1_000L..4_000L })
+        assertTrue(d.distinct().size > 100, "delays must not be predictable")
     }
 
-    @Test fun roundValidity() {
-        assertEquals(RoundValidity.VALID, BeatTheClock.round("a", "s", 0, 5_000, 0, 5_200_000_000, false).validity)
-        assertEquals(RoundValidity.INTERRUPTED, BeatTheClock.round("a", "s", 0, 5_000, 0, 5_200_000_000, true).validity)
-        assertEquals(RoundValidity.IMPLAUSIBLE, BeatTheClock.round("a", "s", 0, 5_000, 0, 900_000_000, false).validity) // < 0.2×
-        assertEquals(RoundValidity.IMPLAUSIBLE, BeatTheClock.round("a", "s", 0, 5_000, 0, 21_000_000_000, false).validity) // > 4×
+    @Test fun trialValidity() {
+        assertEquals(RoundValidity.VALID, BeatTheClock.reaction("a", "s", 0, 2_000, 320).validity)
+        assertEquals(RoundValidity.FALSE_START, BeatTheClock.reaction("a", "s", 0, 2_000, 60).validity) // anticipation
+        assertEquals(RoundValidity.FALSE_START, BeatTheClock.falseStart("a", "s", 0, 2_000).validity)
+        // No tap: recorded at the timeout, and it is a lapse.
+        val none = BeatTheClock.reaction("a", "s", 0, 2_000, 10_000)
+        assertEquals(BeatTheClock.TIMEOUT_MS, none.reactionMs)
+        assertTrue(none.lapse)
+        assertFalse(BeatTheClock.reaction("a", "s", 0, 2_000, 499).lapse)
+        assertTrue(BeatTheClock.reaction("a", "s", 0, 2_000, 500).lapse)
     }
 
     @Test fun sessionValidity() {
-        val all = rounds(0.05)
-        assertEquals(SessionStatus.FULLY_VALID, BeatTheClock.status(all))
-        val two = all.mapIndexed { i, x -> if (i == 0) x.copy(validity = RoundValidity.INTERRUPTED) else x }
-        assertEquals(SessionStatus.PARTIALLY_VALID, BeatTheClock.status(two))
-        // Only one round counted → invalid.
-        val one = all.mapIndexed { i, x -> if (i < 2) x.copy(validity = RoundValidity.INTERRUPTED) else x }
-        assertEquals(SessionStatus.INVALID, BeatTheClock.status(one))
+        assertEquals(SessionStatus.FULLY_VALID, BeatTheClock.status(rounds(320, n = 30)))
+        assertEquals(SessionStatus.PARTIALLY_VALID, BeatTheClock.status(rounds(320, n = 15)))
+        assertEquals(SessionStatus.INVALID, BeatTheClock.status(rounds(320, n = 14)))
+        // Tapping at random (more than a quarter false starts) doesn't count.
+        assertEquals(SessionStatus.INVALID, BeatTheClock.status(rounds(320, n = 30, early = 11)))
     }
 
-    @Test fun olderGameVersionsNeverFormTheBaseline() {
-        val old = (1..3).map { session("o$it", DeviceKind.PHONE, AssessmentWindow.MORNING, (10 + it) * D, 0.03, emptyList()).copy(gameVersion = 1) }
-        // Old games are ignored: the result equals a first game scored against the reference alone.
-        val withOld = session("x", DeviceKind.PHONE, AssessmentWindow.MORNING, 20 * D, 0.08, old)
-        val fresh = session("x", DeviceKind.PHONE, AssessmentWindow.MORNING, 20 * D, 0.08, emptyList())
-        assertEquals(fresh.cognitiveScore, withOld.cognitiveScore)
+    @Test fun speedLapsesAndFalseStarts() {
+        val rs = (0 until 30).map { BeatTheClock.reaction("r$it", "s", it, 2_000, if (it < 3) 800 else 250) } +
+            BeatTheClock.falseStart("f", "s", 30, 2_000)
+        val s = BeatTheClock.finish("e", DeviceKind.PHONE, "p", null, "d", 0, 1, rs, emptyList())
+        assertEquals(3, s.lapses)
+        assertEquals(1, s.falseStarts)
+        assertEquals(250.0, s.medianMs!!, 1e-9)
+        assertEquals((27 * 4.0 + 3 * 1.25) / 30, s.speed!!, 1e-9)
     }
 
-    @Test fun earlyAndLateErrorsGiveSignedBias() {
-        val early = targets.mapIndexed { i, t -> r(i, t, (t * 0.9).toLong()) }
-        val s = BeatTheClock.finish("e", DeviceKind.PHONE, "p", null, "d", 0, 1, early, emptyList())
-        assertTrue(s.bias!! < 0)
-        assertEquals(0.1, s.accuracyError!!, 1e-3)
-        val late = early.map { it.copy(actualMs = (it.targetMs * 1.1).toLong()) }
-        assertTrue(BeatTheClock.finish("l", DeviceKind.PHONE, "p", null, "d", 0, 1, late, emptyList()).bias!! > 0)
+    @Test fun speedScoreFormula() {
+        assertEquals(50, BeatTheClock.speedScore(3.0, 3.0))
+        assertTrue(BeatTheClock.speedScore(2.7, 3.0) in 33..36) // 10% slower
+        assertTrue(BeatTheClock.speedScore(3.3, 3.0) in 63..66) // 10% faster
+        assertEquals(0, BeatTheClock.speedScore(1.0, 3.0))
+        assertEquals(100, BeatTheClock.speedScore(9.0, 3.0))
     }
 
-    @Test fun ratioAndBiasFormulas() {
-        assertEquals(50, BeatTheClock.ratioScore(0.1, 0.1))
-        assertEquals(70, BeatTheClock.ratioScore(0.05, 0.1)) // half the usual error
-        assertEquals(30, BeatTheClock.ratioScore(0.2, 0.1))
-        assertEquals(100, BeatTheClock.ratioScore(0.0, 0.1)) // floor 0.125 → 50 + 60, clamped
-        assertEquals(100, BeatTheClock.biasScore(0.0, 0.1))
-        assertEquals(0, BeatTheClock.biasScore(0.1, 0.1))
-    }
-
-    @Test fun theVeryFirstGameIsScoredAgainstTheReference() {
-        val s = session("p", DeviceKind.PHONE, AssessmentWindow.MORNING, 10 * D, 0.05, emptyList())
-        assertFalse(s.practice)
+    @Test fun theFirstGameIsScoredAgainstTheDeviceReference() {
+        val s = session("p", DeviceKind.PHONE, AssessmentWindow.MORNING, 10 * D, 333, emptyList())
         assertNotNull(s.cognitiveScore)
-        assertEquals(BeatTheClock.ratioScore(s.accuracyError!!, BeatTheClock.REFERENCE_ACCURACY_ERROR), s.accuracyScore)
+        assertEquals(BeatTheClock.speedScore(s.speed!!, BeatTheClock.referenceSpeed(DeviceKind.PHONE)), s.speedScore)
     }
 
-    @Test fun baselineTurnsPersonalAfterThreeSameDeviceGames() {
-        val hist = (1..3).map { session("h$it", DeviceKind.WATCH, AssessmentWindow.MORNING, (10 + it) * D, 0.08, emptyList()) }
-        // Phone has no history of its own: watch sessions are never mixed in, so it uses the reference.
-        val phone = session("x", DeviceKind.PHONE, AssessmentWindow.MORNING, 20 * D, 0.08, hist)
-        assertEquals(BeatTheClock.ratioScore(phone.accuracyError!!, BeatTheClock.REFERENCE_ACCURACY_ERROR), phone.accuracyScore)
-        // Same device, any time of day: the baseline covers every run, so an evening run scores too.
-        assertNotNull(session("y", DeviceKind.WATCH, AssessmentWindow.EVENING, 20 * D, 0.08, hist).cognitiveScore)
-        val watch = session("z", DeviceKind.WATCH, AssessmentWindow.MORNING, 20 * D, 0.08, hist)
-        assertNotNull(watch.cognitiveScore)
-        assertEquals(50, watch.accuracyScore)
+    @Test fun usualTurnsPersonalAfterThreeSameDeviceGames() {
+        val hist = (1..3).map { session("h$it", DeviceKind.WATCH, AssessmentWindow.MORNING, (10 + it) * D, 400, emptyList()) }
+        // The phone never borrows the watch's usual: it still uses the phone reference.
+        val phone = session("x", DeviceKind.PHONE, AssessmentWindow.MORNING, 20 * D, 400, hist)
+        assertEquals(BeatTheClock.speedScore(phone.speed!!, BeatTheClock.referenceSpeed(DeviceKind.PHONE)), phone.speedScore)
+        // Same speed as the watch's own usual scores 50, any time of day.
+        assertEquals(50, session("z", DeviceKind.WATCH, AssessmentWindow.EVENING, 20 * D, 400, hist).speedScore)
+        assertEquals(400.0, BeatTheClock.usualMs(session("z", DeviceKind.WATCH, AssessmentWindow.EVENING, 20 * D, 440, hist))!!, 1.0)
+    }
+
+    @Test fun falseStartsBeyondTwoCostPoints() {
+        val clean = session("a", DeviceKind.PHONE, AssessmentWindow.MORNING, 10 * D, 333, emptyList())
+        val two = session("b", DeviceKind.PHONE, AssessmentWindow.MORNING, 10 * D, 333, emptyList(), early = 2)
+        val five = session("c", DeviceKind.PHONE, AssessmentWindow.MORNING, 10 * D, 333, emptyList(), early = 5)
+        assertEquals(clean.cognitiveScore, two.cognitiveScore)
+        assertEquals(clean.cognitiveScore!! - 15, five.cognitiveScore)
     }
 
     @Test fun invalidSessionsAreStoredButNotScored() {
-        val bad = rounds(0.05).map { it.copy(validity = RoundValidity.INTERRUPTED) }
-        val s = BeatTheClock.finish("i", DeviceKind.PHONE, "p", AssessmentWindow.MORNING, "d", 0, 1, bad, emptyList())
+        val s = BeatTheClock.finish("i", DeviceKind.PHONE, "p", AssessmentWindow.MORNING, "d", 0, 1, rounds(320, n = 5), emptyList())
         assertEquals(SessionStatus.INVALID, s.status)
-        assertNull(s.accuracyError)
+        assertNull(s.speed)
         assertNull(s.cognitiveScore)
     }
 }
@@ -387,13 +393,13 @@ class BeatTheClockTest {
 class PeakWindowTest {
     private val now = 100 * D
 
-    private fun s(day: Int, w: AssessmentWindow, err: Double, device: DeviceKind = DeviceKind.PHONE) = CognitiveSession(
-        "$day-$w-$device", device, "dev", w, "d$day", now - day * D, now - day * D + 60_000, SessionStatus.FULLY_VALID, false,
-        err, 0.02, 0.0, 50, 50, 50, 50, BeatTheClock.GAME_VERSION, emptyList(),
+    private fun s(day: Int, w: AssessmentWindow, speed: Double, device: DeviceKind = DeviceKind.PHONE) = CognitiveSession(
+        "$day-$w-$device", device, "dev", w, "d$day", now - day * D, now - day * D + 60_000, SessionStatus.FULLY_VALID,
+        speed, 1000 / speed, 0, 0, 50, 50, BeatTheClock.GAME_VERSION, emptyList(),
     )
 
     @Test fun notEnoughDataUntilEligible() {
-        val few = (1..5).flatMap { d -> AssessmentWindow.entries.map { s(d, it, 0.1) } }
+        val few = (1..5).flatMap { d -> AssessmentWindow.entries.map { s(d, it, 3.0) } }
         assertEquals(PeakResult.NOT_ENOUGH_DATA, PeakWindowPredictor.predict(few, now).result)
     }
 
@@ -401,8 +407,8 @@ class PeakWindowTest {
         val rnd = Random(3)
         val list = (1..20).flatMap { d ->
             AssessmentWindow.entries.map { w ->
-                val base = when (w) { AssessmentWindow.MORNING -> 0.05; AssessmentWindow.AFTERNOON -> 0.10; AssessmentWindow.EVENING -> 0.11 }
-                s(d, w, base + rnd.nextDouble(-0.01, 0.01))
+                val base = when (w) { AssessmentWindow.MORNING -> 3.4; AssessmentWindow.AFTERNOON -> 3.0; AssessmentWindow.EVENING -> 2.9 }
+                s(d, w, base + rnd.nextDouble(-0.05, 0.05))
             }
         }
         val p = PeakWindowPredictor.predict(list, now)
@@ -413,24 +419,22 @@ class PeakWindowTest {
 
     @Test fun noClearPeakWhenWindowsAreAlike() {
         val rnd = Random(5)
-        val list = (1..20).flatMap { d -> AssessmentWindow.entries.map { w -> s(d, w, 0.08 + rnd.nextDouble(-0.02, 0.02)) } }
+        val list = (1..20).flatMap { d -> AssessmentWindow.entries.map { w -> s(d, w, 3.0 + rnd.nextDouble(-0.2, 0.2)) } }
         assertEquals(PeakResult.NO_CLEAR_PEAK, PeakWindowPredictor.predict(list, now).result)
     }
 
-    @Test fun practiceAndOldSessionsAreIgnored() {
-        val list = (1..20).flatMap { d -> AssessmentWindow.entries.map { s(d, it, 0.1).copy(practice = true) } }
-        assertEquals(0, PeakWindowPredictor.predict(list, now).validSessionCount)
-        val old = (40..60).flatMap { d -> AssessmentWindow.entries.map { s(d, it, 0.1) } }
+    @Test fun oldSessionsAreIgnored() {
+        val old = (40..60).flatMap { d -> AssessmentWindow.entries.map { s(d, it, 3.0) } }
         assertEquals(0, PeakWindowPredictor.predict(old, now).validSessionCount)
-        val olderGame = (1..20).flatMap { d -> AssessmentWindow.entries.map { s(d, it, 0.1).copy(gameVersion = BeatTheClock.GAME_VERSION - 1) } }
+        val olderGame = (1..20).flatMap { d -> AssessmentWindow.entries.map { s(d, it, 3.0).copy(gameVersion = BeatTheClock.GAME_VERSION - 1) } }
         assertEquals(0, PeakWindowPredictor.predict(olderGame, now).validSessionCount)
     }
 
     @Test fun eligibleWithFourGamesOnThreeDaysPerWindow() {
-        // 8 days, each window played on 4 of them: enough under the v2 thresholds.
+        // 8 days, each window played on 4 of them: enough under the thresholds.
         val list = (1..8).flatMap { d ->
             AssessmentWindow.entries.filter { (d + it.ordinal) % 2 == 0 }.map { w ->
-                s(d, w, if (w == AssessmentWindow.MORNING) 0.05 else 0.12)
+                s(d, w, if (w == AssessmentWindow.MORNING) 3.4 else 2.9)
             }
         }
         assertTrue(PeakWindowPredictor.predict(list, now).result != PeakResult.NOT_ENOUGH_DATA)
@@ -541,5 +545,26 @@ class MomentsTest {
 
     @Test fun roundingGuard() {
         assertTrue(abs(DefaultScoring.DEFAULT.weights.values.sum() - 1.0) < 1e-9)
+    }
+}
+
+class ReactionRunTest {
+    @Test fun aTestIsFortyFiveTrials() = kotlinx.coroutines.test.runTest {
+        val taps = kotlinx.coroutines.channels.Channel<Long>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+        val clock = { testScheduler.currentTime }
+        var early = 0
+        val rounds = ReactionRun.play("s", taps, clock, onPhase = { p, _, _ ->
+            when (p) {
+                // React in 300 ms; once, tap before Herc appears.
+                TrialPhase.SHOW -> launch { delay(300); taps.trySend(clock()) }
+                TrialPhase.WAIT -> if (early++ == 5) launch { delay(200); taps.trySend(clock()) }
+                else -> Unit
+            }
+        }, random = Random(2))
+        assertEquals(BeatTheClock.TRIALS, rounds.size)
+        assertTrue(testScheduler.currentTime in 150_000L..210_000L, "about 3 minutes: ${testScheduler.currentTime}")
+        assertEquals(1, rounds.count { it.validity == RoundValidity.FALSE_START })
+        assertTrue(rounds.filter { it.validity == RoundValidity.VALID }.all { it.reactionMs == 300L })
+        assertEquals(SessionStatus.FULLY_VALID, BeatTheClock.status(rounds))
     }
 }

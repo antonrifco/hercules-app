@@ -1,4 +1,4 @@
--- v1 -> v2: spec V1 (dimensions, Health Connect, Beat the Clock, scoring configurations, Moments lifecycle).
+-- v1 -> v2: spec V1 (dimensions, Health Connect, Reaction Test, scoring configurations, Moments lifecycle).
 ALTER TABLE sleep_night ADD COLUMN awake_min INTEGER;
 ALTER TABLE sleep_night ADD COLUMN deep_min INTEGER;
 ALTER TABLE sleep_night ADD COLUMN rem_min INTEGER;
@@ -170,5 +170,5 @@ CREATE TABLE kv (
 );
 
 
--- The daily check-in is gone: energy and stress are now asked (optionally) inside Beat the Clock.
+-- The daily check-in is gone: energy and stress are now asked (optionally) inside Reaction Test.
 DROP TABLE IF EXISTS checkin;

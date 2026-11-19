@@ -8,7 +8,7 @@ import kotlin.math.roundToInt
 /** Version of the scoring engine (formulas, normalization, missing-data rules). Stored with every score. */
 private const val DAY_MS = 86_400_000L
 
-const val SCORING_ENGINE_VERSION = "3.2.0"
+const val SCORING_ENGINE_VERSION = "4.0.0"
 
 /** The five readiness dimensions of the CRS (spec §2.3). */
 @Serializable
@@ -33,9 +33,11 @@ enum class MetricKey(val label: String, val dimension: Dimension, val internalWe
     INTENSITY("Activity intensity", Dimension.ACTIVITY, 0.50),
     LOW_MOVEMENT("Low-movement time", Dimension.ACTIVITY, 0.30),
     LIGHT("Light exposure", Dimension.CIRCADIAN, 1.00),
-    BTC_ACCURACY("Timing accuracy", Dimension.COGNITIVE, 0.70),
-    BTC_CONSISTENCY("Timing consistency", Dimension.COGNITIVE, 0.20),
-    BTC_BIAS("Timing bias", Dimension.COGNITIVE, 0.10),
+    BTC_SPEED("Reaction speed", Dimension.COGNITIVE, 1.00),
+    // The time-estimation game (before game v4). Never produced any more; kept only so scores stored then still load.
+    BTC_ACCURACY("Timing accuracy", Dimension.COGNITIVE, 0.0),
+    BTC_CONSISTENCY("Timing consistency", Dimension.COGNITIVE, 0.0),
+    BTC_BIAS("Timing bias", Dimension.COGNITIVE, 0.0),
 }
 
 /** Why a metric or dimension has no score. Never treated as zero. */
@@ -127,18 +129,20 @@ object DefaultScoring {
      * Lim & Dinges 2010), so it leads; heart signals are associations (Forte 2019, Buchheit 2014).
      * v3: light drops from 10% to 5% and sleep takes it. Light is read by the phone only while it is out and in use,
      * so it is the weakest measurement of the five; sleep is the strongest evidence and measured all night.
+     * v4: sleep 65%, heart 10%, game 10%. Sleep is the one causal driver, and on many watches it is also the most
+     * complete signal (heart readings can have gaps; the game needs the user to play).
      */
-    const val CONFIG_VERSION = 3
+    const val CONFIG_VERSION = 4
 
     val DEFAULT = ScoringConfiguration(
-        id = "default-v3",
+        id = "default-v4",
         version = CONFIG_VERSION,
         type = ConfigurationType.DEFAULT,
-        sleepWeight = 0.45,
-        cardiovascularWeight = 0.20,
+        sleepWeight = 0.65,
+        cardiovascularWeight = 0.10,
         activityWeight = 0.10,
         circadianWeight = 0.05,
-        cognitiveWeight = 0.20,
+        cognitiveWeight = 0.10,
         updatedAtMs = 0L,
     )
 }
@@ -191,7 +195,7 @@ data class ScoringParams(
     /** Earlier days an optional extra needs before "above your usual" can be judged. */
     val strainMinHistory: Int = 7,
     /**
-     * Share of the Beat the Clock weight that counts after 1, 2 and 3+ games in a day. One 2-minute game is a noisy
+     * Share of the Reaction Test weight that counts after 1, 2 and 3+ games in a day. One 3-minute test is a noisy
      * reading, so it moves the score less than the median of several.
      */
     val gameReliability: List<Double> = listOf(0.6, 0.8, 1.0),
@@ -267,8 +271,8 @@ data class ActivityInput(
 /** Light on the previous complete day, split by period. Each list holds lux readings that passed quality checks. */
 data class LightInput(val morning: List<Double>, val daytime: List<Double>, val evening: List<Double>)
 
-/** Today's cognitive result (latest valid, scored Beat the Clock session). */
-data class CognitiveInput(val accuracy: Int, val consistency: Int, val bias: Int, val sessionLabel: String, /** Scored games behind it today. */ val runs: Int = 3)
+/** Today's Reaction Test result: the median game score of today's scored reaction tests, and what it rests on. */
+data class CognitiveInput(val score: Int, val sessionLabel: String, /** Scored games behind it today. */ val runs: Int = 3)
 
 data class DayInputs(
     val dayKey: String,
@@ -310,7 +314,7 @@ data class ScoreModifier(val label: String, val points: Int)
 /** Pure scoring of the five dimensions. Every function returns null scores for missing data, never zero. */
 class DimensionScorer(private val p: ScoringParams = ScoringParams.V1) {
 
-    /** How much of the Beat the Clock weight counts with [runs] games today. */
+    /** How much of the Reaction Test weight counts with [runs] games today. */
     fun gameReliability(runs: Int): Double = p.gameReliability[(runs.coerceAtLeast(1) - 1).coerceAtMost(p.gameReliability.lastIndex)]
 
     /**
@@ -506,17 +510,11 @@ class DimensionScorer(private val p: ScoringParams = ScoringParams.V1) {
     fun cognitive(input: DayInputs): Pair<Int?, List<MetricScore>> {
         val c = input.cognitive
             ?: return null to listOf(
-                MetricScore(MetricKey.BTC_ACCURACY, null, null, "No scored Beat the Clock today.", Availability.NO_DATA),
-                MetricScore(MetricKey.BTC_CONSISTENCY, null, null, "No scored Beat the Clock today.", Availability.NO_DATA),
-                MetricScore(MetricKey.BTC_BIAS, null, null, "No scored Beat the Clock today.", Availability.NO_DATA),
+                MetricScore(MetricKey.BTC_SPEED, null, null, "No scored Reaction Test today.", Availability.NO_DATA),
             )
         val share = (gameReliability(c.runs) * 100).roundToInt()
-        val label = c.sessionLabel + if (share < 100) " · counts $share% until ${p.gameReliability.size} games" else ""
-        val metrics = listOf(
-            MetricScore(MetricKey.BTC_ACCURACY, c.accuracy, "${c.accuracy}", label, Availability.AVAILABLE),
-            MetricScore(MetricKey.BTC_CONSISTENCY, c.consistency, "${c.consistency}", c.sessionLabel, Availability.AVAILABLE),
-            MetricScore(MetricKey.BTC_BIAS, c.bias, "${c.bias}", c.sessionLabel, Availability.AVAILABLE),
-        )
+        val label = c.sessionLabel + if (share < 100) " · counts $share% until ${p.gameReliability.size} tests" else ""
+        val metrics = listOf(MetricScore(MetricKey.BTC_SPEED, c.score, "${c.score}", label, Availability.AVAILABLE))
         return combine(metrics) to metrics
     }
 
@@ -551,11 +549,11 @@ const val HIGH_CONFIDENCE_DAYS = 7
 
 /**
  * Confidence from both what is in today and how much history is behind it (spec §6): High needs ≥ 90% of the
- * weighted signals and 7 full days; Medium ≥ 70% and 3 days; anything less is Low. INSUFFICIENT means no score.
+ * weighted signals and 7 full days; Medium ≥ 50% and 3 days (with sleep in, most of the evidence is there); anything less is Low. INSUFFICIENT means no score.
  */
 fun confidenceFor(coverage: Double, historyDays: Int): ReadinessConfidence = when {
     coverage >= 0.90 - 1e-9 && historyDays >= HIGH_CONFIDENCE_DAYS -> ReadinessConfidence.HIGH
-    coverage >= 0.70 - 1e-9 && historyDays >= MIN_CONFIDENT_DAYS -> ReadinessConfidence.MEDIUM
+    coverage >= 0.50 - 1e-9 && historyDays >= MIN_CONFIDENT_DAYS -> ReadinessConfidence.MEDIUM
     else -> ReadinessConfidence.LOW
 }
 
@@ -609,7 +607,7 @@ private val Dimension.toAdd: String
         Dimension.CARDIO -> "overnight heart data"
         Dimension.ACTIVITY -> "step tracking"
         Dimension.CIRCADIAN -> "daylight readings"
-        Dimension.COGNITIVE -> "a Beat the Clock game"
+        Dimension.COGNITIVE -> "a Reaction Test"
     }
 
 /** What each dimension means in everyday words, for sentences like "Hercules has your sleep and activity". */
@@ -619,7 +617,7 @@ val Dimension.plain: String
         Dimension.CARDIO -> "heart rate and HRV"
         Dimension.ACTIVITY -> "activity"
         Dimension.CIRCADIAN -> "daylight"
-        Dimension.COGNITIVE -> "Beat the Clock"
+        Dimension.COGNITIVE -> "Reaction Test"
     }
 
 private fun List<String>.inWords(): String = when (size) {
@@ -639,7 +637,7 @@ val ReadinessCalculation.insufficientDetail: String?
             return "It's still night. Today's score appears after you wake up, from last night's sleep and recovery."
         }
         return "Nothing has come in for today yet. One reading is enough to start: last night's sleep, heart rate, " +
-            "steps, daylight or a Beat the Clock game. Connect Health Connect, wear the watch, or play a game."
+            "steps, daylight or a Reaction Test. Connect Health Connect, wear the watch, or take a test."
     }
 
 class ReadinessCalculator(private val scorer: DimensionScorer = DimensionScorer()) {

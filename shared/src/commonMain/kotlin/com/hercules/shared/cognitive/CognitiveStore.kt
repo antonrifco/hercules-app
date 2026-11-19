@@ -170,21 +170,18 @@ class CognitiveStore(db: HerculesDatabase, private val io: CoroutineDispatcher =
     suspend fun countLightSince(ms: Long): Long = withContext(io) { q.countLightSince(ms).executeAsOne() }
     suspend fun deleteLightBefore(ms: Long) = withContext(io) { q.deleteLightBefore(ms) }
 
-    // ---------------------------------------------------------------- Beat the Clock
+    // ---------------------------------------------------------------- Reaction Test
     suspend fun saveSession(s: CognitiveSession, synced: Boolean = false) = withContext(io) {
         q.transaction {
             q.upsertCognitiveSession(
                 CogRow(
-                    s.id, s.deviceKind.name, s.deviceId, s.window?.name, s.dayKey, s.startMs, s.endMs, s.status.name, if (s.practice) 1 else 0,
-                    s.accuracyError, s.consistencyError, s.bias, s.accuracyScore?.toLong(), s.consistencyScore?.toLong(),
-                    s.biasScore?.toLong(), s.cognitiveScore?.toLong(), s.gameVersion.toLong(), if (synced) 1 else 0,
-                    s.energy?.toLong(), s.stress?.toLong(),
+                    s.id, s.deviceKind.name, s.deviceId, s.window?.name, s.dayKey, s.startMs, s.endMs, s.status.name,
+                    s.speed, s.medianMs, s.lapses?.toLong(), s.falseStarts?.toLong(), s.speedScore?.toLong(), s.cognitiveScore?.toLong(),
+                    s.gameVersion.toLong(), if (synced) 1 else 0, s.energy?.toLong(), s.stress?.toLong(),
                 ),
             )
             for (r in s.rounds) {
-                q.upsertCognitiveRound(
-                    RoundRow(r.id, r.sessionId, r.order.toLong(), r.targetMs, r.actualMs, r.signedErrorMs, r.absoluteErrorMs, r.relativeError, r.validity.name),
-                )
+                q.upsertCognitiveRound(RoundRow(r.id, r.sessionId, r.order.toLong(), r.delayMs, r.reactionMs, r.validity.name))
             }
         }
     }
@@ -208,12 +205,12 @@ class CognitiveStore(db: HerculesDatabase, private val io: CoroutineDispatcher =
 
     private fun toSession(r: CogRow): CognitiveSession? = runCatching {
         val rounds = q.roundsForSession(r.id).executeAsList().map {
-            CognitiveRound(it.id, it.session_id, it.round_order.toInt(), it.target_ms, it.actual_ms, RoundValidity.valueOf(it.validity))
+            CognitiveRound(it.id, it.session_id, it.round_order.toInt(), it.delay_ms, it.reaction_ms, RoundValidity.valueOf(it.validity))
         }
         CognitiveSession(
             r.id, DeviceKind.valueOf(r.device_kind), r.device_id, r.assessment_window?.let { AssessmentWindow.valueOf(it) }, r.day_key,
-            r.start_ms, r.end_ms, SessionStatus.valueOf(r.status), r.practice == 1L, r.accuracy_error, r.consistency_error, r.bias,
-            r.accuracy_score?.toInt(), r.consistency_score?.toInt(), r.bias_score?.toInt(), r.cognitive_score?.toInt(), r.game_version.toInt(), rounds,
+            r.start_ms, r.end_ms, SessionStatus.valueOf(r.status), r.speed, r.median_ms, r.lapses?.toInt(), r.false_starts?.toInt(),
+            r.speed_score?.toInt(), r.cognitive_score?.toInt(), r.game_version.toInt(), rounds,
             energy = r.energy?.toInt(), stress = r.stress?.toInt(),
         )
     }.getOrNull()

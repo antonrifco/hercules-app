@@ -68,6 +68,7 @@ import androidx.compose.material.icons.rounded.Stairs
 import androidx.compose.material.icons.rounded.Straighten
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import com.google.android.gms.wearable.DataClient
 import com.google.android.gms.wearable.Wearable
 import com.hercules.shared.WearProtocol
@@ -128,6 +129,7 @@ import com.hercules.wear.health.PassiveRegistrar
 import com.hercules.wear.health.Permissions
 import com.hercules.wear.health.SensorSettings
 import com.hercules.wear.sync.SyncStatus
+import androidx.compose.material.icons.rounded.Sync
 import com.hercules.wear.sync.SyncWorker
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -141,7 +143,7 @@ import kotlin.math.sin
 /*
  * The watch does three things only:
  *   1. today's cognitive state (score, band, peak window), or what is missing for one,
- *   2. Beat the Clock, the same game and rules as on the phone,
+ *   2. Reaction Test, the same game and rules as on the phone,
  *   3. what it is tracking (sleep, heart, steps) and whether that data reached the phone,
  *   4. preparation status for the Moments planned in the next 7 days.
  * Moments, weights and sleep corrections live on the phone.
@@ -238,7 +240,7 @@ private fun HerculesWearNav(launch: Intent?, onLaunchHandled: () -> Unit) {
             delay(60_000)
         }
     }
-    // One shared view of "today" for every screen, refreshed each minute and after Beat the Clock.
+    // One shared view of "today" for every screen, refreshed each minute and after Reaction Test.
     LaunchedEffect(reload) {
         while (true) {
             state = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { ctx.graph.watchState.current() } }.getOrNull() ?: state
@@ -361,6 +363,8 @@ internal fun HomeScreen(
     val pending by remember { g.repo.observePendingSampleCount() }.collectAsStateWithLifecycle(0L)
     // Collected here, not inside a list item: an item that scrolls out and back in would query the database again.
     val hr by remember { g.repo.observeLatest(MetricType.HEART_RATE) }.collectAsStateWithLifecycle(null)
+    val liveBpm = rememberLiveBpm()
+    var syncing by remember { mutableStateOf(false) }
     val sync by remember { SyncStatus.flow(ctx) }.collectAsStateWithLifecycle()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(30_000L) } }
@@ -390,7 +394,7 @@ internal fun HomeScreen(
                             Herc(HercMood.SLEEPING, size = 52.dp)
                             WEyebrow("No score yet", WCyan)
                             Text(
-                                "Wear the watch tonight, or play Beat the Clock now.",
+                                "Wear the watch tonight, or take the Reaction Test now.",
                                 fontSize = 11.sp, color = Color.White, textAlign = TextAlign.Center, maxLines = 3,
                                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp),
                             )
@@ -423,14 +427,14 @@ internal fun HomeScreen(
                 // 2 · What should I do next?
                 item {
                     if (brief != null) ActionButton(brief.action, onAction)
-                    else Button(onClick = onPlay, modifier = Modifier.fillMaxWidth(), icon = { Icon(Icons.Rounded.Timer, null) }) { Text("Beat the Clock") }
+                    else Button(onClick = onPlay, modifier = Modifier.fillMaxWidth(), icon = { Icon(Icons.Rounded.Timer, null) }) { Text("Reaction Test") }
                 }
                 // A tracking problem blocks tomorrow's score, so it comes before everything else below.
                 if (sync?.problem != null) item { SyncLine(sync, pending, now, onClick = onStatus) }
                 // Quick actions
                 item {
                     Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                        QuickAction(Icons.Rounded.Timer, "Clock", done = (state?.playsToday ?: 0) > 0, onClick = onPlay)
+                        QuickAction(Icons.Rounded.Timer, "React", done = (state?.playsToday ?: 0) > 0, onClick = onPlay)
                         QuickAction(Icons.Rounded.Bedtime, "Tonight", onClick = onTonight)
                         QuickAction(Icons.Rounded.MonitorHeart, "Tracking", warn = sync?.problem != null, onClick = onStatus)
                     }
@@ -438,7 +442,8 @@ internal fun HomeScreen(
                 // Today at a glance, from this watch: latest pulse, last night's sleep, steps so far.
                 item {
                     Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
-                        StatColumn(hr?.takeIf { now - it.startMs < 10 * 60_000L }?.value?.toInt()?.toString() ?: "--", "bpm") {
+                        // Live while the app is open; otherwise the latest background reading from the last 10 minutes.
+                        StatColumn(liveBpm?.takeIf { it != "…" } ?: hr?.takeIf { now - it.startMs < 10 * 60_000L }?.value?.toInt()?.toString() ?: liveBpm ?: "--", "bpm") {
                             Icon(Icons.Rounded.Favorite, null, tint = WCyan, modifier = Modifier.size(15.dp))
                         }
                         StatColumn(state?.sleepMinutes?.let { formatDuration(it) } ?: "--", "sleep") {
@@ -448,6 +453,31 @@ internal fun HomeScreen(
                             Icon(Icons.AutoMirrored.Rounded.DirectionsWalk, null, tint = WCyan, modifier = Modifier.size(15.dp))
                         }
                     }
+                }
+                // Hand everything new to the phone now, instead of waiting for the next automatic sync.
+                item {
+                    LaunchedEffect(sync?.lastAttemptMs) { syncing = false }
+                    LaunchedEffect(syncing) { if (syncing) { delay(30_000L); syncing = false } }
+                    Button(
+                        onClick = { syncing = true; SyncWorker.runNow(ctx, policy = androidx.work.ExistingWorkPolicy.REPLACE) },
+                        enabled = !syncing,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        icon = { Icon(Icons.Rounded.Sync, null) },
+                        secondaryLabel = {
+                            Text(
+                                when {
+                                    syncing -> "Sending to phone…"
+                                    sync?.problem != null -> sync!!.problem!!
+                                    // A run with nothing new doesn't reach the phone: say so instead of looking idle.
+                                    sync?.lastAttemptMs != null && (sync!!.lastOkMs ?: 0) < sync!!.lastAttemptMs!! -> "Nothing new · ${dk.clock(sync!!.lastAttemptMs!!)}"
+                                    sync?.lastOkMs != null -> "Sent ${dk.clock(sync!!.lastOkMs!!)}"
+                                    else -> "Not synced yet"
+                                },
+                                maxLines = 1,
+                            )
+                        },
+                        colors = ButtonDefaults.filledTonalButtonColors(),
+                    ) { Text("Sync now") }
                 }
                 // Moments have their own page, as on the phone: Home stays about today.
                 if (schedule.isNotEmpty()) {
@@ -951,3 +981,38 @@ private val SensorKind.icon: ImageVector
         SensorKind.DISTANCE -> Icons.Rounded.Straighten
         SensorKind.FLOORS -> Icons.Rounded.Stairs
     }
+
+/**
+ * Pulse measured live while the home screen is showing and the app is in front (Health Services MeasureClient). Background readings depend
+ * on the watch's own all-day heart-rate setting; this works either way. Null until the first reading.
+ */
+@Composable
+private fun rememberLiveBpm(): String? {
+    val ctx = LocalContext.current
+    var bpm by remember { mutableStateOf<Int?>(null) }
+    var measuring by remember { mutableStateOf(false) }
+    // Only while the app is in front: in ambient mode or behind another app the sensor would keep running for nothing.
+    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val resumed by owner.lifecycle.currentStateFlow.collectAsState()
+    val active = resumed.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+    DisposableEffect(active) {
+        if (!active) { measuring = false; return@DisposableEffect onDispose { } }
+        val client = androidx.health.services.client.HealthServices.getClient(ctx).measureClient
+        val type = androidx.health.services.client.data.DataType.HEART_RATE_BPM
+        val callback = object : androidx.health.services.client.MeasureCallback {
+            override fun onAvailabilityChanged(dataType: androidx.health.services.client.data.DeltaDataType<*, *>, availability: androidx.health.services.client.data.Availability) {
+                android.util.Log.w("Hercules", "live heart rate: $availability")
+                measuring = availability.toString().contains("ACQUIRING") || availability.toString().contains("AVAILABLE")
+            }
+            override fun onDataReceived(data: androidx.health.services.client.data.DataPointContainer) {
+                val v = data.getData(type).lastOrNull()?.value
+                if (bpm == null) android.util.Log.w("Hercules", "live heart rate: first reading $v")
+                v?.takeIf { it > 0 }?.let { bpm = it.toInt() }
+            }
+        }
+        val ok = runCatching { client.registerMeasureCallback(type, callback); measuring = true; android.util.Log.w("Hercules", "live heart rate: registered") }
+            .onFailure { android.util.Log.w("Hercules", "live heart rate unavailable", it) }.isSuccess
+        onDispose { if (ok) runCatching { client.unregisterMeasureCallbackAsync(type, callback) } }
+    }
+    return bpm?.toString() ?: if (measuring) "…" else null
+}

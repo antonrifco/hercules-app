@@ -2,20 +2,13 @@ package com.hercules.mobile.ui
 
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.Canvas
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,27 +30,29 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -70,143 +65,186 @@ import com.hercules.shared.readiness.BeatTheClock
 import com.hercules.shared.readiness.CognitiveRound
 import com.hercules.shared.readiness.CognitiveSession
 import com.hercules.shared.readiness.DeviceKind
-import com.hercules.shared.readiness.RoundValidity
+import com.hercules.shared.readiness.ReactionRun
 import com.hercules.shared.readiness.SessionStatus
+import com.hercules.shared.readiness.TrialPhase
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
-import kotlin.math.abs
 import kotlin.math.roundToInt
 
-private enum class Stage { INTRO, READY, RUNNING, BETWEEN, SAVING, RESULT }
+private enum class Stage { INTRO, RUNNING, STOPPED, FEEL, SAVING, RESULT }
 
 /**
- * Beat the Clock (spec §4): three rounds that get longer, 15 to 30 s. The first three seconds are counted on screen. Start, then stop when you think the target
- * has passed; no clock is shown. Timing uses `SystemClock.elapsedRealtimeNanos()` only. Leaving the app while a round
- * runs marks that round interrupted. Only complete sessions are stored.
+ * Reaction Test (spec §4): a 3-minute reaction test. Herc appears after a random 1–4 s wait; tap anywhere as fast as
+ * you can. The rules and loop live in the shared [ReactionRun], so the watch plays exactly the same test. Taps use the
+ * touch-down time and Herc's first frame on screen, both on `SystemClock.uptimeMillis()`. Leaving the app stops the
+ * test without saving it.
  */
 @Composable
 fun BeatTheClockScreen(g: MobileGraph, padding: PaddingValues, onClose: () -> Unit) {
     val scope = rememberCoroutineScope()
-    val haptics = LocalHapticFeedback.current
     val sessionId = remember { UUID.randomUUID().toString() }
-    val plan = remember { BeatTheClock.plan() }
-    val rounds = remember { mutableStateListOf<CognitiveRound>() }
     var stage by remember { mutableStateOf(Stage.INTRO) }
-    var startNanos by remember { mutableLongStateOf(0L) }
+    var trials by remember { mutableStateOf<List<CognitiveRound>>(emptyList()) }
     var sessionStartMs by remember { mutableLongStateOf(0L) }
-    var lastInterrupted by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<CognitiveSession?>(null) }
     var playsAfter by remember { mutableIntStateOf(0) }
-    // Optional self-report, asked in the break before the last round. Preset to the middle so skipping it is one tap.
     var energy by remember { mutableIntStateOf(DEFAULT_FEEL) }
     var stress by remember { mutableIntStateOf(DEFAULT_FEEL) }
-    val index = rounds.size
-
-    // Games played today on either device.
     val playsToday by produceState<Int?>(null) { value = g.cognitive.playsToday() }
 
-    // Called from the lifecycle observer too, which keeps the first composition's closure: read the round number
-    // from the list, never from a value captured at composition time.
-    fun finishRound(interrupted: Boolean) {
-        val stop = SystemClock.elapsedRealtimeNanos()
-        val i = rounds.size
-        if (i >= plan.size) return
-        rounds += BeatTheClock.round("$sessionId:$i", sessionId, i, plan[i], startNanos, stop, interrupted)
-        lastInterrupted = interrupted
-        if (rounds.size < plan.size) {
-            stage = Stage.BETWEEN
-            return
-        }
+    fun save(feel: Boolean) {
         stage = Stage.SAVING
         scope.launch {
             val c = g.cognitive
             try {
-                val s = c.recordAssessment(sessionId, DeviceKind.PHONE, g.deviceId, sessionStartMs, System.currentTimeMillis(), rounds.toList(), energy = energy, stress = stress)
+                val s = c.recordAssessment(
+                    sessionId, DeviceKind.PHONE, g.deviceId, sessionStartMs, System.currentTimeMillis(), trials,
+                    energy = energy.takeIf { feel }, stress = stress.takeIf { feel },
+                )
                 playsAfter = c.playsToday()
                 result = s
                 stage = Stage.RESULT
                 g.pushToWatch()
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                android.util.Log.e("Hercules", "could not save Beat the Clock", e)
+                android.util.Log.e("Hercules", "could not save Reaction Test", e)
                 onClose()
             }
         }
     }
 
-    // Losing focus during a running round invalidates it (spec §4.5).
+    // Leaving the app mid-test stops it: a reaction test only means something with full attention.
     val owner = LocalLifecycleOwner.current
     DisposableEffect(owner) {
-        val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_PAUSE && stage == Stage.RUNNING) finishRound(interrupted = true) }
+        val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_PAUSE && stage == Stage.RUNNING) stage = Stage.STOPPED }
         owner.lifecycle.addObserver(obs)
         onDispose { owner.lifecycle.removeObserver(obs) }
     }
     BackHandler(enabled = stage != Stage.SAVING) { onClose() }
-    // A round has no touches for up to 30 s: without this the screen times out, the app pauses and the round is lost.
     val view = LocalView.current
     DisposableEffect(stage == Stage.RUNNING) {
         view.keepScreenOn = stage == Stage.RUNNING
         onDispose { view.keepScreenOn = false }
     }
 
+    if (stage == Stage.RUNNING) {
+        Run(sessionId, padding, onDone = { trials = it; stage = Stage.FEEL }, onClose = onClose)
+        return
+    }
     Column(
         Modifier.fillMaxSize().background(Ink).padding(padding).padding(horizontal = 24.dp).verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Eyebrow("Beat the Clock", color = Cyan, modifier = Modifier.weight(1f))
+            Eyebrow("Reaction Test", color = Cyan, modifier = Modifier.weight(1f))
             if (stage != Stage.SAVING) IconButton(onClick = onClose) { Icon(Icons.Rounded.Close, "Close", tint = Text2) }
         }
         when (stage) {
-            Stage.INTRO -> Intro(playsToday) {
-                sessionStartMs = System.currentTimeMillis()
-                stage = Stage.READY
-            }
-            Stage.READY, Stage.BETWEEN, Stage.RUNNING -> {
-                VSpace(12.dp)
-                RoundDots(plan.size, rounds)
-                VSpace(28.dp)
-                val target = plan[index] / 1000
-                Text("Round ${index + 1} of ${plan.size}", style = MaterialTheme.typography.bodyMedium, color = Text2)
+            Stage.INTRO -> Intro(playsToday) { sessionStartMs = System.currentTimeMillis(); stage = Stage.RUNNING }
+            Stage.STOPPED -> {
+                VSpace(40.dp)
+                Herc(HercMood.FAIR, size = 96.dp)
+                VSpace(8.dp)
+                Text("Test stopped", style = MaterialTheme.typography.headlineSmall, color = Text1)
                 VSpace(6.dp)
-                Text("$target seconds", fontFamily = Mono, fontSize = 44.sp, color = Text1)
-                VSpace(10.dp)
-                // "1… 2… 3…" right after START, then the count disappears and the rest is up to you.
-                var shown by remember(index) { mutableIntStateOf(0) }
-                LaunchedEffect(stage, index) {
-                    shown = 0
-                    if (stage != Stage.RUNNING) return@LaunchedEffect
-                    for (n in 1..BeatTheClock.COUNT_SHOWN_SECONDS) {
-                        shown = n
-                        delay(1_000)
-                    }
-                    shown = 0
-                }
-                Box(Modifier.height(68.dp), contentAlignment = Alignment.Center) {
-                    when {
-                        stage == Stage.RUNNING && shown > 0 -> Text("$shown…", fontFamily = Mono, fontSize = 40.sp, color = MomentOrange)
-                        stage == Stage.RUNNING -> Text("Keep counting in your head", style = MaterialTheme.typography.titleMedium, color = Text1)
-                        stage == Stage.BETWEEN && lastInterrupted -> Muted("That round didn't count because you left the app.", Modifier.padding(horizontal = 8.dp))
-                        stage == Stage.BETWEEN && rounds.isNotEmpty() -> LastRound(rounds.last())
-                        else -> Muted("Tap START. We count 1, 2, 3 with you, then you're on your own. Tap STOP at $target seconds.", Modifier.padding(horizontal = 8.dp))
-                    }
-                }
-                if (stage == Stage.BETWEEN && index == FEEL_AFTER_ROUND) {
-                    VSpace(20.dp)
-                    FeelCheck(energy, stress, onEnergy = { energy = it }, onStress = { stress = it })
-                }
-                VSpace(36.dp)
-                BigButton(running = stage == Stage.RUNNING) {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    if (stage == Stage.RUNNING) finishRound(interrupted = false)
-                    else { startNanos = SystemClock.elapsedRealtimeNanos(); stage = Stage.RUNNING }
+                Muted("You left the app, so this test wasn't saved. Stay on this screen for the full 3 minutes.", Modifier.padding(horizontal = 4.dp))
+                VSpace(20.dp)
+                PrimaryButton("CLOSE", onClose)
+            }
+            Stage.FEEL -> {
+                VSpace(16.dp)
+                Text("Done! One last thing", style = MaterialTheme.typography.headlineSmall, color = Text1, textAlign = TextAlign.Center)
+                VSpace(16.dp)
+                FeelCheck(energy, stress, onEnergy = { energy = it }, onStress = { stress = it })
+                VSpace(20.dp)
+                PrimaryButton("SEE RESULT") { save(feel = true) }
+                VSpace(8.dp)
+                OutlinedButton(onClick = { save(feel = false) }, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(6.dp)) {
+                    Text("SKIP", color = Text2, letterSpacing = 1.5.sp)
                 }
             }
             Stage.SAVING -> { VSpace(80.dp); Muted("Saving…") }
             Stage.RESULT -> result?.let { Result(it, playsAfter, onClose) }
+            Stage.RUNNING -> Unit
         }
         VSpace(32.dp)
     }
+}
+
+/** The test itself: the whole screen is the tap target. Herc shows up, you tap, your time shows for a second. */
+@Composable
+private fun Run(sessionId: String, padding: PaddingValues, onDone: (List<CognitiveRound>) -> Unit, onClose: () -> Unit) {
+    val taps = remember { Channel<Long>(Channel.UNLIMITED) }
+    var phase by remember { mutableStateOf(TrialPhase.WAIT) }
+    var lastMs by remember { mutableStateOf<Long?>(null) }
+    var trial by remember { mutableIntStateOf(1) }
+    var shownAt by remember { mutableLongStateOf(0L) }
+    var liveMs by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(Unit) {
+        val trials = ReactionRun.play(
+            sessionId, taps, SystemClock::uptimeMillis,
+            onPhase = { p, ms, n -> phase = p; lastMs = ms; trial = n },
+            onScreen = { withFrameMillis { }; SystemClock.uptimeMillis().also { shownAt = it; liveMs = 0 } },
+        )
+        onDone(trials)
+    }
+    // The timer runs from the moment Herc is on screen and freezes on the tap.
+    LaunchedEffect(phase) {
+        if (phase == TrialPhase.SHOW) while (true) withFrameMillis { liveMs = (SystemClock.uptimeMillis() - shownAt).coerceIn(0, BeatTheClock.TIMEOUT_MS) }
+    }
+    Column(
+        Modifier.fillMaxSize().background(Ink).padding(padding)
+            .pointerInput(Unit) { awaitEachGesture { taps.trySend(awaitFirstDown().uptimeMillis) } },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Row(Modifier.fillMaxWidth().padding(start = 24.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Eyebrow("Reaction Test · tap when Herc appears", color = Cyan, modifier = Modifier.weight(1f))
+            IconButton(onClick = onClose) { Icon(Icons.Rounded.Close, "Stop test", tint = Text2) }
+        }
+        Text("$trial of ${BeatTheClock.TRIALS}", fontFamily = Mono, fontSize = 16.sp, color = Text2)
+        VSpace(6.dp)
+        Canvas(Modifier.fillMaxWidth().padding(horizontal = 24.dp).height(4.dp)) {
+            val y = size.height / 2
+            drawLine(Hairline, Offset(0f, y), Offset(size.width, y), size.height, cap = StrokeCap.Round)
+            drawLine(Cyan, Offset(0f, y), Offset(size.width * (trial - 1) / BeatTheClock.TRIALS, y), size.height, cap = StrokeCap.Round)
+        }
+        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.size(180.dp), contentAlignment = Alignment.Center) {
+                    when (phase) {
+                        TrialPhase.WAIT -> Box(Modifier.size(14.dp).clip(CircleShape).background(Hairline))
+                        TrialPhase.SHOW -> Herc(HercMood.PRIME, size = 180.dp)
+                        TrialPhase.REACTED -> Herc(HercMood.PRIME, Modifier.alpha(0.35f), size = 180.dp)
+                        TrialPhase.TOO_SOON -> Text("Too soon", fontSize = 32.sp, color = MomentOrange, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                VSpace(16.dp)
+                // Same place for the running and the stopped time, so it reads as one stopwatch.
+                val shown = when (phase) { TrialPhase.SHOW -> liveMs; TrialPhase.REACTED -> lastMs; else -> null }
+                Text(
+                    shown?.let { "$it ms" } ?: " ",
+                    fontFamily = Mono, fontSize = 44.sp,
+                    color = when {
+                        phase == TrialPhase.SHOW -> Text1
+                        (lastMs ?: 0) < BeatTheClock.LAPSE_MS -> Cyan
+                        else -> MomentOrange
+                    },
+                )
+            }
+        }
+        Muted("Wait for Herc. Tap anywhere.", Modifier.padding(bottom = 32.dp))
+    }
+}
+
+@Composable
+private fun PrimaryButton(label: String, onClick: () -> Unit) {
+    Button(
+        onClick = onClick, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(6.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Ink),
+    ) { Text(label, letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold) }
 }
 
 @Composable
@@ -215,54 +253,30 @@ private fun Intro(playsToday: Int?, onStart: () -> Unit) {
     VSpace(12.dp)
     Herc(HercMood.GOOD, size = 110.dp)
     VSpace(8.dp)
-    Text("How well can you feel time?", style = MaterialTheme.typography.headlineSmall, color = Text1, textAlign = TextAlign.Center)
+    Text("How quick are you right now?", style = MaterialTheme.typography.headlineSmall, color = Text1, textAlign = TextAlign.Center)
     VSpace(6.dp)
-    Muted("A quick game that shows how sharp you are right now.", Modifier.padding(horizontal = 4.dp))
+    Muted("A 3-minute reaction test. Tired brains react slower and miss more, so it shows how sharp you are today.", Modifier.padding(horizontal = 4.dp))
     VSpace(18.dp)
     PanelBox(Modifier.fillMaxWidth()) {
         Column {
             Eyebrow("How to play", color = Cyan)
             VSpace(10.dp)
-            HowStep(1, "You'll see a time between 15 and 30 seconds. Each round is a bit longer.")
-            HowStep(2, "Tap START. We count 1, 2, 3 with you, then the count disappears.")
-            HowStep(3, "Keep counting in your head and tap STOP when you think the time is up.")
+            HowStep(1, "Herc pops up at random moments, every 1 to 4 seconds.")
+            HowStep(2, "Tap anywhere as fast as you can when you see him.")
+            HowStep(3, "Don't tap before he appears: that's a false start.")
             VSpace(4.dp)
-            Muted("3 rounds · about 2 minutes. The closer you get, the sharper you are.")
+            Muted("${BeatTheClock.TRIALS} taps · about 3 minutes. Scored against your own usual speed on this phone.")
         }
     }
     VSpace(12.dp)
     Muted(
-        when {
-            plays == 0 -> "Play any time, as often as you like."
-            else -> "Game ${plays + 1} today. Today's score is the median of your games."
-        },
+        if (plays == 0) "Play any time, as often as you like." else "Test ${plays + 1} today. Today's score is the median of your tests.",
         Modifier.padding(horizontal = 4.dp),
     )
     VSpace(20.dp)
-    Button(
-        onClick = onStart, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(6.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Ink),
-    ) { Text("PLAY", letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold) }
+    PrimaryButton("START", onStart)
     VSpace(10.dp)
-    Muted("Stay in the app during a round, or that round won't count.")
-}
-
-/** Right after STOP: the real time on the clock and how far off it was, so you can calibrate the next round. */
-@Composable
-private fun LastRound(r: CognitiveRound) {
-    val diff = (r.actualMs - r.targetMs) / 1000.0
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("Last round: you stopped at %.1f s".format(UiLocale, r.actualMs / 1000.0), style = MaterialTheme.typography.titleMedium, color = Text1)
-        Text(
-            when {
-                r.validity != RoundValidity.VALID -> "${r.validity.label}: this round won't count"
-                abs(diff) < 0.1 -> "Spot on the ${r.targetMs / 1000} s goal"
-                diff < 0 -> "%.1f s early for the %d s goal".format(UiLocale, -diff, r.targetMs / 1000)
-                else -> "%.1f s late for the %d s goal".format(UiLocale, diff, r.targetMs / 1000)
-            },
-            style = MaterialTheme.typography.bodyMedium, color = if (r.validity == RoundValidity.VALID && abs(diff) <= r.targetMs / 1000.0 * 0.1) Cyan else MomentOrange,
-        )
-    }
+    Muted("Find a quiet moment and stay on this screen until it ends.")
 }
 
 @Composable
@@ -280,10 +294,8 @@ private fun HowStep(n: Int, text: String) {
 private fun energyMood(v: Int) = listOf(HercMood.DRAINED, HercMood.LOW, HercMood.FAIR, HercMood.GOOD, HercMood.PRIME)[v - 1]
 
 private const val DEFAULT_FEEL = 3
-/** The break after this many rounds asks how you feel, before the last round, never while a round is being timed. */
-private const val FEEL_AFTER_ROUND = 2
 
-/** Check before the last round: energy and stress, 1–5, preset to 3. Optional, and never part of the score. */
+/** Check after the test: energy and stress, 1–5, preset to 3. Optional, and never part of the score. */
 @Composable
 private fun FeelCheck(energy: Int, stress: Int, onEnergy: (Int) -> Unit, onStress: (Int) -> Unit) {
     PanelBox(Modifier.fillMaxWidth()) {
@@ -330,44 +342,6 @@ private fun FeelRow(label: String, words: List<String>, faces: List<String>?, va
     }
 }
 
-@Composable
-private fun RoundDots(total: Int, rounds: List<CognitiveRound>) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        repeat(total) { i ->
-            val r = rounds.getOrNull(i)
-            Box(
-                Modifier.size(10.dp).clip(CircleShape).background(
-                    when {
-                        r == null -> Hairline
-                        r.validity == RoundValidity.VALID -> Cyan
-                        else -> Text2
-                    },
-                ),
-            )
-        }
-    }
-}
-
-/** The round button. Breathes while counting so the screen visibly works, without showing time. */
-@Composable
-private fun BigButton(running: Boolean, onClick: () -> Unit) {
-    val t = rememberInfiniteTransition(label = "btc")
-    val pulse by t.animateFloat(0f, 1f, infiniteRepeatable(tween(1600, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "pulse")
-    val color = if (running) MomentOrange else Cyan
-    Box(contentAlignment = Alignment.Center) {
-        if (running) {
-            Box(Modifier.size(220.dp).graphicsLayer { val k = 1f + 0.06f * pulse; scaleX = k; scaleY = k; alpha = 0.35f * (1 - pulse) }.clip(CircleShape).background(color))
-        }
-        Box(
-            Modifier.size(200.dp).clip(CircleShape).background(color.copy(alpha = 0.12f))
-                .border(BorderStroke(2.dp, color), CircleShape).clickable(onClickLabel = if (running) "Stop" else "Start", onClick = onClick),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(if (running) "STOP" else "START", color = color, fontSize = 30.sp, letterSpacing = 4.sp, fontWeight = FontWeight.SemiBold)
-        }
-    }
-}
-
 private val MomentOrange = androidx.compose.ui.graphics.Color(0xFFFF8C4C)
 
 /** Where a game score sits from 0 to 100, with the "usual" mark at 50. */
@@ -383,9 +357,9 @@ private fun ScoreScale(score: Int) {
         }
         VSpace(2.dp)
         Row(Modifier.fillMaxWidth()) {
-            Text("0 · far off", fontSize = 10.sp, color = Text2, modifier = Modifier.weight(1f))
+            Text("0 · much slower", fontSize = 10.sp, color = Text2, modifier = Modifier.weight(1f))
             Text("50 · usual", fontSize = 10.sp, color = Text2, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
-            Text("100 · sharp", fontSize = 10.sp, color = Text2, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
+            Text("100 · faster", fontSize = 10.sp, color = Text2, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
         }
     }
 }
@@ -397,9 +371,12 @@ private fun Result(s: CognitiveSession, playsAfter: Int, onClose: () -> Unit) {
     VSpace(6.dp)
     val score = s.cognitiveScore
     if (s.status == SessionStatus.INVALID || score == null) {
-        Text("Not enough rounds counted", style = MaterialTheme.typography.headlineSmall, color = Text1, textAlign = TextAlign.Center)
+        Text("This test didn't count", style = MaterialTheme.typography.headlineSmall, color = Text1, textAlign = TextAlign.Center)
         VSpace(6.dp)
-        Muted("At least 2 of the 3 rounds need to count. Stay in the app while a round runs.", Modifier.padding(horizontal = 4.dp))
+        Muted(
+            "It needs at least ${BeatTheClock.MIN_TRIALS} reactions, and no more than a quarter of taps before Herc appears.",
+            Modifier.padding(horizontal = 4.dp),
+        )
     } else {
         Text(BeatTheClock.verdict(score), style = MaterialTheme.typography.headlineSmall, color = Text1, textAlign = TextAlign.Center)
         VSpace(4.dp)
@@ -410,45 +387,36 @@ private fun Result(s: CognitiveSession, playsAfter: Int, onClose: () -> Unit) {
         VSpace(10.dp)
         ScoreScale(score)
         VSpace(10.dp)
-        // What the number is made of, as real quantities.
-        val off = s.accuracyError?.let { (it * 100).roundToInt() }
-        val usual = BeatTheClock.usualError(s)?.let { (it * 100).roundToInt() }
+        val usual = BeatTheClock.usualMs(s)?.roundToInt()
         Muted(
             buildString {
-                if (off != null) append("Your stops were off by $off% of the goal time")
-                if (off != null && usual != null) append("; your usual is about $usual%")
-                if (off != null) append(". ")
-                append("50 means your usual, higher means closer.")
-                append(if (playsAfter > 1) " Today counts the middle score of your $playsAfter games." else " For your first 3 games, usual means a typical player.")
+                append("50 means your usual speed, higher means faster.")
+                append(if (playsAfter > 1) " Today counts the middle score of your $playsAfter tests." else " For your first 3 tests, usual means a typical player.")
+                if (usual != null) append(" Your usual is about $usual ms.")
             },
             Modifier.padding(horizontal = 4.dp),
         )
     }
-    if (s.energy != null || s.stress != null) {
-        VSpace(10.dp)
-        Muted("You felt: energy ${s.energy?.let { "$it/5" } ?: "–"} · stress ${s.stress?.let { BeatTheClock.STRESS_FACES[it - 1] } ?: "–"}")
+    VSpace(18.dp)
+    Section("Your test") {
+        Stat("Typical reaction", s.medianMs?.let { "${it.roundToInt()} ms" } ?: "–")
+        Stat("Reactions", "${s.rounds.count { it.validity == com.hercules.shared.readiness.RoundValidity.VALID }}")
+        Stat("Slow reactions (${BeatTheClock.LAPSE_MS} ms+)", s.lapses?.toString() ?: "–")
+        Stat("False starts", "${s.falseStarts ?: 0}")
+        if (s.energy != null || s.stress != null) {
+            Stat("You felt", "energy ${s.energy?.let { "$it/5" } ?: "–"} · stress ${s.stress?.let { BeatTheClock.STRESS_FACES[it - 1] } ?: "–"}")
+        }
+        VSpace(6.dp)
+        Muted("Slow reactions and false starts are what tiredness looks like: attention slips, then you rush.")
     }
     VSpace(18.dp)
-    Section("How close you got") {
-        s.rounds.sortedBy { it.order }.forEach { r ->
-            val pct = (r.relativeError * 100).roundToInt()
-            Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("${r.targetMs / 1000}s goal", fontFamily = Mono, fontSize = 14.sp, color = Text2, modifier = Modifier.weight(0.25f))
-                Text("%.1fs".format(UiLocale, r.actualMs / 1000.0), fontFamily = Mono, fontSize = 14.sp, color = Text1, modifier = Modifier.weight(0.22f))
-                Text(
-                    if (r.validity != RoundValidity.VALID) r.validity.label else if (abs(pct) <= 1) "spot on" else if (pct < 0) "${-pct}% early" else "$pct% late",
-                    style = MaterialTheme.typography.bodySmall, color = if (r.validity == RoundValidity.VALID) Text1 else Text2, modifier = Modifier.weight(0.53f),
-                )
-            }
-        }
-        s.bias?.let {
-            VSpace(6.dp)
-            Muted(if (it < -0.02) "You tend to stop early: time feels faster to you right now." else if (it > 0.02) "You tend to stop late: time feels slower to you right now." else "No clear early or late habit.")
-        }
+    PrimaryButton("DONE", onClose)
+}
+
+@Composable
+private fun Stat(label: String, value: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = Text2, modifier = Modifier.weight(1f))
+        Text(value, fontFamily = Mono, fontSize = 14.sp, color = Text1)
     }
-    VSpace(18.dp)
-    Button(
-        onClick = onClose, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(6.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Ink),
-    ) { Text("DONE", letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold) }
 }

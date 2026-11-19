@@ -316,31 +316,29 @@ CREATE TABLE cognitive_session (
     start_ms INTEGER NOT NULL,
     end_ms INTEGER NOT NULL,
     status TEXT NOT NULL,
-    practice INTEGER NOT NULL,
-    accuracy_error REAL,
-    consistency_error REAL,
-    bias REAL,
-    accuracy_score INTEGER,
-    consistency_score INTEGER,
-    bias_score INTEGER,
+    -- Reaction Test (game v4): mean response speed (1000 / reaction ms), median reaction time,
+    -- lapses (slow taps), false starts (taps before Herc appears).
+    speed REAL,
+    median_ms REAL,
+    lapses INTEGER,
+    false_starts INTEGER,
+    speed_score INTEGER,
     cognitive_score INTEGER,
     game_version INTEGER NOT NULL,
     synced INTEGER NOT NULL DEFAULT 0,
-    -- Optional self-report asked during the game (1–5); never part of the score.
+    -- Optional self-report asked after the game (1–5); never part of the score.
     energy INTEGER,
     stress INTEGER
 );
 CREATE INDEX cognitive_session_start ON cognitive_session(start_ms);
 
+-- One trial: Herc appeared delay_ms after the previous trial; reaction_ms from appearing to the tap.
 CREATE TABLE cognitive_round (
     id TEXT NOT NULL PRIMARY KEY,
     session_id TEXT NOT NULL,
     round_order INTEGER NOT NULL,
-    target_ms INTEGER NOT NULL,
-    actual_ms INTEGER NOT NULL,
-    signed_error_ms INTEGER NOT NULL,
-    absolute_error_ms INTEGER NOT NULL,
-    relative_error REAL NOT NULL,
+    delay_ms INTEGER NOT NULL,
+    reaction_ms INTEGER NOT NULL,
     validity TEXT NOT NULL
 );
 CREATE INDEX cognitive_round_session ON cognitive_round(session_id);

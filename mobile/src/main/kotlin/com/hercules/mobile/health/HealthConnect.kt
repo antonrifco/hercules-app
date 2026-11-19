@@ -106,6 +106,21 @@ class HealthConnectImporter(private val context: Context, private val store: Cog
     /** Today's totals for Home's tiles, from Health Connect's de-duplicated aggregates. Only granted types are read. */
     data class DayTotals(val steps: Long?, val distanceM: Double?, val activeKcal: Double?, val floors: Double?, val maxHr: Long?, val restingHr: Long?)
 
+    /** Steps per [bucketMs] slot from [fromMs], de-duplicated by Health Connect. Empty without access. */
+    suspend fun stepsByBucket(fromMs: Long, toMs: Long, bucketMs: Long): Map<Long, Long> {
+        val c = client() ?: return emptyMap()
+        if (HealthPermission.getReadPermission(StepsRecord::class) !in granted()) return emptyMap()
+        return runCatching {
+            c.aggregateGroupByDuration(
+                androidx.health.connect.client.request.AggregateGroupByDurationRequest(
+                    setOf(StepsRecord.COUNT_TOTAL),
+                    TimeRangeFilter.between(Instant.ofEpochMilli(fromMs), Instant.ofEpochMilli(toMs)),
+                    Duration.ofMillis(bucketMs),
+                ),
+            ).mapNotNull { r -> r.result[StepsRecord.COUNT_TOTAL]?.let { r.startTime.toEpochMilli() to it } }.toMap()
+        }.onFailure { Log.w(TAG, "steps by bucket failed", it) }.getOrDefault(emptyMap())
+    }
+
     suspend fun todayTotals(nowMs: Long = System.currentTimeMillis()): DayTotals? {
         val c = client() ?: return null
         val granted = granted()

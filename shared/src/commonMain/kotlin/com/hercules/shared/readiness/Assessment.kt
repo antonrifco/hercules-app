@@ -1,8 +1,8 @@
 package com.hercules.shared.readiness
 
 import kotlinx.serialization.Serializable
-import kotlin.math.abs
-import kotlin.math.pow
+import kotlin.math.exp
+import kotlin.math.ln
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import kotlin.random.Random
@@ -12,7 +12,7 @@ import kotlin.random.Random
 enum class DeviceKind(val label: String) { PHONE("Phone"), WATCH("Watch") }
 
 /**
- * Part of the waking day a Beat the Clock run fell in, in hours after waking. Not a schedule: the game can be played
+ * Part of the waking day a Reaction Test fell in, in hours after waking. Not a schedule: the game can be played
  * any time, as often as you like. The label only groups runs so the peak window can be found.
  */
 @Serializable
@@ -43,8 +43,8 @@ enum class AssessmentWindow(val label: String, val fromHours: Double, val toHour
 @Serializable
 enum class RoundValidity(val label: String) {
     VALID("Valid"),
-    INTERRUPTED("Interrupted"),
-    IMPLAUSIBLE("Implausible tap"),
+    /** Tapped before Herc appeared, or within [BeatTheClock.FALSE_START_MS] of it: a guess, not a reaction. */
+    FALSE_START("Too soon"),
 }
 
 @Serializable
@@ -54,18 +54,17 @@ enum class SessionStatus(val label: String) {
     INVALID("Invalid"),
 }
 
+/** One trial: Herc appeared [delayMs] after the previous trial; [reactionMs] from appearing to the tap (0 if too soon). */
 @Serializable
 data class CognitiveRound(
     val id: String,
     val sessionId: String,
     val order: Int,
-    val targetMs: Long,
-    val actualMs: Long,
+    val delayMs: Long,
+    val reactionMs: Long,
     val validity: RoundValidity,
 ) {
-    val signedErrorMs: Long get() = actualMs - targetMs
-    val absoluteErrorMs: Long get() = abs(signedErrorMs)
-    val relativeError: Double get() = (actualMs - targetMs).toDouble() / targetMs
+    val lapse: Boolean get() = validity == RoundValidity.VALID && reactionMs >= BeatTheClock.LAPSE_MS
 }
 
 @Serializable
@@ -73,97 +72,104 @@ data class CognitiveSession(
     val id: String,
     val deviceKind: DeviceKind,
     val deviceId: String,
-    /** Part of the day it was played in (null only for runs stored before the game went schedule-free). */
+    /** Part of the day it was played in. */
     val window: AssessmentWindow?,
     val dayKey: String,
     val startMs: Long,
     val endMs: Long,
     val status: SessionStatus,
-    val practice: Boolean,
-    /** median(|relative error|) */
-    val accuracyError: Double?,
-    /** MAD(relative error) */
-    val consistencyError: Double?,
-    /** median(relative error); negative = taps too early. */
-    val bias: Double?,
-    val accuracyScore: Int?,
-    val consistencyScore: Int?,
-    val biasScore: Int?,
+    /** Mean response speed: the average of 1000 / reaction ms over the reactions (taps per second). Higher is faster. */
+    val speed: Double?,
+    /** Median reaction time, ms. */
+    val medianMs: Double?,
+    /** Reactions of [BeatTheClock.LAPSE_MS] or slower: moments attention dropped. */
+    val lapses: Int?,
+    /** Taps before Herc appeared. */
+    val falseStarts: Int?,
+    /** Speed against this device's usual, 50 = usual. */
+    val speedScore: Int?,
+    /** The game's score: speed, less a little for false starts beyond a couple of slips. */
     val cognitiveScore: Int?,
     val gameVersion: Int,
     val rounds: List<CognitiveRound>,
-    /** Self-reported energy, 1 (drained) to 5 (charged), asked during the game. Optional; never part of the score. */
+    /** Self-reported energy, 1 (drained) to 5 (charged), asked after the game. Optional; never part of the score. */
     val energy: Int? = null,
-    /** Self-reported stress, 1 (calm) to 5 (tense), asked during the game. Optional; never part of the score. */
+    /** Self-reported stress, 1 (calm) to 5 (tense), asked after the game. Optional; never part of the score. */
     val stress: Int? = null,
 ) {
     val valid: Boolean get() = status != SessionStatus.INVALID
     val scored: Boolean get() = cognitiveScore != null
 }
 
-/** The rules of Beat the Clock, shared by phone and watch. Changing any of them means a new [GAME_VERSION]. */
+/**
+ * Reaction Test: a 3-minute reaction test modelled on the brief Psychomotor Vigilance Test (PVT-B, Basner & Dinges
+ * 2011), the standard measure of how sleep loss slows attention. Herc appears after a random 1–4 s wait; tap as fast as
+ * you can. Phone and watch use the same rules. Changing any of them means a new [GAME_VERSION].
+ */
 object BeatTheClock {
+    /** v4: reaction test. (v1–v3 were a time-estimation game; their data was removed.) */
+    const val GAME_VERSION = 4
+    /** Trials per test, false starts included: about 3 minutes, like PVT-B, and a fixed count the screen can show. */
+    const val TRIALS = 45
+    /** Random wait before Herc appears, as in PVT-B. */
+    const val MIN_DELAY_MS = 1_000L
+    const val MAX_DELAY_MS = 4_000L
+    /** Faster than this after Herc appears is anticipation, not a reaction (standard PVT rule). */
+    const val FALSE_START_MS = 100L
     /**
-     * v3: three rounds that get longer (15–19 s, 20–24 s, 25–30 s, whole seconds picked at random each game) and a
-     * visible "1… 2… 3…" lead-in. Only same-version games form a baseline.
+     * A lapse: a reaction this slow or slower. PVT-B uses 355 ms with a hardware button; a touchscreen adds about
+     * 50–100 ms, so the classic 500 ms PVT threshold is used.
      */
-    const val GAME_VERSION = 3
-    /** One band per round, in order: each round's goal is a random whole second inside its band. */
-    val ROUND_BANDS_S: List<IntRange> = listOf(15..19, 20..24, 25..30)
-    val ROUNDS: Int get() = ROUND_BANDS_S.size
-    /** Seconds counted on screen at the start of each round, then the count disappears. */
-    const val COUNT_SHOWN_SECONDS = 3
-    const val MIN_VALID_ROUNDS = 2
-    /** Games on a device before its baseline is fully personal; until then it leans on the reference below. */
+    const val LAPSE_MS = 500L
+    /** No tap this long after Herc appears: recorded as a lapse at this time, and the next trial starts. */
+    const val TIMEOUT_MS = 3_000L
+    /** Reactions needed for a fully valid test, and for one that still counts. */
+    const val FULL_TRIALS = 30
+    const val MIN_TRIALS = 15
+    /** More false starts than this share of all taps means the test was guessed, not played. */
+    const val MAX_FALSE_START_SHARE = 0.25
+    /** False starts allowed before they cost points. */
+    const val FREE_FALSE_STARTS = 2
+    const val FALSE_START_PENALTY = 5
+    /** Games on a device before its usual is fully personal; until then it leans on the reference below. */
     const val MIN_BASELINE_SESSIONS = 3
-    /** Typical relative errors for a 15–30 s estimate, used until the player has their own history. */
-    const val REFERENCE_ACCURACY_ERROR = 0.12
-    const val REFERENCE_CONSISTENCY_ERROR = 0.08
     const val BASELINE_DAYS = 28
-    /** A tap faster than 0.2× or slower than 4× the target is treated as a slip, not an estimate. */
-    const val MIN_FACTOR = 0.2
-    const val MAX_FACTOR = 4.0
-    const val RATIO_FLOOR = 0.125
-    const val ERROR_FLOOR = 0.01
+    /** Typical touchscreen speed until there is a personal usual: about 330 ms on a phone, 370 ms on a watch. */
+    fun referenceSpeed(device: DeviceKind): Double = when (device) { DeviceKind.PHONE -> 3.0; DeviceKind.WATCH -> 2.7 }
+    /** Points per unit of ln(speed / usual): 10% slower than usual ≈ 34, 10% faster ≈ 64. */
+    const val SPEED_GAIN = 150.0
 
-    /** Three goals, shortest first, each a random whole second in its round's band (spec §4.3). */
-    fun plan(random: Random = Random.Default): List<Long> =
-        ROUND_BANDS_S.map { band -> band.random(random) * 1_000L }
+    /** The wait before the next appearance, a random whole number of milliseconds in 1–4 s. */
+    fun nextDelay(random: Random = Random.Default): Long = random.nextLong(MIN_DELAY_MS, MAX_DELAY_MS + 1)
 
-    /** Validity of one round from monotonic timestamps ([startNanos], [stopNanos]) and whether it was interrupted. */
-    fun round(id: String, sessionId: String, order: Int, targetMs: Long, startNanos: Long, stopNanos: Long, interrupted: Boolean): CognitiveRound {
-        val actual = ((stopNanos - startNanos) / 1_000_000L).coerceAtLeast(0)
-        val validity = when {
-            interrupted -> RoundValidity.INTERRUPTED
-            actual < targetMs * MIN_FACTOR || actual > targetMs * MAX_FACTOR -> RoundValidity.IMPLAUSIBLE
-            else -> RoundValidity.VALID
-        }
-        return CognitiveRound(id, sessionId, order, targetMs, actual, validity)
+    /** A tap after Herc appeared: [reactionMs] from appearing to the tap (capped at [TIMEOUT_MS] when there was none). */
+    fun reaction(id: String, sessionId: String, order: Int, delayMs: Long, reactionMs: Long): CognitiveRound {
+        val rt = reactionMs.coerceIn(0, TIMEOUT_MS)
+        return CognitiveRound(id, sessionId, order, delayMs, rt, if (rt < FALSE_START_MS) RoundValidity.FALSE_START else RoundValidity.VALID)
     }
 
-    /** Partially valid: at least 2 of the 3 rounds valid. Fully valid: all 3 (spec §4.5). */
+    /** A tap while waiting, before Herc appeared. */
+    fun falseStart(id: String, sessionId: String, order: Int, delayMs: Long): CognitiveRound =
+        CognitiveRound(id, sessionId, order, delayMs, 0, RoundValidity.FALSE_START)
+
     fun status(rounds: List<CognitiveRound>): SessionStatus {
-        val valid = rounds.filter { it.validity == RoundValidity.VALID }
+        val reactions = rounds.count { it.validity == RoundValidity.VALID }
+        val falseStarts = rounds.size - reactions
         return when {
-            valid.size >= ROUNDS -> SessionStatus.FULLY_VALID
-            valid.size >= MIN_VALID_ROUNDS -> SessionStatus.PARTIALLY_VALID
+            rounds.isNotEmpty() && falseStarts.toDouble() / rounds.size > MAX_FALSE_START_SHARE -> SessionStatus.INVALID
+            reactions >= FULL_TRIALS -> SessionStatus.FULLY_VALID
+            reactions >= MIN_TRIALS -> SessionStatus.PARTIALLY_VALID
             else -> SessionStatus.INVALID
         }
     }
 
-    /** `score = clamp(50 − 20·log2(max(ratio, floor)), 0, 100)` (spec §4.6). Lower error than usual scores above 50. */
-    fun ratioScore(current: Double, baseline: Double): Int {
-        val ratio = current / baseline.coerceAtLeast(ERROR_FLOOR)
-        return Stats.clamp(50 - 20 * Stats.log2(maxOf(ratio, RATIO_FLOOR)), 0.0, 100.0).roundToInt()
-    }
-
-    fun biasScore(medianSigned: Double, medianAbs: Double): Int =
-        (100 * (1 - Stats.clamp(abs(medianSigned) / maxOf(medianAbs, ERROR_FLOOR), 0.0, 1.0))).roundToInt()
+    /** `clamp(50 + 150·ln(speed / usual), 0, 100)`: 50 is the usual, higher is faster. */
+    fun speedScore(speed: Double, usual: Double): Int =
+        Stats.clamp(50 + SPEED_GAIN * ln(speed / usual.coerceAtLeast(0.1)), 0.0, 100.0).roundToInt()
 
     /**
-     * Completes a session: validity, practice flag, error statistics and, when a baseline exists, scores.
-     * [history] holds this user's earlier sessions (any device); only same-device, valid, non-practice sessions from
-     * the last [BASELINE_DAYS] days form the baseline, whatever time of day they were played.
+     * Completes a test: validity, speed, lapses, false starts and the score. [history] holds earlier sessions (any
+     * device); only same-device valid sessions of this version from the last [BASELINE_DAYS] days form the usual.
      */
     fun finish(
         id: String,
@@ -177,33 +183,30 @@ object BeatTheClock {
         history: List<CognitiveSession>,
     ): CognitiveSession {
         val status = status(rounds)
-        // No practice games any more: every valid game is scored. Older games may still carry the flag.
-        val practice = false
-        val rel = rounds.filter { it.validity == RoundValidity.VALID }.map { it.relativeError }
-        val accErr = if (status != SessionStatus.INVALID) Stats.median(rel.map { abs(it) }) else null
-        val conErr = if (status != SessionStatus.INVALID) Stats.mad(rel) else null
-        val bias = if (status != SessionStatus.INVALID) Stats.median(rel) else null
-
-        var acc: Int? = null
-        var con: Int? = null
-        var bs: Int? = null
-        if (!practice && accErr != null && conErr != null && bias != null) {
-            // Scored from the first game: a typical-player reference at first, fully personal after 3 games.
-            val base = baselineSessions(history, deviceKind, startMs)
-            val share = minOf(base.size, MIN_BASELINE_SESSIONS).toDouble() / MIN_BASELINE_SESSIONS
-            val pAcc = Stats.median(base.mapNotNull { it.accuracyError }) ?: REFERENCE_ACCURACY_ERROR
-            val pCon = Stats.median(base.mapNotNull { it.consistencyError }) ?: REFERENCE_CONSISTENCY_ERROR
-            val bAcc = share * pAcc + (1 - share) * REFERENCE_ACCURACY_ERROR
-            val bCon = share * pCon + (1 - share) * REFERENCE_CONSISTENCY_ERROR
-            acc = ratioScore(accErr, bAcc)
-            con = ratioScore(maxOf(conErr, ERROR_FLOOR), maxOf(bCon, ERROR_FLOOR))
-            bs = biasScore(bias, accErr)
+        val reactions = rounds.filter { it.validity == RoundValidity.VALID }
+        val falseStarts = rounds.size - reactions.size
+        val ok = status != SessionStatus.INVALID
+        val speed = if (ok) reactions.map { 1000.0 / it.reactionMs }.average() else null
+        val median = if (ok) Stats.median(reactions.map { it.reactionMs.toDouble() }) else null
+        val lapses = if (ok) reactions.count { it.lapse } else null
+        var speedScore: Int? = null
+        var total: Int? = null
+        if (speed != null) {
+            speedScore = speedScore(speed, usualSpeed(history, deviceKind, startMs))
+            total = (speedScore - FALSE_START_PENALTY * maxOf(0, falseStarts - FREE_FALSE_STARTS)).coerceIn(0, 100)
         }
-        val total = if (acc != null && con != null && bs != null) (0.70 * acc + 0.20 * con + 0.10 * bs).roundToInt() else null
         return CognitiveSession(
-            id, deviceKind, deviceId, window, dayKey, startMs, endMs, status, practice,
-            accErr, conErr, bias, acc, con, bs, total, GAME_VERSION, rounds,
+            id, deviceKind, deviceId, window, dayKey, startMs, endMs, status,
+            speed, median, lapses, if (rounds.isEmpty()) null else falseStarts, speedScore, total, GAME_VERSION, rounds,
         )
+    }
+
+    /** This device's usual speed: the reference at first, fully personal after [MIN_BASELINE_SESSIONS] games. */
+    fun usualSpeed(history: List<CognitiveSession>, device: DeviceKind, beforeMs: Long): Double {
+        val base = baselineSessions(history, device, beforeMs)
+        val share = minOf(base.size, MIN_BASELINE_SESSIONS).toDouble() / MIN_BASELINE_SESSIONS
+        val personal = Stats.median(base.mapNotNull { it.speed }) ?: referenceSpeed(device)
+        return share * personal + (1 - share) * referenceSpeed(device)
     }
 
     /** The quick check's five stress choices, 1 (calm) to 5 (tense). Energy uses Herc's five faces instead. */
@@ -211,25 +214,24 @@ object BeatTheClock {
 
     /** A game score in plain words. 50 is the player's usual, so the words compare against that. */
     fun verdict(score: Int): String = when {
-        score >= 65 -> "Sharper than usual"
+        score >= 65 -> "Faster than usual"
         score >= 40 -> "About your usual"
-        score >= 20 -> "Below your usual"
-        else -> "Well below your usual"
+        score >= 20 -> "Slower than usual"
+        else -> "Much slower than usual"
     }
 
-    /** The usual error a game was scored against, recovered from its accuracy score (null at the clamped ends). */
-    fun usualError(s: CognitiveSession): Double? {
-        val err = s.accuracyError ?: return null
-        val score = s.accuracyScore?.takeIf { it in 1..99 } ?: return null
-        return maxOf(err, ERROR_FLOOR) / 2.0.pow((50 - score) / 20.0)
+    /** The usual reaction time a game was scored against, in ms, recovered from its speed score (null at the clamped ends). */
+    fun usualMs(s: CognitiveSession): Double? {
+        val speed = s.speed ?: return null
+        val score = s.speedScore?.takeIf { it in 1..99 } ?: return null
+        return 1000.0 / (speed / exp((score - 50) / SPEED_GAIN))
     }
 
     fun baselineSessions(history: List<CognitiveSession>, device: DeviceKind, beforeMs: Long): List<CognitiveSession> =
         history.filter {
-            it.deviceKind == device && it.gameVersion == GAME_VERSION && it.valid && !it.practice && it.accuracyError != null &&
+            it.deviceKind == device && it.gameVersion == GAME_VERSION && it.valid && it.speed != null &&
                 it.startMs < beforeMs && beforeMs - it.startMs <= BASELINE_DAYS * 86_400_000L
         }
-
 }
 
 // ------------------------------------------------------------------ peak cognitive window (spec §5)
@@ -252,8 +254,8 @@ data class PeakWindowPrediction(
     val modelVersion: Int = MODEL_VERSION,
 ) {
     companion object {
-        /** v2: only games of the current [BeatTheClock.GAME_VERSION]; lower thresholds (7 days, 4 games on 3 days). */
-        const val MODEL_VERSION = 2
+        /** v3: reaction speed (game v4). v2: only games of the current version; 7 days, 4 games on 3 days. */
+        const val MODEL_VERSION = 3
         const val WINDOW_DAYS = 28
         const val MIN_OBSERVATION_DAYS = 7
         const val MIN_SESSIONS_PER_WINDOW = 4
@@ -266,17 +268,17 @@ object PeakWindowPredictor {
 
     fun predict(sessions: List<CognitiveSession>, nowMs: Long): PeakWindowPrediction {
         val from = nowMs - PeakWindowPrediction.WINDOW_DAYS * 86_400_000L
-        // Only same-version games: a different round set gives errors that can't be compared.
+        // Only same-version games: a different game gives numbers that can't be compared.
         val usable = sessions.filter {
-            it.gameVersion == BeatTheClock.GAME_VERSION && it.valid && !it.practice && it.window != null && it.accuracyError != null && it.startMs in from..nowMs
+            it.gameVersion == BeatTheClock.GAME_VERSION && it.valid && it.window != null && it.speed != null && it.startMs in from..nowMs
         }
 
-        // Normalize per device: robust z of the accuracy error against that device's own 28-day distribution.
+        // Normalize per device: robust z of the speed against that device's own 28-day distribution (higher = faster).
         val perf = usable.groupBy { it.deviceKind }.flatMap { (_, list) ->
-            val errs = list.map { it.accuracyError!! }
-            val m = Stats.median(errs)!!
-            val mad = Stats.mad(errs)!!
-            list.map { it to -Stats.robustZ(it.accuracyError!!, m, mad, minScale = 0.01) }
+            val speeds = list.map { it.speed!! }
+            val m = Stats.median(speeds)!!
+            val mad = Stats.mad(speeds)!!
+            list.map { it to Stats.robustZ(it.speed!!, m, mad, minScale = 0.05) }
         }
         val byWindow = AssessmentWindow.entries.associateWith { w -> perf.filter { it.first.window == w } }
         val performance = AssessmentWindow.entries.map { w ->

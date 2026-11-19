@@ -581,7 +581,7 @@ fun EventDetail(
     }
 }
 
-/** On-demand guide: the score scale, the five dimensions, Beat the Clock windows, and the limits. */
+/** On-demand guide: the score scale, the five dimensions, Reaction Test windows, and the limits. */
 @Composable
 fun GuideContent(weights: Map<Dimension, Double> = DefaultScoring.DEFAULT.weights) {
     Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp).verticalScroll(rememberScrollState())) {
@@ -627,7 +627,7 @@ fun GuideContent(weights: Map<Dimension, Double> = DefaultScoring.DEFAULT.weight
         VSpace(8.dp)
         Muted("Missing dimensions are left out and the rest re-weighted. Coverage says how much of the weight had data; confidence follows from it.")
         VSpace(18.dp)
-        Eyebrow("Beat the Clock", color = Text1)
+        Eyebrow("Reaction Test", color = Text1)
         VSpace(6.dp)
         Muted("Optional. Play any time, once or several times a day; the day counts the median of your runs. Herc files each run under a part of your day:")
         VSpace(8.dp)

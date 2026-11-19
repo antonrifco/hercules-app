@@ -63,7 +63,7 @@ class MobileGraph(private val context: Context) {
         pushToWatch()
     }
 
-    /** Sends the current readiness + next event to the watch (DataClient, delivered when connected). */
+    /** Sends the current readiness + next event to the watch (DataClient, delivered when connected), and redraws the widgets. */
     suspend fun pushToWatch() {
         runCatching {
             val json = cognitive.encodeWatchState(cognitive.watchState().copy(reminders = com.hercules.mobile.notify.ReminderSettings.load(context)))
@@ -72,6 +72,8 @@ class MobileGraph(private val context: Context) {
             }.asPutDataRequest().setUrgent()
             Wearable.getDataClient(context).putDataItem(req).await()
         }.onFailure { Log.w(TAG, "could not push state to watch", it) }
+        // Every change that reaches the watch also changes what the home-screen widgets show.
+        com.hercules.mobile.widget.Widgets.refresh(context)
     }
 
     /**

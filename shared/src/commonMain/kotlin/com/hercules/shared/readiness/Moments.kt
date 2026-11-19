@@ -260,11 +260,11 @@ class MomentPreparationEngine {
     )
 
     private fun peakTask(c: PrepContext): PrepTask? = when (peakAlignment(c)) {
-        PeakAlignment.WITHIN_PEAK -> PrepTask("peak_within", "Your moment falls in your peak window", "You tend to perform best at this time of day.", RecCategory.COGNITIVE, 40, "Based on your Beat the Clock history.")
-        PeakAlignment.NEAR_PEAK -> PrepTask("peak_near", "Your moment is close to your peak window", "You tend to be near your sharpest around this time.", RecCategory.COGNITIVE, 40, "Based on your Beat the Clock history.")
+        PeakAlignment.WITHIN_PEAK -> PrepTask("peak_within", "Your moment falls in your peak window", "You tend to perform best at this time of day.", RecCategory.COGNITIVE, 40, "Based on your Reaction Test history.")
+        PeakAlignment.NEAR_PEAK -> PrepTask("peak_near", "Your moment is close to your peak window", "You tend to be near your sharpest around this time.", RecCategory.COGNITIVE, 40, "Based on your Reaction Test history.")
         PeakAlignment.OUTSIDE_PEAK -> c.peak?.window?.let { w ->
             val wake = c.eventDayWakeMs ?: return null
-            PrepTask("peak_outside", "Your moment is outside your peak window (${c.clock(w.startMs(wake))}–${c.clock(w.endMs(wake))})", "A walk and a few slow breaths beforehand help you arrive sharper.", RecCategory.COGNITIVE, 40, "Based on your Beat the Clock history.")
+            PrepTask("peak_outside", "Your moment is outside your peak window (${c.clock(w.startMs(wake))}–${c.clock(w.endMs(wake))})", "A walk and a few slow breaths beforehand help you arrive sharper.", RecCategory.COGNITIVE, 40, "Based on your Reaction Test history.")
         }
         PeakAlignment.UNKNOWN -> null
     }

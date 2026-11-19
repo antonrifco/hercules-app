@@ -155,7 +155,7 @@ fun InsufficientCard(calc: ReadinessCalculation?, onWhy: () -> Unit, onSetup: ()
         Text(calc?.insufficientReason ?: "Waiting on the first reading", style = MaterialTheme.typography.headlineSmall, color = Text1, textAlign = TextAlign.Center)
         VSpace(8.dp)
         Text(
-            calc?.insufficientDetail ?: "One reading is enough to start: sleep, heart rate, steps, daylight or a Beat the Clock game.",
+            calc?.insufficientDetail ?: "One reading is enough to start: sleep, heart rate, steps, daylight or a Reaction Test.",
             style = MaterialTheme.typography.bodyMedium, color = Text2, textAlign = TextAlign.Center,
             modifier = Modifier.padding(horizontal = 8.dp),
         )
@@ -215,7 +215,7 @@ fun PeakCard(peak: PeakWindowPrediction?, today: TimeWindow?, now: Boolean, nowM
                     }
                     peak?.result == PeakResult.NO_CLEAR_PEAK -> {
                         Text("No clear peak", style = MaterialTheme.typography.titleLarge, color = Text1)
-                        Muted("You're steady across the day. Keep playing Beat the Clock to sharpen the picture.")
+                        Muted("You're steady across the day. Keep taking the Reaction Test to sharpen the picture.")
                     }
                     else -> {
                         Text("Herc is still learning", style = MaterialTheme.typography.titleLarge, color = Text1)
@@ -309,8 +309,8 @@ fun GettingStarted(healthConnected: Boolean, watchLinked: Boolean, practiced: Bo
     val done = listOf(healthConnected, watchLinked, practiced).count { it }
     Section("Get started", trailing = { Text("$done/3", fontFamily = Mono, fontSize = 12.sp, color = Cyan) }) {
         StartRow(healthConnected, Icons.Rounded.Favorite, "Connect Health Connect", "Feed your score with sleep, heart and activity.", onSetup)
-        StartRow(practiced, Icons.Rounded.Timer, "Play Beat the Clock", "Your first game counts. About 2 minutes.", onPlay)
-        StartRow(watchLinked, Icons.Rounded.Watch, "Add your watch (optional)", "Sleep tracking and Beat the Clock on your wrist.", onSetup)
+        StartRow(practiced, Icons.Rounded.Timer, "Take the Reaction Test", "A reaction test. Your first one counts. 3 minutes.", onPlay)
+        StartRow(watchLinked, Icons.Rounded.Watch, "Add your watch (optional)", "Sleep tracking and the Reaction Test on your wrist.", onSetup)
     }
 }
 

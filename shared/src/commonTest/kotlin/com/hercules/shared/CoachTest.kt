@@ -37,7 +37,7 @@ class CoachTest {
 
     private fun readiness(baselineDays: Int = 20): Readiness {
         val calc = ReadinessCalculator().calculate(
-            DayInputs(day, NightInput(day, 0, 1, 470, 20, 180.0), emptyList(), 45.0, List(20) { 45.0 }, 58.0, List(20) { 58.0 }, emptyList(), null, null, CognitiveInput(60, 60, 60, "Phone")),
+            DayInputs(day, NightInput(day, 0, 1, 470, 20, 180.0), emptyList(), 45.0, List(20) { 45.0 }, 58.0, List(20) { 58.0 }, emptyList(), null, null, CognitiveInput(60, "Phone")),
             DefaultScoring.DEFAULT,
         )
         val s = calc.score!!

@@ -115,7 +115,7 @@ object Notifier {
         val m = ctx.getSystemService(NotificationManager::class.java)
         if (m.getNotificationChannel(CHANNEL) == null) {
             m.createNotificationChannel(NotificationChannel(CHANNEL, "Reminders", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                description = "Morning score, Beat the Clock, moment prep, bedtime"
+                description = "Morning score, Reaction Test, moment prep, bedtime"
             })
         }
     }

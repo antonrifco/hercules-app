@@ -31,7 +31,7 @@ enum class LegalDoc(val title: String, val updated: String, val intro: String, v
                 "From Health Connect, only the types you allow: sleep sessions, heart rate variability, resting heart rate, steps and exercise sessions. Optionally respiratory rate, skin temperature, blood oxygen and heart rate, which are stored but not used in the score. Hercules only reads; it never writes to Health Connect.",
                 "From your phone's ambient light sensor: light levels, sampled while the app is open and occasionally in the background. No camera, no location.",
                 "From your watch, with your permission: heart rate, sleep and wake times, steps, distance, floors, calories and motion. You can switch each sensor off in Setup.",
-                "From Beat the Clock: how long you held each round compared with its target.",
+                "From the Reaction Test: how fast you tapped each time Herc appeared.",
                 "What you enter: moments you plan, the steps you tick off, ratings after a moment, sleep times you correct, your usual wake time and score weights.",
                 "What Hercules works out from these: your daily score with its coverage and confidence, personal baselines, your peak cognitive window, preparation status and personal bests.",
             ),

@@ -24,7 +24,8 @@ import com.hercules.wear.graph
 import com.hercules.wear.ui.MainActivity
 
 /**
- * Today's score on the watch face, in whichever shape the slot offers: the number with Herc's mark, a longer line
+ * Today's score on the watch face. Herc is drawn cropped tight (ic_herc_mark / ic_herc_color) so he fills the slot;
+ * the watch face decides the slot's size., in whichever shape the slot offers: the number with Herc's mark, a longer line
  * ("67 · Fair"), or just Herc as a launcher icon. No ring form: one watch face printed the scale's top (100) for it. Tapping any of them opens Hercules. Without a score it
  * shows "--", never a made-up number.
  */
@@ -42,7 +43,7 @@ class ScoreComplicationService : SuspendingComplicationDataSourceService() {
             this, 0, Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val mark = MonochromaticImage.Builder(Icon.createWithResource(this, R.drawable.ic_notification)).build()
+        val mark = MonochromaticImage.Builder(Icon.createWithResource(this, R.drawable.ic_herc_mark)).build()
         val text = PlainComplicationText.Builder(score?.toString() ?: "--").build()
         val said = PlainComplicationText.Builder(
             if (score != null) "Hercules score $score" + (band?.let { ", $it" } ?: "") else "Hercules, no score yet",
@@ -59,7 +60,7 @@ class ScoreComplicationService : SuspendingComplicationDataSourceService() {
                 ).setTitle(PlainComplicationText.Builder("Hercules").build()).setMonochromaticImage(mark).setTapAction(open).build()
             ComplicationType.SMALL_IMAGE ->
                 SmallImageComplicationData.Builder(
-                    SmallImage.Builder(Icon.createWithResource(this, R.mipmap.ic_launcher), SmallImageType.ICON).build(), said,
+                    SmallImage.Builder(Icon.createWithResource(this, R.drawable.ic_herc_color), SmallImageType.ICON).build(), said,
                 ).setTapAction(open).build()
             ComplicationType.MONOCHROMATIC_IMAGE ->
                 MonochromaticImageComplicationData.Builder(mark, said).setTapAction(open).build()

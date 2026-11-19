@@ -33,7 +33,7 @@ val Readiness.learningNote: String?
 enum class Provenance(val label: String) {
     MEASURED("Measured by your devices"),
     PHONE_SENSOR("Measured by your phone's light sensor"),
-    ASSESSED("From your Beat the Clock"),
+    ASSESSED("From your Reaction Test"),
     ESTIMATE("Estimate"),
     TIP("General advice"),
 }
@@ -72,7 +72,7 @@ data class SleepAdvice(
     val wakeDayKey: String = "",
 )
 
-/** Beat the Clock today. Optional and any time: play once or several times; the day uses the median. */
+/** Reaction Test today. Optional and any time: play once or several times; the day uses the median. */
 @Serializable
 data class AssessInfo(val playsToday: Int)
 
@@ -127,7 +127,7 @@ class Coach(private val dayKeys: DayKeys) {
         Dimension.CARDIO -> "Your body is still recovering."
         Dimension.ACTIVITY -> "Yesterday's movement was off your usual."
         Dimension.CIRCADIAN -> "Your daylight rhythm slipped yesterday."
-        Dimension.COGNITIVE -> "Your timing was off your usual today."
+        Dimension.COGNITIVE -> "Your reactions were slower than usual today."
     }
 
     private fun goodText(r: Readiness, d: Dimension): String = when (d) {
@@ -135,7 +135,7 @@ class Coach(private val dayKeys: DayKeys) {
         Dimension.CARDIO -> "Fully recharged."
         Dimension.ACTIVITY -> "Yesterday's movement hit the mark."
         Dimension.CIRCADIAN -> "Daylight rhythm on point."
-        Dimension.COGNITIVE -> "Razor-sharp timing today."
+        Dimension.COGNITIVE -> "Lightning-fast reactions today."
     }
 
     /** Today's predicted peak window and whether it is happening now. */
@@ -203,7 +203,7 @@ class Coach(private val dayKeys: DayKeys) {
 
     /**
      * One recommendation, in priority order: get ready for a Moment that is about to happen, reflect on one that just happened, wind down at night, keep preparing, use the peak, or (optional) play
-     * today's first Beat the Clock.
+     * today's first Reaction Test.
      */
     fun action(
         nowMs: Long,
@@ -241,7 +241,7 @@ class Coach(private val dayKeys: DayKeys) {
             return RecommendedAction(ActionKind.PEAK, if (peak.second) "Hit your hardest task now" else "Save your hardest task for ${dayKeys.clock(peak.first.startMs)}", "Your ${peak.first.window.label.lowercase()} peak window")
         }
         if (assess != null && assess.playsToday == 0 && part != DayPart.NIGHT) {
-            return RecommendedAction(ActionKind.ASSESS, "Play Beat the Clock", "A 2-minute check on how sharp you are")
+            return RecommendedAction(ActionKind.ASSESS, "Take the Reaction Test", "A 3-minute reaction test of how sharp you are")
         }
         return RecommendedAction(ActionKind.PEAK, if (r != null && r.score >= 70) "Go take on the big stuff" else "Steady pace. Recover and reload")
     }

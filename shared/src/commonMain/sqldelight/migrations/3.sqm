@@ -1,0 +1,37 @@
+-- v3 -> v4: Reaction Test becomes a reaction test (game v4). The time-estimation game is gone, with its data:
+-- its scores can't be compared with reaction times, so its sessions, rounds and baselines are dropped.
+DROP TABLE IF EXISTS cognitive_round;
+DROP TABLE IF EXISTS cognitive_session;
+DELETE FROM user_baseline WHERE metric_type LIKE 'BTC_%';
+
+CREATE TABLE cognitive_session (
+    id TEXT NOT NULL PRIMARY KEY,
+    device_kind TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    assessment_window TEXT,
+    day_key TEXT NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    speed REAL,
+    median_ms REAL,
+    lapses INTEGER,
+    false_starts INTEGER,
+    speed_score INTEGER,
+    cognitive_score INTEGER,
+    game_version INTEGER NOT NULL,
+    synced INTEGER NOT NULL DEFAULT 0,
+    energy INTEGER,
+    stress INTEGER
+);
+CREATE INDEX cognitive_session_start ON cognitive_session(start_ms);
+
+CREATE TABLE cognitive_round (
+    id TEXT NOT NULL PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    round_order INTEGER NOT NULL,
+    delay_ms INTEGER NOT NULL,
+    reaction_ms INTEGER NOT NULL,
+    validity TEXT NOT NULL
+);
+CREATE INDEX cognitive_round_session ON cognitive_round(session_id);

@@ -41,7 +41,7 @@ adapts it are listed in [§0.2](#02-adaptations-to-the-master-specification), ea
 |---|---|---|---|
 | Local database | Room | SQLDelight (already in the project, shared by phone, watch and future iOS) with the same entities as tables and versioned migrations | §13.1 and §26.2 ask to reuse the existing architecture and dependencies. SQLDelight offers the same guarantees (typed queries, migrations, Flow) and is multiplatform. |
 | Health data on the watch | Health Services | Health Services passive monitoring (as before). The phone treats the Hercules watch as one more provider, with its own provenance, next to Health Connect | Users without a Health Connect provider still get a score from their watch. |
-| Morning check-in (energy/stress) | Not part of the CRS | Removed. The daily task on Home is now **Beat the Clock** | The five CRS dimensions are fixed by the spec; self-reports are not one of them. |
+| Morning check-in (energy/stress) | Not part of the CRS | Removed. The daily task on Home is now **Reaction Test** | The five CRS dimensions are fixed by the spec; self-reports are not one of them. |
 | Generic "focus windows" | Peak window only from data | Removed. The day timeline shows the three assessment windows and highlights the Peak Cognitive Window only once it is predicted | §5.3: predict the peak only with enough history. |
 | Moment go/reschedule verdict and 0–100 "prep" score | Preparation status, no extra score, no rescheduling of fixed events | Replaced by On Track / Needs Attention / Insufficient Data and peak alignment | §8.6 and §8.9. |
 | Moment urgency | Normal / Critical | Normal / Critical. Older "Important" moments are read as Critical | §8.2. |
@@ -77,7 +77,7 @@ estimate daily readiness, and answers three questions:
 Exactly three primary menus.
 
 - **Home:** daily Cognitive Readiness Score (CRS), classification, confidence and coverage, dimensions and
-  contributing metrics, Peak Cognitive Window, history of readiness and assessments, today's Beat the Clock.
+  contributing metrics, Peak Cognitive Window, history of readiness and assessments, today's Reaction Test.
 - **Moments:** up to five active future Moments (title, urgency, date, hour); readiness tracking as each approaches;
   personalized preparation; event-day review; history of completed and cancelled Moments.
 - **Setup:** assessment settings, health data sources and Health Connect permissions, phone and watch connection,
@@ -86,7 +86,7 @@ Exactly three primary menus.
 ## 1.4 Scope
 
 Included in V1: daily CRS; five classifications; five dimensions; confidence and coverage; Peak Cognitive Window;
-Beat the Clock on phone and watch; Health Connect; Wear OS Health Services; ambient light; optional sensor
+Reaction Test on phone and watch; Health Connect; Wear OS Health Services; ambient light; optional sensor
 detection; personal baselines; customizable weights with confirmed reset; up to five Moments with preparation;
 local persistence; phone-watch sync; history.
 
@@ -117,15 +117,16 @@ Product categories, not clinically validated thresholds.
 
 | Dimension | Default |
 |---|---:|
-| Sleep & Recovery (S) | 45% |
-| Cardiovascular Readiness (H) | 20% |
+| Sleep & Recovery (S) | 65% |
+| Cardiovascular Readiness (H) | 10% |
 | Physical Activity (A) | 10% |
 | Circadian Alignment (C) | 5% |
-| Cognitive Performance (T) | 20% |
+| Cognitive Performance (T) | 10% |
 
-`CRS = 0.45·S + 0.20·H + 0.10·A + 0.05·C + 0.20·T − extras`, each dimension normalized to 0–100 (default
-configuration v3). v3 moved 5 points from light to sleep: light is read by the phone only while it is out and in
-use, the weakest measurement of the five. The Beat the Clock weight counts 60% after one game in a day, 80% after
+`CRS = 0.65·S + 0.10·H + 0.10·A + 0.05·C + 0.10·T − extras`, each dimension normalized to 0–100 (default
+configuration v4). v4 gave sleep 20 more points (10 from heart, 10 from the game): sleep is the one causal driver and
+on many watches the most complete signal. v3 moved 5 points from light to sleep: light is read by the phone only while it is out and in
+use, the weakest measurement of the five. The Reaction Test weight counts 60% after one game in a day, 80% after
 two and in full from three (engine 3.1.0): one 2-minute game is a noisy reading. Sleep leads because it is the only signal with causal evidence for next-day cognition (Van Dongen
 2003, Belenky 2003, Lim & Dinges 2010); heart signals are associations (Forte 2019, Buchheit 2014). The weights
 remain product hypotheses, not validated values. A stored older default follows v3; custom weights are kept. The engine never hardcodes them: it
@@ -176,19 +177,20 @@ Missing samples never mean darkness. Time of day is not a CRS bonus, and sleep c
 
 ## 2.8 Cognitive Performance
 
-`T = 0.70·Accuracy + 0.20·Consistency + 0.10·Bias` from the latest valid, scored Beat the Clock session of the
-day. Without one, the dimension is unavailable.
+`T` = the median game score of the day's valid, scored Reaction Tests (one metric, Reaction speed,
+§4.6). Without one, the dimension is unavailable.
 
-The result is shown as `T / 100` with a verdict against the player's usual (50): ≥ 65 "Sharper than usual", ≥ 40
-"About your usual", ≥ 20 "Below your usual", else "Well below your usual" (`BeatTheClock.verdict`), plus the
-real error ("off by N% of the goal time; your usual is about M%"). Phone and watch use the same words.
+The result is shown as `T / 100` with a verdict against the player's usual (50): ≥ 65 "Faster than usual", ≥ 40
+"About your usual", ≥ 20 "Slower than usual", else "Much slower than usual" (`BeatTheClock.verdict`), plus the real
+numbers: typical reaction time in ms, the usual it was compared with, slow reactions and false starts. Phone and
+watch use the same words.
 
 **Score check (debug builds, Setup → Developers).** `ScoreCheck` reports Spearman's rank correlation between the
 score without the cognitive dimension and the day's median game score, over days in the last 90 that have both.
 No verdict below 30 days. It only measures; it never changes a score.
 
-**Screen stays on.** While a round is being timed, phone and watch keep the screen on; otherwise the display
-times out, the app pauses and the round is marked interrupted.
+**Screen stays on.** During the 3-minute test, phone and watch keep the screen on; leaving the app stops the test
+without saving it.
 
 **Moment preparation stays in scope.** Prep tasks cover only sleep, recovery, light, stress and sensors, never the content of the Moment: final stretch adds skipping alcohol and no caffeine after 14:00 the day before; the day itself suggests a 10-minute walk and 2 minutes of box breathing. Reminders: the bedtime reminder is keyed to the wake-up day, so it fires once per night even past midnight; "how did it go?" reads Moments that started in the last 12 hours.
 
@@ -235,18 +237,19 @@ Stored scores of older days are still never recalculated.
 
 ---
 
-# 4. Beat the Clock
+# 4. Reaction Test
 
 ## 4.1 Purpose
 
-The user sees a target duration, taps START, and taps STOP when they believe it has elapsed. The screen counts the
-first three seconds ("1… 2… 3…") so the pace is clear, then the count disappears. It measures time perception, not reaction
-time or intelligence.
+A 3-minute reaction test modelled on the brief Psychomotor Vigilance Test (PVT-B, Basner & Dinges 2011), the
+standard measure of how sleep loss and fatigue slow attention. Herc appears at random moments; the user taps anywhere
+as fast as they can. It measures reaction speed and attention lapses, not intelligence. (Game versions 1–3 were a
+time-estimation game; it was removed with all its sessions, rounds and baselines in database migration 3.)
 
 ## 4.2 When to play
 
-Optional, any time, as often as the user likes. There is no schedule. The day's Beat the Clock result is the median of
-that day's scored games (accuracy, consistency and bias each taken as the median). Each game is filed under the part of
+Optional, any time, as often as the user likes. There is no schedule. The day's Reaction Test result is the median of
+that day's scored tests. Each game is filed under the part of
 the waking day it was played in, only to find the peak window:
 
 | Part of day | Hours after waking |
@@ -260,34 +263,38 @@ any history). There is no wake-time setting.
 
 ## 4.3 Session
 
-Three rounds that get longer: 15–19 s, then 20–24 s, then 25–30 s, each a random whole second in its band
-(game version 3). Each round opens with a visible "1… 2… 3…" count, then the count disappears. An optional
-energy/stress check comes before the last round. There are no practice games: every valid game is scored from the
-first one. The baseline is per device, across all times of day, from the same game version only.
+Game version 4, run by the shared `ReactionRun` loop so phone and watch are identical. 45 trials (false starts
+included), about 3 minutes: wait a random 1–4 s (whole milliseconds), show Herc, wait for a tap (at most 3 s), show
+the reaction time (or "Too soon") for 1 s, repeat. The screen shows "N of 45" and a progress bar (a ring on the
+watch). A millisecond timer starts when Herc is on screen and freezes at the tap, as on the PVT. A tap during the wait is a false start and starts the next trial. The whole screen
+is the tap target. An optional energy/stress check comes after the test (skippable; never scored). There are no
+practice games: every valid test is scored from the first one.
 
 ## 4.4 Timing
 
-`SystemClock.elapsedRealtimeNanos()` only (monotonic). Per round: target, start, stop, actual, signed error,
-absolute error, relative error `(actual − target) / target`, device, validity.
+`SystemClock.uptimeMillis()` (monotonic): the touch-down time of the tap, against the first frame that shows Herc.
+Per trial: wait, reaction time, validity. Touchscreen and display delay (about 50–100 ms) are the same from test to
+test on one device, which is why baselines are per device.
 
 ## 4.5 Validation
 
-- A round is invalid if the app lost focus or was interrupted while it ran, or if the tap is implausible
-  (outside 0.2×–4× the target).
-- A session is **partially valid** with at least 2 of the 3 rounds valid; **fully valid** with all 3.
-- Sessions that fail are stored as invalid and never scored.
+- A trial is a **false start** if the tap came before Herc appeared or within 100 ms of it (anticipation).
+  No tap within 3 s is recorded as a 3 000 ms reaction (a lapse).
+- A test is **fully valid** with ≥ 30 reactions, **partially valid** with ≥ 15, and **invalid** with fewer or when
+  more than a quarter of taps are false starts. Leaving the app stops the test; it is not saved.
+- Invalid tests are stored and never scored.
 
 ## 4.6 Scoring
 
-- `accuracyError = median(|relativeError|)`, `bias = median(relativeError)`,
-  `consistencyError = MAD(relativeError)`.
-- Accuracy and consistency: `ratio = current / baseline`,
-  `score = clamp(50 − 20·log2(max(ratio, 0.125)), 0, 100)`.
-- Bias: `100 · (1 − clamp(|bias| / max(accuracyError, 0.01), 0, 1))`.
-- The baseline is a blend: a typical-player reference (accuracy error 0.12, consistency error 0.08) mixed with the
-  median of the same device's earlier valid sessions, personal share = min(sessions, 3) / 3. The first game is
-  scored against the reference alone; from the third game on, the baseline is fully personal.
-- Valid games of today that have no score (for example from an older rule set) are re-scored on the next refresh.
+- `speed = mean(1000 / reaction ms)` over the reactions (the main PVT outcome; it reflects both slowing and lapses).
+  Also stored: median reaction time, **lapses** (reactions ≥ 500 ms, the classic PVT threshold, chosen over PVT-B's
+  355 ms because a touchscreen adds delay) and false starts.
+- `speedScore = clamp(50 + 150·ln(speed / usual), 0, 100)`: 10% slower than usual ≈ 34, 10% faster ≈ 64.
+- `game score = speedScore − 5 × (false starts beyond 2)`, clamped to 0–100.
+- `usual` is a blend: a device reference (phone 3.0/s ≈ 330 ms, watch 2.7/s ≈ 370 ms) mixed with the median speed
+  of the same device's earlier valid tests in the last 28 days, personal share = min(tests, 3) / 3. The first test
+  is scored against the reference alone; from the fourth on, against the player's own usual.
+- Valid tests of today that have no score are scored on the next refresh.
 
 ## 4.7 Device-specific baselines
 
@@ -298,11 +305,10 @@ never mixed without normalization.
 
 # 5. Peak Cognitive Window
 
-- Uses the last 28 days of valid sessions of the current game version (older practice-flagged games and games of an
-  earlier version excluded). Eligible only with ≥ 7 observation days and, in every window, ≥ 4 valid sessions on
-  ≥ 3 distinct days (model v2).
-- Performance per session is normalized per device (robust z of the accuracy error against that device's own
-  28-day median and MAD, sign flipped so higher is better), then averaged per window.
+- Uses the last 28 days of valid tests of the current game version. Eligible only with ≥ 7 observation days and, in
+  every window, ≥ 4 valid tests on ≥ 3 distinct days (model v3).
+- Performance per test is normalized per device (robust z of the speed against that device's own 28-day median and
+  MAD, higher is faster), then averaged per window.
 - `peak = argmax(mean performance)`. If the gap to the runner-up is smaller than its standard error (minimum 0.2),
   the result is `NO_CLEAR_PEAK`. Only broad windows are predicted.
 - Stored: predicted window, per-window performance, confidence, valid session count, last update, model version.
@@ -321,11 +327,11 @@ never mixed without normalization.
 | Coverage | Full days of data | Confidence |
 |---:|---:|---|
 | ≥ 90% | ≥ 7 | High |
-| ≥ 70% | ≥ 3 | Medium |
+| ≥ 50% | ≥ 3 | Medium |
 | otherwise | | Low |
 
 - Next to the score: the level, "N of M score parts · D days of data" (parts = sleep, heart, activity, light, game; not the data sources Setup counts), and below High what would raise it
-  ("To raise it: add a Beat the Clock game; 2 more days of data."). Phone (Home and Why this score) and watch.
+  ("To raise it: add a Reaction Test; 2 more days of data."). Phone (Home and Why this score) and watch.
 
 Confidence and classification are independent.
 
@@ -400,7 +406,7 @@ never resets baselines.
 - **Phone sensors:** ambient light availability, sampling status and coverage.
 - **Devices:** paired watch, sync status, watch sensors (existing on/off grid with confirmation before turning one
   off).
-- **Beat the Clock:** nothing to set. Game rules are identical on phone and watch and not editable.
+- **Reaction Test:** nothing to set. Game rules are identical on phone and watch and not editable.
 - **Scoring weights:** active configuration, five editable weights, validation, defaults, confirmed reset, version
   and update time.
 - **Personal baselines:** per metric median, MAD, sample count, personal share, calibration version.
@@ -425,7 +431,7 @@ never resets baselines.
 | Activity intensity | Exercise sessions | Activity |
 | Low-movement time | Hourly steps | Activity, if reliable |
 | Ambient light | Phone `TYPE_LIGHT` | Circadian, if enough samples |
-| Beat the Clock | Phone and watch | Cognitive, if valid |
+| Reaction Test | Phone and watch | Cognitive, if valid |
 
 ## 10.2 Optional extras (deduction only, §6.1)
 
@@ -476,7 +482,7 @@ normalized domain metrics.
 # 13. Architecture
 
 - **Domain (`shared/commonMain`, no Android APIs):** metric models, validation, normalization, baseline engine,
-  scoring engine, scoring configuration manager, Beat the Clock engine, peak-window predictor, Moment preparation
+  scoring engine, scoring configuration manager, Reaction Test engine, peak-window predictor, Moment preparation
   engine, capability models.
 - **Data:** SQLDelight database (`HerculesDatabase`); repositories for health metrics, sleep, light, assessments,
   Moments, scoring configuration, baselines.
@@ -523,7 +529,7 @@ Sources are never summed. Health Connect has no heart or HRV sensor of its own; 
 
 # 15. Wear OS companion
 
-The watch runs Beat the Clock independently (same rules, monotonic timing, interruption handling), collects
+The watch runs Reaction Test independently (same shared test loop, monotonic timing; leaving the app stops the test), collects
 supported data with `PassiveMonitoringClient` (batched, unpredictable delivery), stores everything locally first,
 and keeps working without the phone. `MeasureClient` is only for short explicit measurements and `ExerciseClient`
 only for explicit workouts. Missing capabilities are detected and handled without crashing.
@@ -562,7 +568,7 @@ Raw observations are stored separately from derived scores.
 |---|---|---|
 | HealthMetric | `health_metric` | Extensible for every metric type, with unit, source package and device, quality, collection method |
 | SleepSession | `sleep_session` (all provider sessions) → `sleep_night` (the resolved night) | Stages and efficiency when present |
-| CognitiveSession / CognitiveRound | `cognitive_session`, `cognitive_round` | Device, window, practice flag, scores, game version |
+| CognitiveSession / CognitiveRound | `cognitive_session`, `cognitive_round` | Device, window, speed, median ms, lapses, false starts, scores, game version; one round row per trial |
 | UserBaseline | `user_baseline` | Metric, device, window, median, MAD, samples, calibration version |
 | ScoringConfiguration | `scoring_config` | Full history, one active |
 | ReadinessScore | `readiness_day` | Score or insufficient, classification, confidence, coverage, dimensions, config id and version, weights, engine version |
@@ -604,7 +610,7 @@ invalid data. Integration and device-compatibility checks follow §22 of the mas
 # 23–24. Roadmap and scientific validation
 
 Weights and formulas are hypotheses. Collect 4–8 weeks of data before tuning; evaluate each signal's added value;
-avoid circular validation (Beat the Clock is part of the CRS, so the CRS predicting it proves nothing); no machine
+avoid circular validation (Reaction Test is part of the CRS, so the CRS predicting it proves nothing); no machine
 learning in V1; promote optional metrics only after their value and overlap are evaluated.
 
 # 25. References

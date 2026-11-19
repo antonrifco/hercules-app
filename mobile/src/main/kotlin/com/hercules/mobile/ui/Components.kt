@@ -119,7 +119,7 @@ val Tone.color: Color
         Tone.ACTION -> Cyan
     }
 
-/** One hue per Beat the Clock window on the day strip. */
+/** One hue per Reaction Test window on the day strip. */
 val AssessmentWindow.color: Color
     get() = when (this) {
         AssessmentWindow.MORNING -> Color(0xFFFFD166)   // sunrise yellow
@@ -167,6 +167,8 @@ private val zone get() = ZoneId.systemDefault()
 private fun fmt(pattern: String, ms: Long) = DateTimeFormatter.ofPattern(pattern, UiLocale).format(Instant.ofEpochMilli(ms).atZone(zone))
 
 fun clockOf(ms: Long) = fmt("HH:mm", ms)
+/** "Tue 18 Nov, 21:10": when a reading was taken. */
+fun stampOf(ms: Long) = fmt("EEE, d MMM, HH:mm", ms)
 fun longDate(ms: Long) = fmt("EEEE, d MMMM", ms)
 fun shortDate(ms: Long) = fmt("EEE, d MMM", ms)
 fun weekdayShort(ms: Long) = fmt("EEE", ms)

@@ -4,7 +4,7 @@
 
 ![Hercules — Know when your brain is ready.](docs/images/hercules-hero.jpg)
 
-**Know when your brain is ready.** Hercules turns the signals your phone, watch and Health Connect already collect (sleep, heart rate variability, resting heart rate, activity, daylight) plus a 2-minute timing game, **Beat the Clock**, into a daily **Cognitive Readiness Score (0–100)**. It shows how much to trust that number, finds the time of day you tend to think best, and helps you prepare for important **Moments** in the next 7 days.
+**Know when your brain is ready.** Hercules turns the signals your phone, watch and Health Connect already collect (sleep, heart rate variability, resting heart rate, activity, daylight) plus a 3-minute reaction test, **Reaction Test**, into a daily **Cognitive Readiness Score (0–100)**. It shows how much to trust that number, finds the time of day you tend to think best, and helps you prepare for important **Moments** in the next 7 days.
 
 Android phone and Wear OS watch today (Kotlin Multiplatform), built so iOS and watchOS can follow with the same core logic. The full product and technical specification is [`docs/SPEC.md`](docs/SPEC.md).
 
@@ -21,7 +21,7 @@ Hercules answers three questions, in three menus:
 | Question | Menu |
 |---|---|
 | *How ready am I to perform cognitively today?* | **Home**: score, level, confidence, why, one next step |
-| *When do I tend to perform best?* | **Home**: Peak Cognitive Window, once enough Beat the Clock games exist |
+| *When do I tend to perform best?* | **Home**: Peak Cognitive Window, once enough reaction tests exist |
 | *What can I do to prepare for an important Moment?* | **Moments**: up to 5 Moments, 7 days ahead, with preparation status |
 
 **Setup** holds Health Connect, sensors and devices, scoring weights, baselines, reminders, data and legal pages.
@@ -29,8 +29,8 @@ Hercules answers three questions, in three menus:
 ## 2. Daily flow
 
 1. **Data arrives on its own.** Health Connect is read when the app opens, every 5 minutes while it is open, and about every 15 minutes in the background (the watch records its sensors continuously and hands new readings to the phone within about 10 minutes; the phone also asks the watch for them every 15 minutes while it is connected). Every new batch of data recalculates the score. "Sync now" is optional. The Hercules watch is one more provider.
-2. **A score appears from the first data point.** One night of sleep or one Beat the Clock game is enough. The confidence line under the score says how far to trust it.
-3. **Beat the Clock (optional, any time, ~2 minutes).** Three rounds: hold a target of 15–19 s, then 20–24 s, then 25–30 s, and tap STOP when you think the time is up. Each round counts "1… 2… 3…" so you get the pace, then the count disappears. The first game is scored against a typical-player reference; from the third game on, against your own baseline. Phone and watch keep separate baselines.
+2. **A score appears from the first data point.** One night of sleep or one Reaction Test is enough. The confidence line under the score says how far to trust it.
+3. **Reaction Test (optional, any time, 3 minutes).** A reaction test modelled on the brief Psychomotor Vigilance Test (PVT-B), the standard measure of how tiredness slows attention. Herc pops up every 1 to 4 seconds; tap anywhere as fast as you can, 45 times (about 3 minutes). The screen shows how far you are ("3 of 45") and a timer that runs from Herc's appearance until your tap. Tapping before he appears is a false start. The score compares your reaction speed with your usual (50 = usual) and shows your typical reaction time, slow reactions (500 ms+) and false starts. The first test is scored against a typical-player reference; from the fourth on, against your own usual. Phone and watch keep separate baselines, since their screens respond differently.
 4. **One next step.** The coach (`Coach.kt`) picks the single most useful action: play, prepare for a Moment, reflect on one, sleep earlier, or use your peak window. Phone and watch say the same thing.
 5. **Sleep looks wrong?** Tap **Edit times** (or **Add sleep**) in the Sleep section. A corrected night is never overwritten by automatic detection.
 
@@ -38,9 +38,11 @@ Hercules answers three questions, in three menus:
 
 ![Herc: Prime, Good, Fair, Low, Drained, no score](docs/images/hercules-mascot.png)
 
-**Reminders** (all optional, in Setup): morning score, Beat the Clock, Moment prep (evening before and shortly ahead), bedtime, after a Moment, and focus start (off by default). **Only one device delivers each reminder:** the watch while it is worn, the phone otherwise.
+**Reminders** (all optional, in Setup): morning score, Reaction Test, Moment prep (evening before and shortly ahead), bedtime, after a Moment, and focus start (off by default). **Only one device delivers each reminder:** the watch while it is worn, the phone otherwise.
 
-**Watch:** score with Herc, level and confidence, one next step, today's pulse, sleep and steps, Beat the Clock (same rules as the phone), upcoming Moments, and a tracking-status screen. A **watch-face complication** ("Hercules score") puts the score on the watch face; tapping it opens the app.
+**Home-screen widgets** (Setup › Home screen widgets): today's score with a Test Reaction button (2×2), today's stats (2×2) and this week's scores (4×2). They update whenever the score does. On Xiaomi, allow *Home screen shortcuts* for Hercules first.
+
+**Watch:** score with Herc, level and confidence, one next step, today's pulse, sleep and steps, Reaction Test (same rules as the phone), live pulse while the app is open, Sync now, upcoming Moments, and a tracking-status screen. A **watch-face complication** ("Hercules score") puts the score on the watch face; tapping it opens the app.
 
 ## 3. Reading the score
 
@@ -57,20 +59,20 @@ Hercules answers three questions, in three menus:
 | Signals in today | Full days of data | Confidence |
 |---|---|---|
 | ≥ 90% of the weighted signals | ≥ 7 | High |
-| ≥ 70% | ≥ 3 | Medium |
+| ≥ 50% (sleep alone is 65%) | ≥ 3 | Medium |
 | less | | Low |
 
-It reads like *"Medium confidence · 4 of 5 score parts · 5 days of data"*, and below High it says what would raise it (*"To raise it: add a Beat the Clock game; 2 more days of data."*). **Why this score** opens from the score and shows every dimension, metric, deduction and the configuration used.
+It reads like *"Medium confidence · 4 of 5 score parts · 5 days of data"*, and below High it says what would raise it (*"To raise it: add a Reaction Test; 2 more days of data."*). **Why this score** opens from the score and shows every dimension, metric, deduction and the configuration used.
 
-## 4. How the score is built (default configuration v2)
+## 4. How the score is built (default configuration v4)
 
 | Dimension | Weight | What is measured | Evidence |
 |---|---|---|---|
-| Sleep & Recovery | 45% | 3-night sleep load (0.60 / 0.25 / 0.15; 7–9 h = full marks) 55%, sleep regularity 25%, continuity 20% | Van Dongen 2003, Lim & Dinges 2010, Watson 2015, Phillips 2017 |
-| Cardiovascular | 20% | HRV (ln RMSSD, 3-night average vs. your 28-day usual) 70%, resting heart rate vs. usual 30% | Plews 2013/2014, Buchheit 2014, Forte 2019 |
+| Sleep & Recovery | 65% | 3-night sleep load (0.60 / 0.25 / 0.15; 7–9 h = full marks) 55%, sleep regularity 25%, continuity 20% | Van Dongen 2003, Lim & Dinges 2010, Watson 2015, Phillips 2017 |
+| Cardiovascular | 10% | HRV (ln RMSSD, 3-night average vs. your 28-day usual) 70%, resting heart rate vs. usual 30% | Plews 2013/2014, Buchheit 2014, Forte 2019 |
 | Physical Activity | 10% | Yesterday's steps, exercise minutes, low-movement hours (more is not always better) | Chang 2012, Wheeler 2020 |
 | Circadian Alignment | 5% | Phone light sensor: bright mornings and days, dim evenings | Brown 2022 |
-| Cognitive Performance | 20% | Today's Beat the Clock: accuracy, consistency, bias. One game counts 60% of this weight, two 80%, three or more in full | |
+| Cognitive Performance | 10% | Today's Reaction Test: reaction speed (median of the day's tests). One test counts 60% of this weight, two 80%, three or more in full | |
 
 - **Missing is never zero.** A missing dimension is left out and the others are re-weighted; it lowers confidence, not the score.
 - **Optional extras only subtract** (max −10 in total, after 7 days of history): breathing rate or skin temperature clearly above your usual (−5 each), low overnight oxygen (−5), glucose under 3.9 mmol/L in the last 24 hours (−5) or under 3.0 (−10), for about 15 minutes on a CGM (one dip is ignored) or one meter reading. A low glucose reading from the last 3 hours also shows a live banner on Home.
@@ -80,11 +82,11 @@ It reads like *"Medium confidence · 4 of 5 score parts · 5 days of data"*, and
 
 ## 5. Peak Cognitive Window
 
-Each Beat the Clock game is filed under morning (0–4 h after waking), afternoon (4–8 h) or evening (8 h+). After 7 days, with at least 4 valid games on 3 different days in every part of the day (current game version only), Hercules names the part of the day you perform best, or says there is no clear peak.
+Each Reaction Test is filed under morning (0–4 h after waking), afternoon (4–8 h) or evening (8 h+). After 7 days, with at least 4 valid tests on 3 different days in every part of the day (current game version only), Hercules names the part of the day you perform best, or says there is no clear peak.
 
 ## 6. Moments (up to 7 days ahead)
 
-Add a title, urgency (Normal or Critical), date and hour. Each Moment gets a **preparation status**, *On Track*, *Needs Attention* or *Insufficient Data*, from your recent readiness, sleep and recovery trends, activity, Beat the Clock and whether the hour falls in your peak window. Recommendations depend on time left (5–7 days: build sleep regularity; 1–2 days: protect sleep; event day: current readiness and peak alignment). The time is treated as fixed: advice is about preparing, not rescheduling. Afterwards, one tap records how it went.
+Add a title, urgency (Normal or Critical), date and hour. Each Moment gets a **preparation status**, *On Track*, *Needs Attention* or *Insufficient Data*, from your recent readiness, sleep and recovery trends, activity, Reaction Test and whether the hour falls in your peak window. Recommendations depend on time left (5–7 days: build sleep regularity; 1–2 days: protect sleep; event day: current readiness and peak alignment). The time is treated as fixed: advice is about preparing, not rescheduling. Afterwards, one tap records how it went.
 
 ## 7. Sensors are your choice
 
@@ -109,11 +111,11 @@ Add a title, urgency (Normal or Critical), date and hour. Each Moment gets a **p
 │  HR, steps, calories, distance, floors      │ batch  │  store samples → insights → readiness refresh      │
 │  + user activity state (asleep/awake) ──────┼───────►│  → push WatchState back to the watch               │
 │ Sync status: "Sent to phone · 2m ago"       │MessageC│ Compose UI: Today · Plan · Data(+Sensors)          │
-│ Home: score, confidence, Beat the Clock     │◄───────┤ DataClient: /hercules/state, /hercules/sensors/*   │
+│ Home: score, confidence, Reaction Test     │◄───────┤ DataClient: /hercules/state, /hercules/sensors/*   │
 │ Sensors screen ◄──── /hercules/sensors ────►│DataCli.│ NoopRemoteSink → (future) HttpRemoteSink → backend │
 └──────────────────────┬──────────────────────┘        └──────────────────────────┬─────────────────────────┘
                        └───────────── shared (Kotlin Multiplatform) ──────────────┘
-      readiness/ Scoring · Assessment (Beat the Clock) · Moments · Stats   cognitive/ CognitiveService · Coach
+      readiness/ Scoring · Assessment (Reaction Test) · Moments · Stats   cognitive/ CognitiveService · Coach
       SQLDelight DB · SensorConfig · SyncService/WireCodec · DemoData           (Android now, iOS/watchOS next)
 ```
 
@@ -123,8 +125,8 @@ All scoring and coaching logic is in `shared`, so the watch can compute a score 
 
 | Module | Contents |
 |---|---|
-| `shared/` | `readiness/` `Scoring.kt` (dimensions, CRS, confidence, extras), `Assessment.kt` (Beat the Clock, peak window), `Moments.kt`, `HealthData.kt`, `Stats.kt` · `cognitive/` `CognitiveService` (orchestration) + `CognitiveStore`, `Coach`, `Nudges`, `ReadinessEngine` (sleep analysis) · `model/`, `insights/`, `data/` watch samples and daily summaries · `sensors/` · `sync/` batch sync + wire format · `demo/` synthetic data · `sqldelight/` schema |
-| `wear/` | `health/` passive monitoring, sleep, sensor settings · `sync/` phone sink, periodic worker, `WatchStateSource` · `notify/` reminders · `ui/` home, Beat the Clock, Moments (Wear Compose M3) |
+| `shared/` | `readiness/` `Scoring.kt` (dimensions, CRS, confidence, extras), `Assessment.kt` (Reaction Test, peak window), `Moments.kt`, `HealthData.kt`, `Stats.kt` · `cognitive/` `CognitiveService` (orchestration) + `CognitiveStore`, `Coach`, `Nudges`, `ReadinessEngine` (sleep analysis) · `model/`, `insights/`, `data/` watch samples and daily summaries · `sensors/` · `sync/` batch sync + wire format · `demo/` synthetic data · `sqldelight/` schema |
+| `wear/` | `health/` passive monitoring, sleep, sensor settings · `sync/` phone sink, periodic worker, `WatchStateSource` · `notify/` reminders · `ui/` home, Reaction Test, Moments (Wear Compose M3) |
 | `mobile/` | `health/` Health Connect reader, background worker, phone light sensor · `sync/` receives watch batches · `notify/` reminders · `ui/` Home (`TodayScreen`, `CoachCards`), Moments (`PlanScreen`), Setup (`DataScreen`), `BeatTheClockScreen`, onboarding (`Journey`), legal |
 
 ## Sensors and what they're used for
@@ -143,7 +145,7 @@ Only sensors that are **enabled** (`SensorConfig`) and **supported** by the watc
 
 - **Storage:** SQLDelight (`HerculesDatabase`). Watch data: `sample`, `workout_session`, `daily_summary`, `personal_record`, `sleep_night`. Readiness: `health_metric`, `sleep_session`, `exercise_session`, `light_sample`, `cognitive_session`, `cognitive_round`, `user_baseline`, `scoring_config`, `readiness_day` (JSON, with config and engine version), `peak_window`. Moments: `plan_event`, `prep_task_done`, `event_reflection`, `moment_snapshot`. Settings: `kv`.
 - **Watch → phone:** every 15 minutes (WorkManager) and while the app is open. Batches go over `MessageClient` on `/hercules/sync/v1`. The phone acks the stored IDs, and only acked rows are marked synced. Sample IDs are deterministic, so retries are idempotent.
-- **Phone → watch:** after each refresh the phone writes `WatchState` (score with confidence, next step, Moments) to DataClient `/hercules/state`. Beat the Clock games sync both ways and are stored once per id. The watch uses it when it is less than 6 hours old and from today; otherwise it computes locally.
+- **Phone → watch:** after each refresh the phone writes `WatchState` (score with confidence, next step, Moments) to DataClient `/hercules/state`. reaction tests sync both ways and are stored once per id. The watch uses it when it is less than 6 hours old and from today; otherwise it computes locally.
 - **Sensor choice:** `/hercules/sensors/config`, written by either side; the newest `updatedMs` wins. The watch reports back on `/hercules/sensors/report`.
 - **Backend (future):** the phone keeps everything queued (`synced = 0`). Swap `NoopRemoteSink` for an HTTP sink and set `SERVER_SYNC_ENABLED`. The wire contract is in `docs/contracts/sample-batch.v1.schema.json`.
 
@@ -152,7 +154,7 @@ Only sensors that are **enabled** (`SensorConfig`) and **supported** by the watc
 Requirements: JDK 17+ (21 tested) and the Android SDK (compileSdk 36).
 
 ```bash
-./gradlew :shared:testDebugUnitTest                  # unit tests: scoring, confidence, Beat the Clock, peak, moments, coach, sync, DB
+./gradlew :shared:testDebugUnitTest                  # unit tests: scoring, confidence, Reaction Test, peak, moments, coach, sync, DB
 ./gradlew :wear:assembleDebug :mobile:assembleDebug
 ./gradlew :wear:lintDebug :mobile:lintDebug
 ```
@@ -169,14 +171,14 @@ adb -s <watch> install -r wear/build/outputs/apk/debug/wear-debug.apk
 
 Both apps share the `applicationId` `com.hercules.app`, which the Wearable Data Layer requires.
 
-**Try it without a watch (debug builds only):** load synthetic sleep, HRV, resting HR, steps, light and Beat the Clock games plus sample Moments:
+**Try it without a watch (debug builds only):** load synthetic sleep, HRV, resting HR, steps, light and reaction tests plus sample Moments:
 
 ```bash
 adb shell am start -n com.hercules.app/com.hercules.mobile.ui.MainActivity --ez demo true
 ```
 
 You can also use **Setup → Developers → Load demo data**.
-The same page has a **Score check**: how well the body part of your score has tracked your Beat the Clock results (needs 30 days with both).
+The same page has a **Score check**: how well the body part of your score has tracked your Reaction Test results (needs 30 days with both).
 
 The watch has the same switch, so its UI can be checked on an unpaired Wear OS emulator (grant the sensor permissions first, or tap Allow):
 
@@ -219,7 +221,7 @@ The UI is designed as a **precision instrument**, not a wellness toy: matte blac
 |---|---|
 | Onboarding 01 · Meet Herc | `ill_score`: head profile inside a precision dial |
 | Onboarding 02 · Health Connect | `ill_sleep`: sleep wave flowing into a watch |
-| Onboarding 03 · Beat the Clock | `ill_checkin`: rings aligning |
+| Onboarding 03 · Reaction Test | `ill_checkin`: rings aligning |
 | Onboarding 04 · Moments, and the empty Moments screen | `ill_plan`: seven ascending platforms to a diamond |
 | Onboarding 05 · The watch | `ill_no_watch`: broken signal arc |
 

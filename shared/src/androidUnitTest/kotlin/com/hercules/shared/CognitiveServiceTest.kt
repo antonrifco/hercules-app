@@ -72,7 +72,7 @@ class CognitiveServiceTest {
         val peak = assertNotNull(cognitive.store.latestPeak())
         assertEquals(PeakResult.PREDICTED, peak.result)
         assertEquals(AssessmentWindow.MORNING, peak.window)
-        assertTrue(cognitive.store.baselines().any { it.device == DeviceKind.PHONE && it.window == null && it.metric == "BTC_ACCURACY" })
+        assertTrue(cognitive.store.baselines().any { it.device == DeviceKind.PHONE && it.window == null && it.metric == "BTC_SPEED" })
 
         val events = cognitive.upcoming()
         val pitch = events.first { it.event.id == "demo-pitch" }
@@ -114,11 +114,10 @@ class CognitiveServiceTest {
     @Test fun beatTheClockScoresFromTheFirstGameAnyTimeAnyNumber() = runTest {
         val (repo, insights, cognitive) = services()
         val wake = cognitive.wakeMs("2026-11-10")
-        fun rounds(id: String) = listOf(15_000L, 22_000L, 28_000L).mapIndexed { i, t -> CognitiveRound("$id:$i", id, i, t, t + 300, RoundValidity.VALID) }
+        fun rounds(id: String) = (0 until 30).map { BeatTheClock.reaction("$id:$it", id, it, 2_000, 330) }
         val at = AssessmentWindow.MORNING.startMs(wake) + 60_000
         val first = cognitive.recordAssessment("a", DeviceKind.PHONE, "phone", at, at + 60_000, rounds("a"))
         assertEquals(AssessmentWindow.MORNING, first.window)
-        assertFalse(first.practice)
         assertNotNull(first.cognitiveScore) // scored from the very first game
         val second = cognitive.recordAssessment("b", DeviceKind.PHONE, "phone", at + 120_000, at + 180_000, rounds("b"))
         assertEquals(AssessmentWindow.MORNING, second.window) // any time counts, as often as you like
@@ -136,28 +135,29 @@ class CognitiveServiceTest {
 
     @Test fun todaysUnscoredGamesAreScoredOnRefresh() = runTest {
         val (_, _, cognitive) = services()
-        fun rounds(id: String) = listOf(15_000L, 22_000L, 28_000L).mapIndexed { i, t -> CognitiveRound("$id:$i", id, i, t, t + 900, RoundValidity.VALID) }
+        fun rounds(id: String) = (0 until 30).map { BeatTheClock.reaction("$id:$it", id, it, 2_000, 420) }
         val today = cognitive.today()
-        // A game saved under the old rules: valid, but no score ("locked").
+        // A valid game saved without a score ("locked").
         val old = BeatTheClock.finish("old", DeviceKind.PHONE, "phone", null, today, now - 60_000, now, rounds("old"), emptyList())
-            .copy(accuracyScore = null, consistencyScore = null, biasScore = null, cognitiveScore = null, gameVersion = 2)
+            .copy(speedScore = null, cognitiveScore = null)
         cognitive.store.saveSession(old)
         cognitive.refresh()
         val again = cognitive.store.session("old")!!
         assertNotNull(again.cognitiveScore)
-        assertEquals(2, again.gameVersion)
+        assertEquals(BeatTheClock.GAME_VERSION, again.gameVersion)
     }
 
     @Test fun energyAndStressAreStoredButNeverScored() = runTest {
         val (_, _, cognitive) = services()
-        fun rounds(id: String) = listOf(15_000L, 22_000L, 28_000L).mapIndexed { i, t -> CognitiveRound("$id:$i", id, i, t, t + 300, RoundValidity.VALID) }
+        fun rounds(id: String) = (0 until 30).map { BeatTheClock.reaction("$id:$it", id, it, 2_000, 330) }
         val plain = cognitive.recordAssessment("x", DeviceKind.PHONE, "phone", now, now + 60_000, rounds("x"))
         val rated = cognitive.recordAssessment("y", DeviceKind.WATCH, "watch", now, now + 60_000, rounds("y"), energy = 9, stress = 2)
         assertNull(plain.energy)
         assertEquals(5, rated.energy) // clamped to 1..5
         assertEquals(2, cognitive.store.session("y")?.stress)
         assertEquals(5, cognitive.store.session("y")?.energy)
-        assertEquals(plain.accuracyScore, rated.accuracyScore)
+        // The self-report never moves the score: same as the same game scored without it.
+        assertEquals(BeatTheClock.finish("z", DeviceKind.WATCH, "watch", null, rated.dayKey, now, now + 60_000, rounds("z"), emptyList()).speedScore, rated.speedScore)
         assertEquals(plain.status, rated.status)
     }
 

@@ -29,7 +29,7 @@ class WatchSyncListenerService : WearableListenerService() {
                 val (batch, ack) = WireCodec.decodeBatchWithAck(request)
                 g.repo.insertSamples(batch.samples)
                 g.repo.upsertSummarizedSessions(batch.sessions)
-                // Beat the Clock sessions from the watch: stored by id, so a retried batch changes nothing.
+                // Reaction Test sessions from the watch: stored by id, so a retried batch changes nothing.
                 g.cognitive.applyRemoteSessions(batch.assessments)
                 g.insights.refresh(g.insights.daysOf(batch.samples) + batch.sessions.map { it.dayKey })
                 g.markWatchSync(System.currentTimeMillis())

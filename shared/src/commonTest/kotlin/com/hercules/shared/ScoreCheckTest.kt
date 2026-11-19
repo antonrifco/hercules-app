@@ -22,7 +22,7 @@ class ScoreCheckTest {
 
     private fun readiness(dayKey: String, asleepMinutes: Int, game: Int): Readiness {
         val calc = ReadinessCalculator().calculate(
-            DayInputs(dayKey, NightInput(dayKey, 0, 1, asleepMinutes, 20, 180.0), emptyList(), 45.0, List(20) { 45.0 }, 58.0, List(20) { 58.0 }, emptyList(), null, null, CognitiveInput(game, game, game, "Phone")),
+            DayInputs(dayKey, NightInput(dayKey, 0, 1, asleepMinutes, 20, 180.0), emptyList(), 45.0, List(20) { 45.0 }, 58.0, List(20) { 58.0 }, emptyList(), null, null, CognitiveInput(game, "Phone")),
             DefaultScoring.DEFAULT,
         )
         val s = calc.score!!
@@ -30,8 +30,8 @@ class ScoreCheckTest {
     }
 
     private fun game(dayKey: String, score: Int, n: Int = 0) = CognitiveSession(
-        "$dayKey-$n", DeviceKind.PHONE, "p", null, dayKey, 0, 1, SessionStatus.FULLY_VALID, false,
-        0.1, 0.05, 0.0, score, score, score, score, BeatTheClock.GAME_VERSION, emptyList(),
+        "$dayKey-$n", DeviceKind.PHONE, "p", null, dayKey, 0, 1, SessionStatus.FULLY_VALID,
+        3.0, 333.0, 0, 0, score, score, BeatTheClock.GAME_VERSION, emptyList(),
     )
 
     @Test fun spearmanFollowsOrderNotSize() {

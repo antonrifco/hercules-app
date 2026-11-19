@@ -16,7 +16,7 @@ interface SyncStore {
     suspend fun pendingSessions(limit: Long): List<SessionSummary>
     suspend fun markSynced(sampleIds: List<String>, sessionIds: List<String>)
 
-    /** Beat the Clock sessions waiting to be delivered (watch only). */
+    /** Reaction Test sessions waiting to be delivered (watch only). */
     suspend fun pendingAssessments(limit: Long): List<CognitiveSession> = emptyList()
     suspend fun markAssessmentsSynced(ids: List<String>) {}
 }
@@ -131,7 +131,7 @@ data class SyncBatchDto(
     val sentAt: String,
     val samples: List<SampleDto>,
     val sessions: List<SessionDto> = emptyList(),
-    /** Beat the Clock sessions with their rounds (watch → phone). Older receivers ignore the field. */
+    /** Reaction Test sessions with their rounds (watch → phone). Older receivers ignore the field. */
     val assessments: List<CognitiveSession> = emptyList(),
 )
 

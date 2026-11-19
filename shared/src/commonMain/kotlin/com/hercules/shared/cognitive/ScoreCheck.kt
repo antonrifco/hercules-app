@@ -38,7 +38,7 @@ object ScoreCheck {
 
     fun run(days: List<Readiness>, sessions: List<CognitiveSession>): Result {
         val games = sessions
-            .filter { it.gameVersion == BeatTheClock.GAME_VERSION && it.valid && !it.practice && it.cognitiveScore != null }
+            .filter { it.gameVersion == BeatTheClock.GAME_VERSION && it.valid && it.cognitiveScore != null }
             .groupBy { it.dayKey }
             .mapValues { (_, l) -> Stats.median(l.map { it.cognitiveScore!!.toDouble() })!! }
         val pairs = days.mapNotNull { d -> val b = bodyScore(d); val g = games[d.dayKey]; if (b != null && g != null) b to g else null }

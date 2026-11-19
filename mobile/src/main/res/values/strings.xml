@@ -1,3 +1,9 @@
 <resources>
     <string name="app_name">Hercules</string>
+    <string name="widget_score_label">Hercules score</string>
+    <string name="widget_score_desc">Today\'s score and a button to take the Reaction Test</string>
+    <string name="widget_today_label">Hercules today</string>
+    <string name="widget_today_desc">Steps, distance, resting pulse and energy burned</string>
+    <string name="widget_week_label">Hercules week</string>
+    <string name="widget_week_desc">Your score for each of the last 7 days</string>
 </resources>

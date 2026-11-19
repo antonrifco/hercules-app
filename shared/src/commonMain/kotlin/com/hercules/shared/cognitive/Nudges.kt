@@ -28,7 +28,7 @@ data class NudgePrefs(
     val evening: Boolean = true,
     val reflect: Boolean = true,
     val focus: Boolean = false,
-    /** A reminder when a Beat the Clock window opens. */
+    /** A reminder when a Reaction Test window opens. */
     val assess: Boolean = true,
 )
 
@@ -86,8 +86,8 @@ class NudgePlanner(private val dayKeys: DayKeys, private val coach: Coach) {
         if (prefs.assess && wakeMs != null && playsToday == 0) {
             out += Nudge(
                 "assess:$today", NudgeKind.ASSESS, wakeMs + ASSESS_AFTER_WAKE_MS,
-                "Beat the Clock?",
-                "A 2-minute game that shows how sharp you are today.",
+                "Time for a Reaction Test?",
+                "A 3-minute reaction test that shows how sharp you are today.",
                 NudgeTarget.ASSESS,
             )
         }

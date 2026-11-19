@@ -52,7 +52,7 @@ import kotlin.uuid.Uuid
 data class CombinedTask(val task: PrepTask, val moments: List<String>)
 
 /**
- * Orchestrates sleep resolution → inputs → CRS, Beat the Clock, the peak window and Moment preparation.
+ * Orchestrates sleep resolution → inputs → CRS, Reaction Test, the peak window and Moment preparation.
  * Pure domain rules live in `readiness`; this class only reads and writes the store. Same code on phone and watch.
  */
 /** Earlier days recalculated on every refresh, matching the Health Connect re-import window. */
@@ -314,15 +314,16 @@ class CognitiveService(
     }
 
     /**
-     * The day's Beat the Clock result from either device. Play once or many times: each part is the median of the
-     * day's scored runs, so one lucky or sloppy run doesn't swing it.
+     * The day's Reaction Test result from either device. Play once or many times: the median of the day's scored
+     * tests, so one lucky or sloppy test doesn't swing it.
      */
     private suspend fun cognitive(dayKey: String, nowMs: Long): CognitiveInput? {
         val runs = store.sessionsFrom(dayKeys.startOf(dayKey)).filter { it.dayKey == dayKey && it.scored && it.endMs <= nowMs }
         if (runs.isEmpty()) return null
-        fun med(f: (CognitiveSession) -> Int?) = Stats.median(runs.mapNotNull { f(it)?.toDouble() })!!.roundToInt()
-        val label = if (runs.size == 1) "1 run · ${runs[0].deviceKind.label}" else "Median of ${runs.size} runs"
-        return CognitiveInput(med { it.accuracyScore }, med { it.consistencyScore }, med { it.biasScore }, label, runs.size)
+        val score = Stats.median(runs.mapNotNull { it.cognitiveScore?.toDouble() })!!.roundToInt()
+        val ms = Stats.median(runs.mapNotNull { it.medianMs })?.roundToInt()
+        val label = (if (runs.size == 1) "1 test · ${runs[0].deviceKind.label}" else "Median of ${runs.size} tests") + (ms?.let { " · $it ms" } ?: "")
+        return CognitiveInput(score, label, runs.size)
     }
 
     // ---------------------------------------------------------------- refresh
@@ -406,27 +407,27 @@ class CognitiveService(
         val history = store.sessionsFrom(nowMs - BeatTheClock.BASELINE_DAYS * DAY_MS)
         for (d in DeviceKind.entries) {
             val base = BeatTheClock.baselineSessions(history, d, nowMs + 1)
-            val errs = base.mapNotNull { it.accuracyError }
-            if (errs.isEmpty()) continue
-            val share = if (errs.size >= BeatTheClock.MIN_BASELINE_SESSIONS) 1.0 else 0.0
-            list += StoredBaseline(MetricKey.BTC_ACCURACY.name, d, null, BaselineValue(Stats.median(errs)!!, Stats.mad(errs)!!, errs.size, share), "btc-${BeatTheClock.GAME_VERSION}", nowMs)
+            val speeds = base.mapNotNull { it.speed }
+            if (speeds.isEmpty()) continue
+            val share = if (speeds.size >= BeatTheClock.MIN_BASELINE_SESSIONS) 1.0 else 0.0
+            list += StoredBaseline(MetricKey.BTC_SPEED.name, d, null, BaselineValue(Stats.median(speeds)!!, Stats.mad(speeds)!!, speeds.size, share), "btc-${BeatTheClock.GAME_VERSION}", nowMs)
         }
         store.saveBaselines(list)
     }
 
     suspend fun evaluation(dayKey: String = today()): Evaluation? = store.evaluation(dayKey)
 
-    // ---------------------------------------------------------------- Beat the Clock
+    // ---------------------------------------------------------------- Reaction Test
 
-    /** Valid, non-practice runs played today, on either device. */
-    /** How well the body part of the score has tracked Beat the Clock over the last [ScoreCheck.WINDOW_DAYS] days. */
+    /** How well the body part of the score has tracked Reaction Test over the last [ScoreCheck.WINDOW_DAYS] days. */
     suspend fun scoreCheck(): ScoreCheck.Result {
         val from = dayKeys.plusDays(today(), -ScoreCheck.WINDOW_DAYS)
         return ScoreCheck.run(store.readinessRange(from, today()), store.sessionsFrom(dayKeys.startOf(from)))
     }
 
     suspend fun playsToday(dayKey: String = today()): Int =
-        store.sessionsFrom(dayKeys.startOf(dayKey)).count { it.dayKey == dayKey && it.valid && !it.practice }
+        store.sessionsFrom(dayKeys.startOf(dayKey)).count { it.dayKey == dayKey && it.valid }
+
 
 
     /**
@@ -455,10 +456,7 @@ class CognitiveService(
         return session
     }
 
-    /**
-     * Valid games from today that never got a score (played while a score still needed practice or a full
-     * baseline) are scored now, so nobody sees "locked" after playing.
-     */
+    /** Valid tests from today that never got a score are scored now, so nobody sees "locked" after playing. */
     private suspend fun rescoreUnscored(dayKey: String, nowMs: Long) {
         val history = store.sessionsFrom(nowMs - (BeatTheClock.BASELINE_DAYS + 1) * DAY_MS)
         val stale = history.filter { it.dayKey == dayKey && it.valid && it.cognitiveScore == null }
@@ -666,7 +664,7 @@ class CognitiveService(
         store.readinessRange(from, to).maxByOrNull { it.score }?.let { out += PersonalBest("Highest score", "${it.score}", it.dayKey) }
         store.sessionsFrom(dayKeys.startOf(from))
             .filter { it.gameVersion == BeatTheClock.GAME_VERSION && it.valid && it.cognitiveScore != null }
-            .maxByOrNull { it.cognitiveScore!! }?.let { out += PersonalBest("Sharpest Beat the Clock", "${it.cognitiveScore} / 100", it.dayKey) }
+            .maxByOrNull { it.cognitiveScore!! }?.let { out += PersonalBest("Fastest Reaction Test", "${it.cognitiveScore} / 100", it.dayKey) }
         store.sleepRange(from, to).maxByOrNull { it.asleepMinutes }?.let { out += PersonalBest("Longest sleep", formatDuration(it.asleepMinutes), it.dayKey) }
         dailyValues(HealthMetricType.STEPS_DAILY, from, to).filterValues { it > 0 }.maxByOrNull { it.value }
             ?.let { out += PersonalBest("Most steps", "${it.value.roundToInt()}", it.key) }

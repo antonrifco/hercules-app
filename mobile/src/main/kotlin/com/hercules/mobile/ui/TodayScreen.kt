@@ -175,7 +175,7 @@ private fun ConfidenceExplainer(calc: ReadinessCalculation) {
         VSpace(12.dp)
         Text("Coverage · $pct%", style = MaterialTheme.typography.bodyLarge, color = Text1)
         Text(
-            "${calc.signalsIn} of ${calc.signalsTotal} parts of the score (sleep, heart, activity, light, game) have data today, carrying $pct% of the score's weight. " +
+            "${calc.signalsIn} of ${calc.signalsTotal} parts of the score (sleep, heart, activity, light, reaction) have data today, carrying $pct% of the score's weight. " +
                 "Missing ones are left out, not counted as zero.",
             style = MaterialTheme.typography.bodySmall, color = LocalSubtle.current,
         )
@@ -230,7 +230,7 @@ private fun Banded(bright: Boolean = false, content: @Composable () -> Unit) {
 
 /**
  * Home. Order follows the questions people ask, most urgent first: How am I? (score, or what's missing) · What
- * unlocks it? (first week) · What do I do now? (next step, tips, Beat the Clock) · What's coming? (tonight in the
+ * unlocks it? (first week) · What do I do now? (next step, tips, Reaction Test) · What's coming? (tonight in the
  * evening, the next moment, the peak window, the day) · sleep and the week · today's counts.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -263,6 +263,7 @@ fun TodayScreen(
     var syncing by remember { mutableStateOf(false) }
     var totalsTick by remember { mutableIntStateOf(0) }
     val totals by produceState<HealthConnectImporter.DayTotals?>(null, nowMs, totalsTick) { value = g.healthConnect.todayTotals() }
+    val lastHc by produceState<Long?>(null, nowMs, totalsTick) { value = runCatching { g.healthConnect.lastImportMs() }.getOrNull() }
     val lowGlucose by produceState<Double?>(null, nowMs) { value = g.cognitive.lowGlucose(nowMs) }
 
     val sections = buildList<Pair<String, @Composable () -> Unit>> {
@@ -296,7 +297,7 @@ fun TodayScreen(
         add("sleep" to { SleepBlock(data.sleep, data.sleepWeek, data.today, g) })
         if (data.trend.size >= 2) add("week" to { Banded { WeekBlock(data.trend, data.sleepWeek, data.today, g) } })
         add("stats" to {
-            TodayStats(summary, totals, syncing) {
+            TodayStats(summary, totals, syncing, lastHc, lastSync) {
                 syncing = true
                 scope.launch {
                     g.importHealthAndRefresh()
@@ -346,23 +347,23 @@ fun TodayScreen(
     }
 }
 
-/** Beat the Clock today: optional, any time, as often as you like. Shows today's runs and the median that counts. */
+/** Reaction Test today: optional, any time, as often as you like. Shows today's runs and the median that counts. */
 @Composable
 private fun AssessCard(brief: DailyBrief, sessions: List<CognitiveSession>, onPlay: () -> Unit) {
     val a = brief.assess ?: return
-    val runs = sessions.filter { it.valid && !it.practice }.sortedBy { it.endMs }
+    val runs = sessions.filter { it.valid }.sortedBy { it.endMs }
     val scored = runs.mapNotNull { it.cognitiveScore }
     val median = scored.takeIf { it.isNotEmpty() }?.sorted()?.let { l -> if (l.size % 2 == 1) l[l.size / 2] else (l[l.size / 2 - 1] + l[l.size / 2]) / 2 }
-    Section("Beat the Clock", trailing = {
+    Section("Reaction Test", trailing = {
         Text(
-            "${runs.size} ${if (runs.size == 1) "game" else "games"} today",
+            "${runs.size} ${if (runs.size == 1) "test" else "tests"} today",
             fontFamily = Mono, fontSize = 12.sp, color = Cyan,
         )
     }) {
         Muted(
             when {
-                runs.isEmpty() -> "A 2-minute game that shows how sharp you are. Play any time, as often as you like."
-                else -> "Scores are out of 100. 50 is your usual; higher is sharper. Today counts the middle score of your games."
+                runs.isEmpty() -> "A 3-minute reaction test that shows how sharp you are. Take it any time, as often as you like."
+                else -> "Scores are out of 100. 50 is your usual; higher is faster. Today counts the middle score of your tests."
             },
         )
         if (runs.isNotEmpty()) {
@@ -485,7 +486,7 @@ internal fun ScoreBreakdown(calc: ReadinessCalculation) {
 
 /**
  * The signature view: one line for the whole day. Last night's sleep, the predicted peak focus window, today's
- * Beat the Clock runs and now, on a single time axis. Moments stay on the Moments tab. The canvas draws shapes plus a few numerals;
+ * reaction tests and now, on a single time axis. Moments stay on the Moments tab. The canvas draws shapes plus a few numerals;
  * anything wordy is normal layout that wraps.
  */
 @OptIn(ExperimentalLayoutApi::class)
@@ -501,7 +502,7 @@ internal fun DayStrip(dk: DayKeys, data: TodayData, nowMs: Long) {
     val tickStyle = TextStyle(color = subtle, fontSize = 10.sp)
     val wake = data.evaluation?.wakeMs
     val peakWindow = data.peak?.takeIf { it.result == PeakResult.PREDICTED }?.window
-    val runs = data.sessionsToday.filter { it.valid && !it.practice } // same runs the Beat the Clock card counts
+    val runs = data.sessionsToday.filter { it.valid } // same runs the Reaction Test card counts
 
     val tickH = with(density) { measurer.measure("00:00", tickStyle).size.height.toDp() }
     val pinZone = 0.dp // Moments live on the Moments tab only
@@ -555,7 +556,7 @@ internal fun DayStrip(dk: DayKeys, data: TodayData, nowMs: Long) {
                 val nowCrosses = nowMs in start..end && x(nowMs) in (lx - 6.dp.toPx())..(lx + txt.size.width + 6.dp.toPx())
                 if (lx > 6.dp.toPx() && !nowCrosses) drawText(txt, topLeft = Offset(lx, top + (sleepPx - txt.size.height) / 2))
             }
-            // The predicted peak glows on the band; each Beat the Clock run today is a dot.
+            // The predicted peak glows on the band; each Reaction Test today is a dot.
             drawRoundRect(rule, Offset(0f, bandY), Size(size.width, bandPx), CornerRadius(3.dp.toPx()))
             if (wake != null && peakWindow != null) {
                 val x0 = x(peakWindow.startMs(wake)); val x1 = x(peakWindow.endMs(wake))
@@ -577,7 +578,7 @@ internal fun DayStrip(dk: DayKeys, data: TodayData, nowMs: Long) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Legend(Brand.copy(alpha = 0.75f), "Sleep")
             if (peakWindow != null) Legend(Cyan, "Peak focus")
-            if (runs.isNotEmpty()) Legend(BtcColor, "Beat the Clock")
+            if (runs.isNotEmpty()) Legend(BtcColor, "Reaction Test")
             Legend(NowColor, "Now")
         }
     }
@@ -810,26 +811,37 @@ private fun WeekBlock(trend: List<Readiness>, sleepWeek: List<SleepNight>, today
 fun List<EventStatus>.nextRelevant(nowMs: Long): EventStatus? =
     firstOrNull { it.phase != PrepPhase.DONE && it.event.startMs > nowMs - 2 * 3_600_000L }
 
-@Composable
-internal fun TodayStats(s: DailySummary?, hc: HealthConnectImporter.DayTotals? = null, syncing: Boolean = false, onSync: (() -> Unit)? = null) {
-    // Same rule as the score: the Hercules watch (when worn today) and Health Connect are compared and the fuller
-    // reading wins, never summed. The watch's summary row starts at zero, so a watch zero means "not recorded".
+/** Today's numbers as shown on Home and the Today widget. */
+internal data class TodayNumbers(val steps: Long?, val km: Double?, val kcal: Double?, val floors: Long?, val resting: Long?, val peak: Long?)
+
+/**
+ * Same rule as the score: the Hercules watch (when worn today) and Health Connect are compared and the fuller reading
+ * wins, never summed. The watch's summary row starts at zero, so a watch zero means "not recorded".
+ */
+internal fun todayNumbers(s: DailySummary?, hc: HealthConnectImporter.DayTotals?): TodayNumbers {
     val worn = s != null && s.hrSampleCount > 0
     fun Long.orNull() = takeIf { it > 0 }
     fun Double.orNull() = takeIf { it > 0.0 }
     fun <T : Comparable<T>> fuller(a: T?, b: T?): T? = if (a != null && b != null) maxOf(a, b) else a ?: b
-    val steps = fuller(s?.steps?.orNull()?.takeIf { worn }, hc?.steps)
-    val km = fuller(s?.distanceMeters?.orNull()?.takeIf { worn }, hc?.distanceM)?.div(1000)
-    val kcal = fuller(s?.calories?.orNull()?.takeIf { worn }, hc?.activeKcal)
-    val floors = fuller(s?.floors?.orNull()?.takeIf { worn }, hc?.floors?.roundToInt()?.toLong())
-    val resting = listOfNotNull(s?.restingHr?.toLong(), hc?.restingHr).minOrNull()
-    val peak = fuller(s?.maxHr?.toLong(), hc?.maxHr)
+    return TodayNumbers(
+        steps = fuller(s?.steps?.orNull()?.takeIf { worn }, hc?.steps),
+        km = fuller(s?.distanceMeters?.orNull()?.takeIf { worn }, hc?.distanceM)?.div(1000),
+        kcal = fuller(s?.calories?.orNull()?.takeIf { worn }, hc?.activeKcal),
+        floors = fuller(s?.floors?.orNull()?.takeIf { worn }, hc?.floors?.roundToInt()?.toLong()),
+        resting = listOfNotNull(s?.restingHr?.toLong(), hc?.restingHr).minOrNull(),
+        peak = fuller(s?.maxHr?.toLong(), hc?.maxHr),
+    )
+}
+
+@Composable
+internal fun TodayStats(s: DailySummary?, hc: HealthConnectImporter.DayTotals? = null, syncing: Boolean = false, lastHcMs: Long? = null, lastWatchMs: Long? = null, onSync: (() -> Unit)? = null) {
+    val (steps, km, kcal, floors, resting, peak) = todayNumbers(s, hc)
     val stats = listOf(
         Stat(Icons.AutoMirrored.Rounded.DirectionsWalk, "Steps", steps?.let { "%,d".format(UiLocale, it) } ?: "--", "", "Movement today"),
         Stat(Icons.Rounded.Straighten, "Distance", km?.let { "%.1f".format(UiLocale, it) } ?: "--", "km", "Walked and run"),
         Stat(Icons.Rounded.Favorite, "Resting pulse", resting?.toString() ?: "--", "bpm", "Lower usually means more recovered"),
         Stat(Icons.Rounded.MonitorHeart, "Peak heart rate", peak?.toString() ?: "--", "bpm", "Highest reading today"),
-        Stat(Icons.Rounded.LocalFireDepartment, "Energy burned", kcal?.roundToInt()?.toString() ?: "--", "kcal", "Calories from activity"),
+        Stat(Icons.Rounded.LocalFireDepartment, "Energy burned", kcal?.let { "%,d".format(UiLocale, it.roundToInt()) } ?: "--", "kcal", "Calories from activity"),
         Stat(Icons.Rounded.Stairs, "Floors climbed", floors?.toString() ?: "--", "", "Flights of stairs"),
     )
     Section("Today", trailing = onSync?.let { sync ->
@@ -847,6 +859,14 @@ internal fun TodayStats(s: DailySummary?, hc: HealthConnectImporter.DayTotals? =
                 pair.forEach { StatTile(it, Modifier.weight(1f).fillMaxHeight()) }
             }
         }
+        // When the numbers were last refreshed, per source, so a stale tile is easy to spot.
+        VSpace(10.dp)
+        Text(
+            "Last retrieved:\n" +
+                "Health Connect - ${lastHcMs?.let { stampOf(it) } ?: "not yet"}\n" +
+                "Watch App - ${lastWatchMs?.let { stampOf(it) } ?: "not yet"}",
+            style = MaterialTheme.typography.bodySmall, color = LocalSubtle.current,
+        )
     }
 }
 

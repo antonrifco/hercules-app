@@ -28,7 +28,7 @@ import kotlin.random.Random
 
 /**
  * Realistic synthetic data for demos and tests: three weeks of Health Connect-style sleep, HRV, resting heart rate,
- * steps and exercise, Hercules watch heart rate, phone light readings, Beat the Clock sessions with a clear morning
+ * steps and exercise, Hercules watch heart rate, phone light readings, Reaction Test sessions with a clear morning
  * peak, and two Moments. The last night is deliberately short. Device and package "demo" make it easy to recognise.
  */
 object DemoData {
@@ -87,13 +87,21 @@ object DemoData {
         "demo:${type.name}:$dayKey", type, v, at, at, at, dayKey, PACKAGE, DEVICE_ID, DataQuality.VALID, CollectionMethod.HEALTH_CONNECT,
     )
 
-    /** Synthetic rounds: [skill] is the typical relative error (lower is sharper). */
-    private fun rounds(sessionId: String, skill: Double, rnd: Random): List<CognitiveRound> =
-        BeatTheClock.plan(rnd).mapIndexed { i, target ->
-            val err = (rnd.nextDouble(-1.0, 1.0) * skill * 1.6 - skill * 0.2)
-            val actual = (target * (1 + err)).roundToLong()
-            CognitiveRound("$sessionId:$i", sessionId, i, target, actual, RoundValidity.VALID)
+    /** A synthetic 3-minute reaction test: [typicalMs] is the usual reaction time (lower is sharper). */
+    private fun rounds(sessionId: String, typicalMs: Double, rnd: Random): List<CognitiveRound> {
+        val out = mutableListOf<CognitiveRound>()
+        repeat(BeatTheClock.TRIALS) {
+            val i = out.size
+            val delay = BeatTheClock.nextDelay(rnd)
+            out += if (rnd.nextInt(40) == 0) BeatTheClock.falseStart("$sessionId:$i", sessionId, i, delay)
+            else {
+                // Mostly near the usual, now and then a slow one (a lapse).
+                val rt = if (rnd.nextInt(25) == 0) typicalMs * 1.8 else typicalMs * (0.85 + rnd.nextDouble() * 0.3)
+                BeatTheClock.reaction("$sessionId:$i", sessionId, i, delay, rt.roundToLong())
+            }
         }
+        return out
+    }
 
     /** Fills the database and rebuilds three weeks of history, then adds two Moments. */
     suspend fun load(
@@ -145,10 +153,10 @@ object DemoData {
         store.upsertExercise(exercise)
         store.insertLight(light.filter { it.measuredMs <= nowMs })
 
-        // Beat the Clock on the phone: most windows of most days. Mornings are sharpest.
+        // Reaction Test on the phone: most windows of most days. Mornings are sharpest.
         val history = mutableListOf<CognitiveSession>()
         fun play(id: String, window: AssessmentWindow?, dayKey: String, at: Long, skill: Double) {
-            history += BeatTheClock.finish(id, DeviceKind.PHONE, DEVICE_ID, window, dayKey, at, at + 70_000, rounds(id, skill, rnd), history)
+            history += BeatTheClock.finish(id, DeviceKind.PHONE, DEVICE_ID, window, dayKey, at, at + 180_000, rounds(id, skill, rnd), history)
         }
         for (offset in -days..0) {
             val key = dk.plusDays(today, offset)
@@ -157,10 +165,10 @@ object DemoData {
                 val at = w.startMs(wake) + 20 * MIN
                 if (at > nowMs || (offset < 0 && rnd.nextInt(10) < 2)) continue
                 val skill = when (w) {
-                    AssessmentWindow.MORNING -> 0.06
-                    AssessmentWindow.AFTERNOON -> 0.10
-                    AssessmentWindow.EVENING -> 0.12
-                } * if (offset == 0) 1.3 else 1.0
+                    AssessmentWindow.MORNING -> 310.0
+                    AssessmentWindow.AFTERNOON -> 335.0
+                    AssessmentWindow.EVENING -> 350.0
+                } * if (offset == 0) 1.12 else 1.0
                 play("demo:btc:$key:${w.name}", w, key, at, skill)
             }
         }
