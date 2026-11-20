@@ -186,16 +186,4 @@ object DemoData {
         val pitch = if (dk.of(soon) == today) soon else dk.startOf(dk.plusDays(today, 1)) + 9 * HOUR
         cognitive.saveMoment("demo-pitch", "Pitching to Y Combinator", pitch, Urgency.NORMAL)
     }
-
-    /** Takes the demo back out: deletes what [load] wrote and rebuilds history from your own data only. */
-    suspend fun remove(insights: InsightsService, cognitive: CognitiveService, nowMs: Long, days: Int = 21) {
-        val dk = cognitive.dayKeys
-        val today = dk.of(nowMs)
-        cognitive.store.removeDemo()
-        insights.refresh((-days..0).mapTo(mutableSetOf()) { dk.plusDays(today, it) })
-        for (offset in -days..0) {
-            val key = dk.plusDays(today, offset)
-            cognitive.refresh(if (offset == 0) nowMs else dk.startOf(key) + 21 * HOUR)
-        }
-    }
 }

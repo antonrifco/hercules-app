@@ -11,6 +11,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
+import androidx.glance.Image
+import androidx.glance.ImageProvider
+import androidx.glance.layout.size
+import androidx.glance.text.TextAlign
+import com.hercules.mobile.ui.hercBitmap
+import com.hercules.mobile.ui.mood
 import androidx.glance.action.Action
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
@@ -47,18 +53,19 @@ import com.hercules.mobile.ui.color
 import com.hercules.mobile.ui.todayNumbers
 import com.hercules.shared.cognitive.Readiness
 import kotlinx.coroutines.flow.firstOrNull
+import com.hercules.shared.readiness.RETENTION_DAYS
 import java.time.LocalDate
 import kotlin.math.roundToInt
 
 /**
- * Three home-screen widgets (Jetpack Glance): today's score with a Reaction Test button, today's stats, and this week's
- * scores. They read the same database as the app and are redrawn after every recalculation ([Widgets.refresh]).
+ * Three home-screen widgets (Jetpack Glance): today's score with a Reaction Test button, today's stats, and the last 10
+ * days' scores. They read the same database as the app and are redrawn after every recalculation ([Widgets.refresh]).
  */
 object Widgets {
     enum class Kind(val title: String, val size: String, val blurb: String, val receiver: Class<*>) {
         SCORE("Score", "2×2", "Today's score and a button to take the Reaction Test.", ScoreWidgetReceiver::class.java),
-        TODAY("Today", "2×2", "Steps, distance, resting pulse and energy burned.", TodayWidgetReceiver::class.java),
-        WEEK("This week", "4×2", "Your score for each of the last 7 days.", WeekWidgetReceiver::class.java),
+        TODAY("Today", "2×2", "Steps, distance, resting pulse and last night's sleep.", TodayWidgetReceiver::class.java),
+        WEEK("Last 10 days", "4×2", "Your score for each of the last 10 days.", WeekWidgetReceiver::class.java),
     }
 
     suspend fun refresh(context: Context) {
@@ -100,6 +107,11 @@ private fun Card(onClick: Action, content: @Composable () -> Unit) {
 @Composable
 private fun Label(text: String) = Text(text.uppercase(), style = TextStyle(color = c(Text2), fontSize = 10.sp, fontWeight = FontWeight.Medium))
 
+/** Herc's face for the score's band (sleepy with no score yet), drawn the same as in the app. */
+@Composable
+private fun Herc(r: Readiness?, size: Int) =
+    Image(ImageProvider(hercBitmap(r?.band.mood(), size * 3)), "Herc", GlanceModifier.size(size.dp))
+
 // ------------------------------------------------------------------ 1. score + play
 
 class ScoreWidget : GlanceAppWidget() {
@@ -108,16 +120,18 @@ class ScoreWidget : GlanceAppWidget() {
         val r: Readiness? = runCatching { g.cognitive.store.readiness(g.cognitive.today()) }.getOrNull()
         provideContent {
             Card(open(context)) {
-                Column(GlanceModifier.fillMaxSize()) {
-                    Label("Hercules · today")
+                Column(GlanceModifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
                     Spacer(GlanceModifier.defaultWeight())
-                    if (r == null) {
-                        Text("--", style = TextStyle(color = c(Text2), fontSize = 40.sp))
-                        Text("No score yet", style = TextStyle(color = c(Text2), fontSize = 12.sp))
-                    } else {
-                        Text("${r.score}", style = TextStyle(color = c(r.band.color), fontSize = 44.sp, fontWeight = FontWeight.Bold))
-                        Text("${r.band.label} · ${r.confidence.label.substringBefore(" ")}", style = TextStyle(color = c(Text1), fontSize = 12.sp), maxLines = 1)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Herc(r, 44)
+                        Spacer(GlanceModifier.width(6.dp))
+                        Text(r?.score?.toString() ?: "--", style = TextStyle(color = c(r?.band?.color ?: Text2), fontSize = 40.sp, fontWeight = FontWeight.Bold))
                     }
+                    Text(
+                        r?.let { "${it.band.label} · ${it.confidence.label.substringBefore(" ")}" } ?: "No score yet",
+                        style = TextStyle(color = c(if (r != null) Text1 else Text2), fontSize = 12.sp, textAlign = TextAlign.Center),
+                        maxLines = 1,
+                    )
                     Spacer(GlanceModifier.defaultWeight())
                     Box(
                         GlanceModifier.fillMaxWidth().height(34.dp).background(Cyan).cornerRadius(17.dp).clickable(open(context, "ASSESS")),
@@ -139,19 +153,27 @@ class TodayWidget : GlanceAppWidget() {
         val summary = runCatching { g.repo.observeDaily(g.cognitive.today()).firstOrNull() }.getOrNull()
         val hc = runCatching { g.healthConnect.todayTotals() }.getOrNull()
         val n: TodayNumbers = todayNumbers(summary, hc)
+        val sleep = runCatching { g.cognitive.store.sleep(g.cognitive.today()) }.getOrNull()
+        val r: Readiness? = runCatching { g.cognitive.store.readiness(g.cognitive.today()) }.getOrNull()
         provideContent {
             Card(open(context)) {
                 Column(GlanceModifier.fillMaxSize()) {
-                    Label("Today")
+                    Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Herc(r, 26)
+                        Spacer(GlanceModifier.width(6.dp))
+                        Label("Today")
+                    }
                     Spacer(GlanceModifier.defaultWeight())
+                    // The right column starts a little past the middle so long step counts don't crowd it.
                     Row(GlanceModifier.fillMaxWidth()) {
                         Stat("Steps", n.steps?.let { "%,d".format(UiLocale, it) }, "", GlanceModifier.defaultWeight())
-                        Stat("Distance", n.km?.let { "%.1f".format(UiLocale, it) }, "km", GlanceModifier.defaultWeight())
+                        Stat("Distance", n.km?.let { "%.1f".format(UiLocale, it) }, "km", GlanceModifier.defaultWeight().padding(start = 12.dp))
                     }
                     Spacer(GlanceModifier.height(10.dp))
                     Row(GlanceModifier.fillMaxWidth()) {
                         Stat("Resting", n.resting?.toString(), "bpm", GlanceModifier.defaultWeight())
-                        Stat("Burned", n.kcal?.let { "%,d".format(UiLocale, it.roundToInt()) }, "kcal", GlanceModifier.defaultWeight())
+                        // Hours over minutes, so a long night fits the narrow column.
+                        Stat("Sleep", sleep?.let { "${it.asleepMinutes / 60}h\n${it.asleepMinutes % 60}m" }, "", GlanceModifier.defaultWeight().padding(start = 12.dp))
                     }
                     Spacer(GlanceModifier.defaultWeight())
                 }
@@ -165,28 +187,30 @@ private fun Stat(label: String, value: String?, unit: String, modifier: GlanceMo
     Column(modifier) {
         Text(label, style = TextStyle(color = c(Text2), fontSize = 10.sp))
         Row(verticalAlignment = Alignment.Bottom) {
-            Text(value ?: "--", style = TextStyle(color = c(Text1), fontSize = 18.sp, fontWeight = FontWeight.Medium))
+            Text(value ?: "--", style = TextStyle(color = c(Text1), fontSize = 15.sp, fontWeight = FontWeight.Medium), maxLines = 2)
             if (unit.isNotEmpty() && value != null) Text(" $unit", style = TextStyle(color = c(Text2), fontSize = 10.sp))
         }
     }
 }
 
-// ------------------------------------------------------------------ 3. this week
+// ------------------------------------------------------------------ 3. last 10 days
 
 class WeekWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val g = context.graph
         val today = g.cognitive.today()
         val dk = g.cognitive.dayKeys
-        val keys = (-6..0).map { dk.plusDays(today, it) }
+        val keys = (-(RETENTION_DAYS - 1)..0).map { dk.plusDays(today, it) }
         val scores = runCatching { g.cognitive.store.readinessRange(keys.first(), today) }.getOrDefault(emptyList()).associateBy { it.dayKey }
-        val days = keys.map { k -> Triple(k, scores[k], LocalDate.parse(k).dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, UiLocale)) }
+        val days = keys.map { k -> LocalDate.parse(k).let { d -> Triple(k, scores[k], "${d.dayOfMonth}\n${d.month.getDisplayName(java.time.format.TextStyle.SHORT, UiLocale)}") } }
         val avg = days.mapNotNull { it.second?.score }.takeIf { it.isNotEmpty() }?.average()?.roundToInt()
         provideContent {
             Card(open(context)) {
                 Column(GlanceModifier.fillMaxSize()) {
                     Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Box(GlanceModifier.defaultWeight()) { Label("This week") }
+                        Herc(days.last().second, 26)
+                        Spacer(GlanceModifier.width(6.dp))
+                        Box(GlanceModifier.defaultWeight()) { Label("Last ${RETENTION_DAYS} days") }
                         Text(avg?.let { "avg $it" } ?: "", style = TextStyle(color = c(Text1), fontSize = 11.sp))
                     }
                     Spacer(GlanceModifier.defaultWeight())
@@ -208,8 +232,8 @@ private fun Bar(r: Readiness?, letter: String, isToday: Boolean, modifier: Glanc
         Spacer(GlanceModifier.height(2.dp))
         // A missing day stays a stub: missing data is never shown as a low score.
         val h = r?.score?.let { (it * BAR_MAX_DP / 100).coerceAtLeast(4) } ?: 3
-        Box(GlanceModifier.width(18.dp).height(h.dp).background(r?.band?.color ?: Hairline).cornerRadius(3.dp)) {}
+        Box(GlanceModifier.width(14.dp).height(h.dp).background(r?.band?.color ?: Hairline).cornerRadius(3.dp)) {}
         Spacer(GlanceModifier.height(4.dp))
-        Text(letter, style = TextStyle(color = c(if (isToday) Cyan else Text2), fontSize = 10.sp, fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal))
+        Text(letter, style = TextStyle(color = c(if (isToday) Cyan else Text2), fontSize = 9.sp, fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal, textAlign = TextAlign.Center), maxLines = 2)
     }
 }

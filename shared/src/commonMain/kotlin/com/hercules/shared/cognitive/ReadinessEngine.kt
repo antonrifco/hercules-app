@@ -5,7 +5,6 @@ import com.hercules.shared.model.ActivityState
 import com.hercules.shared.model.MetricType
 import com.hercules.shared.model.Sample
 import com.hercules.shared.readiness.Dimension
-import com.hercules.shared.readiness.MetricKey
 import com.hercules.shared.readiness.NightInput
 import com.hercules.shared.readiness.ReadinessCalculation
 
@@ -15,12 +14,22 @@ import com.hercules.shared.readiness.ReadinessCalculation
  * [MAX_AWAKE_GAP_MS] stay inside one episode and count as time awake; a longer gap starts a new episode, so an
  * evening nap is not glued onto the night. A night still in progress is not reported until the watch sees you awake.
  */
+/** See [SleepAnalyzer.earliestWake]. */
+const val EARLIEST_WAKE_H = 3L
+
 class SleepAnalyzer(private val dayKeys: DayKeys) {
 
     fun window(dayKey: String): Pair<Long, Long> {
         val midnight = dayKeys.startOf(dayKey)
         return (midnight - 6 * HOUR_MS) to (midnight + 14 * HOUR_MS)
     }
+
+    /**
+     * A night must end at or after this time on the morning of [dayKey]. Sleep that ends earlier (an evening nap, the
+     * phone down while watching TV) is the day before's nap, not last night: otherwise just after midnight it would
+     * pass for a finished night and publish a score with a wake-up in the evening.
+     */
+    fun earliestWake(dayKey: String): Long = dayKeys.startOf(dayKey) + EARLIEST_WAKE_H * HOUR_MS
 
     /** [samples] should start ~12 h before the window so the state at window start is known. */
     fun analyze(dayKey: String, samples: List<Sample>, nowMs: Long): SleepNight? {
@@ -54,7 +63,7 @@ class SleepAnalyzer(private val dayKeys: DayKeys) {
             if (episodes.isEmpty() || iv.first - episodes.last().last().second > MAX_AWAKE_GAP_MS) episodes += mutableListOf(iv)
             else episodes.last() += iv
         }
-        val main = episodes.maxBy { e -> e.sumOf { it.second - it.first } }
+        val main = episodes.filter { it.last().second >= earliestWake(dayKey) }.maxByOrNull { e -> e.sumOf { it.second - it.first } } ?: return null
         intervals.clear()
         intervals += main
         val asleepMs = intervals.sumOf { it.second - it.first }
@@ -79,6 +88,24 @@ class SleepAnalyzer(private val dayKeys: DayKeys) {
         )
     }
 
+    /**
+     * Every finished sleep episode the watch saw in [[fromMs], [toMs]) (same grouping as the night), for naps.
+     * An episode still open at the end is left out.
+     */
+    fun episodes(states: List<Sample>, fromMs: Long, toMs: Long): List<Pair<Long, Long>> {
+        val sorted = states.filter { it.type == MetricType.ACTIVITY_STATE }.sortedBy { it.startMs }
+        val out = mutableListOf<Pair<Long, Long>>()
+        for ((i, s) in sorted.withIndex()) {
+            if (s.value != ActivityState.ASLEEP) continue
+            val next = sorted.getOrNull(i + 1)?.startMs ?: continue
+            val a = maxOf(s.startMs, fromMs)
+            val b = minOf(next, toMs)
+            if (b <= a) continue
+            if (out.isNotEmpty() && a - out.last().second <= MAX_AWAKE_GAP_MS) out[out.lastIndex] = out.last().first to b else out += a to b
+        }
+        return out
+    }
+
     companion object {
         /** Longer than this awake and the sleep before it is a separate episode (a nap, or a split night). */
         const val MAX_AWAKE_GAP_MS = 60 * MIN_MS
@@ -98,32 +125,20 @@ object Tips {
         band?.let {
             out += Suggestion(it.headline, it.meaning, if (it == ReadinessBand.PRIMA || it == ReadinessBand.BAIK) Tone.POSITIVE else Tone.CAUTION)
         }
-        fun metric(k: MetricKey) = calc.dimensions.flatMap { it.metrics }.firstOrNull { it.key == k }
-        fun dim(d: Dimension) = calc.dimensions.first { it.dimension == d }
-
-        val duration = metric(MetricKey.SLEEP_DURATION)?.score
-        if (lastNight != null && duration != null && duration < 70) {
+        val dim = { d: Dimension -> calc.dimensions.firstOrNull { it.dimension == d } }
+        if (lastNight != null && lastNight.asleepMinutes < 6 * 60 + 30) {
             out += Suggestion(
                 "Short on sleep (${formatDuration(lastNight.asleepMinutes)})",
                 "A 10–20 minute nap before 15:00 can help; skip caffeine after 14:00." + (bedtime?.let { " Tonight, aim to be in bed by $it." } ?: ""),
                 Tone.ACTION,
             )
         }
-        metric(MetricKey.SLEEP_CONSISTENCY)?.score?.takeIf { it < 60 }?.let {
-            out += Suggestion("Irregular sleep times", "Going to bed and getting up at similar times steadies your rhythm.", Tone.ACTION)
-        }
-        dim(Dimension.CARDIO).score?.takeIf { it < 55 }?.let {
+        dim(Dimension.CARDIO)?.score?.takeIf { it < 55 }?.let {
             out += Suggestion(
                 "Recovery is below your usual",
-                "Your heart signals suggest strain. Possible causes: stress, poor sleep, alcohol, illness. Keep effort moderate today.",
+                "Your body signals are off your usual. Possible causes: stress, poor sleep, alcohol, illness. Keep effort moderate today.",
                 Tone.ACTION,
             )
-        }
-        dim(Dimension.ACTIVITY).score?.takeIf { it < 60 }?.let {
-            out += Suggestion("Activity was off your usual", "A brisk 10-minute walk before demanding work lifts alertness.", Tone.ACTION)
-        }
-        dim(Dimension.CIRCADIAN).score?.takeIf { it < 60 }?.let {
-            out += Suggestion("Brighter mornings, dimmer evenings", "Daylight soon after waking and dim light before bed support your body clock.", Tone.ACTION)
         }
         return out
     }

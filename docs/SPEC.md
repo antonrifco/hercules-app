@@ -95,110 +95,220 @@ cognitive assessment, EEG, mandatory access to any wearable brand.
 
 ---
 
-# 2. Home: daily Cognitive Readiness
+# 2. Home: cognitive score (engine 5.0.0)
 
-## 2.1 Output
+The score is a research-based estimate from 1 to 100 of how alert you are right now. Sleep and time awake are the
+causal drivers (sleep-restriction experiments: Van Dongen et al. 2003 found lapses grow near-linearly with
+wakefulness beyond a critical amount, however the sleep loss happened); HRV, resting heart rate and skin
+temperature only mark recovery state, so they scale the prediction instead of adding to it; the Reaction Test is the
+one direct measurement and is blended in when recent. Source of the design: the "Cognitive Score Formula" handoff
+(20 Nov 2026). Labels below: **[Verified]** checked against a source, **[Verify]** widely cited, not yet checked,
+**[Design]** our own tunable choice.
 
-CRS from 0 to 100, estimated from the available signals.
+Pipeline: sleep model → predicted alertness P → × recovery modifier M → blended with the game G when one is recent →
+tuned to the user over time.
 
-## 2.2 Classifications
+## 2.1 Output and bands
 
-| Score | Classification |
+Score 1–100, rounded. Bands (cut-offs [Design], re-check once real score distributions exist):
+
+| Score | Band |
 |---:|---|
 | 85–100 | Prime |
 | 70–84 | Good |
 | 55–69 | Fair |
 | 40–54 | Low |
-| 0–39 | Drained |
+| 1–39 | Drained |
 
-Product categories, not clinically validated thresholds.
+The score follows the day: it is highest soon after a good night and falls as hours awake add up. Present it as a
+wellness estimate, never a medical or safety assessment; never tell users they are fit or unfit to drive or operate
+machinery. Caffeine, alcohol, medication and illness are not modelled; they show up only through M and the game.
 
-## 2.3 Dimensions and default weights
+## 2.2 Sleep model (McCauley et al. 2013)
 
-| Dimension | Default |
-|---|---:|
-| Sleep & Recovery (S) | 65% |
-| Cardiovascular Readiness (H) | 10% |
-| Physical Activity (A) | 10% |
-| Circadian Alignment (C) | 5% |
-| Cognitive Performance (T) | 10% |
+McCauley P, Kalachev LV, Mollicone DJ, Banks S, Dinges DF, Van Dongen HPA. *Sleep* 2013;36(12):1987–1997
+(PMC3825450) [Verified: equations from its Table 1, parameters from its Table 2]. It predicts PVT lapses (reaction
+times ≥ 500 ms) under normal sleep, total and chronic sleep loss, night shifts and naps. State: p (predicted lapses),
+u (slow homeostat, days to weeks), κ (circadian amplitude). t is local clock time in hours, τ = 24 h.
 
-`CRS = 0.65·S + 0.10·H + 0.10·A + 0.05·C + 0.10·T − extras`, each dimension normalized to 0–100 (default
-configuration v4). v4 gave sleep 20 more points (10 from heart, 10 from the game): sleep is the one causal driver and
-on many watches the most complete signal. v3 moved 5 points from light to sleep: light is read by the phone only while it is out and in
-use, the weakest measurement of the five. The Reaction Test weight counts 60% after one game in a day, 80% after
-two and in full from three (engine 3.1.0): one 2-minute game is a noisy reading. Sleep leads because it is the only signal with causal evidence for next-day cognition (Van Dongen
-2003, Belenky 2003, Lim & Dinges 2010); heart signals are associations (Forte 2019, Buchheit 2014). The weights
-remain product hypotheses, not validated values. A stored older default follows v3; custom weights are kept. The engine never hardcodes them: it
-reads the active `ScoringConfiguration`.
+```
+Wake:  dp/dt = α_w·(p + β·u) + κ·(c(t) + μ_w)        du/dt = η_w·u          dκ/dt = λ·κ·(1 − κ/ξ)
+Sleep: dp/dt = α_s·(p + β·u) + κ·(c(t) + μ_s) + α_s·β/η_s
+                                                     du/dt = η_s·u + 1      dκ/dt = −λ·κ
+c(t) = sin(2π·(t − φ)/24),   η_s = A_c/(A_c − 1)·η_w,   A_c = 20.2/24
+α_w = −0.028/h   α_s = −0.26/h   β_w = β_s = −0.26   η_w = 0.0074/h   μ_w = 0.33   μ_s = −1.5
+φ = 21.2 h   λ_w = −λ_s = 0.49/h   ξ = 1.09
+```
 
-## 2.4 Sleep & Recovery
+- Implementation (`SleepModel`): Euler steps of 6 minutes through the window's sleep episodes.
+- Initial state: the periodic steady state of 8-hour nights ending at the usual wake time, reached by simulating 20
+  days before the first recorded night (the paper starts from its baseline schedule's steady state; its closed form,
+  supplement Eqs. S13–S17, is not reproduced) [Design].
+- φ is moved by (usual wake time − 07:30), since the paper's subjects woke around then [Design]; calibration then fits
+  it (§2.7). κ's effect can be scaled (calibration × the body-clock slider; 1 = the paper).
+- Sleep episodes: the resolved main nights (§14 precedence), plus naps: any other Health Connect session or watch
+  sleep episode of 15 minutes or more that doesn't overlap a night. A missing night after the first recorded one is
+  filled with the usual window (median wake time and time in bed) [Design]. Sleep debt carries over automatically.
 
-`S = 0.55·D + 0.25·K + 0.20·Q` (sleep load, regularity, continuity). Within a dimension, if a component is missing
-the remaining components are re-weighted; the dimension is available when duration (D) is available.
+## 2.3 From lapses to predicted alertness
 
-- **Sleep load (D):** from `SleepSessionRecord` (Health Connect) or the Hercules watch. Weighted hours of the last
-  3 consecutive nights (0.60 / 0.25 / 0.15), since short sleep accumulates (Van Dongen 2003). 7–9 h scores 100
-  (Watson 2015); 6 h ≈ 60, 5 h ≈ 35; long sleep declines gently (Li 2022).
-- **Consistency (K):** circular standard deviation of the sleep midpoint over the previous 14 valid nights (circular
-  maths handles sessions that cross midnight). Needs at least 5 nights.
-- **Continuity (Q):** sleep efficiency (asleep ÷ time in bed) from awake time or stages when the provider reports
-  them. Stages are never scored; they only mark a Health Connect night as coming from a wearable's own algorithm,
-  which then wins over the Hercules watch's detection (§14).
+`P = 100 − 4·max(0, p − 2)`, clamped to 0–100 [Design]; with the sleep-influence slider `P_adj = 100 − k_s·(100 − P)`.
+Two lapses or fewer is a normal rested result. Reference points with 8-hour nights and a 07:00 wake-up: about 92 in
+the morning and about 85 by bedtime; after 24 h awake about 40; after 48 h lower still; 14 nights of 4 h about 30.
+Recheck the scale against real Reaction Test data.
 
-## 2.5 Cardiovascular Readiness
+## 2.4 Body clock
 
-`H = 0.70·V + 0.30·R` (HRV RMSSD, resting heart rate), both scored as deviations from the personal baseline
-(21–28 days), never against universal absolutes. HRV is ln(RMSSD) averaged over the last 3 nights against the
-baseline (Plews 2013/2014), which smooths single-night noise. If only one is available it carries the dimension; the two
-together can never exceed the dimension weight. Ordinary heart rate is stored as supporting information and not
-scored; respiratory rate is an optional extra that can only deduct (§6.1).
+Part of the model above: c(t) is lowest (best performance) around φ − 6 h, 15:12 at the paper's φ, and highest
+around 03:12. Its amplitude κ builds over about 20 h awake and fades during sleep, so a night awake hits hardest in
+the early morning.
 
-## 2.6 Physical Activity
+## 2.5 Recovery modifier (M)
 
-`A = 0.20·P + 0.50·I + 0.30·E` (steps, activity intensity, low-movement time), scored on the previous complete day
-with target ranges (more is not always better).
+Each signal is z-scored against the user's own trailing 10 days from the same source:
+`z = (today − mean) / sd` (sd floored per signal so a flat history can't explode it; z clamped to ±4). A signal with
+fewer than 5 earlier days is dropped, not imputed [Design].
 
-- **Steps:** the Hercules watch total on days it was worn; otherwise the Health Connect aggregate (which
-  de-duplicates providers). Never both.
-- **Intensity:** minutes in exercise sessions, overlapping sessions merged so no minute counts twice.
-- **Low-movement time:** waking hours with fewer than 250 steps. Scored only when hourly step data is reliable.
-  Called "low-movement time", never "sedentary".
+```
+penalty = w_h·max(0, −z_lnHRV) + w_r·max(0, z_RHR) + w_t·max(0, z_temp) + optional terms (§2.14)
+M = clamp(1 − penalty, 0.7, 1.0)
+```
 
-Overlap is limited by construction: steps measure volume, intensity counts only exercise minutes, low-movement
-counts only idle hours.
+- HRV as ln(RMSSD) overnight [Verify]; resting HR overnight or morning; skin temperature as the overnight deviation.
+- Only unfavourable deviations count: M never exceeds 1, a better-than-usual reading doesn't raise the score.
+- Starting weights w_h = w_r = w_t = 0.05, fitted later (§2.7) [Design]. Don't raise defaults without game data:
+  evidence on wearables predicting performance is mixed (MHSRS abstract; Personal and Ubiquitous Computing 2025).
 
-## 2.7 Circadian Alignment
+## 2.6 Reaction Test (G) and the final score
 
-`C = L`, light-exposure alignment from the phone's `Sensor.TYPE_LIGHT` on the previous complete day: bright
-mornings, daytime exposure, and dim evenings score well (Brown 2022: ≥ 250 lux by day, ≤ 10 lux in the 3 hours
-before bed; full marks at those levels, falling off away from them). Requires samples in at least two of the three periods.
-Missing samples never mean darkness. Time of day is not a CRS bonus, and sleep consistency is not counted again here.
+- G is scored against the user's own history, per device: from 5 earlier valid tests in the last 10 days,
+  `G = 100 × share of those tests that were slower` (ties count half); before that, the 50-anchored speed score of
+  §4.6. Then − 5 per false start beyond 2. Lapse threshold 500 ms [Verify].
+- With a test that ended in the last 2 hours (median of them if several, either device):
+  `Score = g·G + (1 − g)·(P_adj·M)`, g = 0.6 [Design]. Otherwise `Score = P_adj·M`. Clamped to 1–100.
 
-## 2.8 Cognitive Performance
+## 2.7 Calibration
 
-`T` = the median game score of the day's valid, scored Reaction Tests (one metric, Reaction speed,
-§4.6). Without one, the dimension is unavailable.
+Every valid test is counted (the counter survives the 10-day window). From 20 tests [Design], each new test refits on
+the window's tests (model state recomputed at the time each test started, game excluded):
 
-The result is shown as `T / 100` with a verdict against the player's usual (50): ≥ 65 "Faster than usual", ≥ 40
-"About your usual", ≥ 20 "Slower than usual", else "Much slower than usual" (`BeatTheClock.verdict`), plus the real
-numbers: typical reaction time in ms, the usual it was compared with, slow reactions and false starts. Phone and
-watch use the same words.
+- the body-clock peak (0–23.5 h, half-hour grid; φ = peak + 6 h) and κ's scale (0.5, 0.75, 1, 1.25, 1.5×) by grid
+  search on the squared error of G − P·M, one model run over the window per candidate;
+- w_h, w_r, w_t by least squares of `1 − G/P` on each signal's unfavourable z, bounded 0–0.2;
+- the paper's rate constants stay fixed. At least 8 tests in the window, otherwise the last fit is kept.
+- The phone sends its fit to the watch (it sees both devices' tests); the watch keeps its own only if it has counted
+  more tests.
 
-**Score check (debug builds, Setup → Developers).** `ScoreCheck` reports Spearman's rank correlation between the
-score without the cognitive dimension and the day's median game score, over days in the last 90 that have both.
-No verdict below 30 days. It only measures; it never changes a score.
+Only the fitted values (`Calibration`: weights, φ, a, counter) are kept beyond 10 days; no raw data. Precedent:
+2B-Alert personalises a group fatigue model from individual PVT data [Verify]. Setup → Score settings shows the
+progress ("Personal tuning").
+
+## 2.8 Confidence
+
+Every score carries 0–100%, from the data behind it (`ReadinessCalculator.confidenceParts`):
+
+| Part | Full | Partial |
+|---|---|---|
+| Sleep | Watch-detected 35 | Phone estimate or entered 15; usual sleep assumed 5 |
+| Days of data in the window | 8–10 days: 15 | 5–7 days: 8 |
+| HRV | Watch 8 | Phone 4 |
+| Resting heart rate | Watch 8 | Phone 4 |
+| Skin temperature | Watch 8 | — |
+| Reaction Test | In the last 2 h: 19 | 20+ tests tuned: 12 |
+
+Optional sensors add up to 7 (glucose 3, each other Health Connect sensor 1; each needs 5 days of baseline; ECG
+would add 3 but there is no ECG source on Android, §2.14). Custom settings subtract 5. `confidence = min(100, core + optional − adjustments)`.
+Without watch sleep it is capped at 74% (never High); on usual sleep or a test alone at 49% (Low).
+Labels: High 75–100%, Medium 50–74%, Low under 50%. Home and Why this score list each part with its points and say
+what would raise it; the watch shows "72% · sleep: watch · 9 days of data".
+
+## 2.9 Score settings (Setup → Score settings)
+
+Sliders scale the model's own parameters, so the structure stays intact [Design]:
+
+| Slider | Changes | Range | Default |
+|---|---|---|---|
+| Sleep influence k_s | `P_adj = 100 − k_s·(100 − P)` | 0.5–1.5 | 1.0 |
+| HRV / resting HR / temperature sensitivity | × w_h / w_r / w_t | 0–2× | 1× |
+| Body clock strength | × a | 0–2× | 1× |
+| Reaction Test weight g | replaces 0.6 | 0–0.8 | 0.6 |
+| Glucose / blood oxygen / breathing sensitivity | × their 0.05 weights | 0–2× | 1× |
+
+The time constants and the 0.7 floor are not adjustable. Multipliers apply on top of calibrated values. "Reset to
+defaults" asks first. Any non-default setting costs 5 confidence points. Settings are stored in `kv`
+(`score_settings`) and stamped on every score (`ConfigStamp.settings`); recalculated past days use their own stamp.
+Migration: the engine-4 percentage weights are discarded; users start at defaults, and anyone who had custom
+weights sees a one-time notice on the settings page.
+
+## 2.10 Missing sleep
+
+The first case that fits [Design]:
+
+1. Entered or phone-estimated sleep: an unstaged Health Connect session, or Hercules' own screen-use estimate
+   (optional Usage Access, Setup › Sensors & data). The estimate is the longest stretch from the screen going off to
+   the first unlock between 18:00 and 14:00, 3–14 h long; checks under 10 minutes in the night don't split it and
+   count as awake (`ScreenSleep`). Only screen on/off and lock-screen events are read, never app use. It ranks below
+   every Health Connect session and the watch. The sleep model runs as normal; confidence at most Medium.
+2. No sleep, but a test in the last 2 hours: `Score = G`, confidence Low.
+3. The usual sleep window from stored nights, once its wake time has passed: model as normal, confidence Low.
+4. Nothing usable: no score; Home asks for a night of sleep or a test.
+
+Between midnight and the usual wake time with no night recorded, no score is published ("Today's score starts when
+you wake up").
+
+## 2.11 Sources
+
+One source per signal per day, never mixed, each with its own baseline; the source is stored and shown in Why this
+score.
+
+| Signal | Primary (watch) | Fallback (phone) | Effect of fallback |
+|---|---|---|---|
+| Sleep | Hercules watch, or a staged Health Connect night (stages need a wearable) | Unstaged Health Connect session; times entered by the user | Confidence at most Medium |
+| HRV, resting HR | Health Connect from a wearable, else the Hercules watch | Health Connect recorded on a phone (`Device.TYPE_PHONE`, stored as `metadata = device:phone`) | weight × 0.5 |
+| Skin temperature | Health Connect from a wearable | — | term dropped |
+
+Which night is used still follows §14 (staged Health Connect → Hercules watch → unstaged Health Connect).
+
+## 2.12 Retention
+
+All data stays on the device; there is no server. Raw sensor values, nights, Health Connect copies, light, tests,
+daily summaries, evaluations and scores older than 10 days are deleted once a day (`CognitiveService.purgeOld`,
+`RetentionPolicy` for watch samples). The first Health Connect import reads 10 days. Baselines, the game percentile
+and calibration use the same window. Kept beyond it: calibration values, score settings, Moments with their tasks,
+ratings and snapshots, personal records.
+
+## 2.13 Engine status and evidence
+
+Engine 5 runs McCauley et al. 2013 (§2.2), replacing the interim two-process fallback of the handoff. Still to verify:
+the lapse-to-P scale (§2.3) against real data, the 500 ms lapse threshold for our 3-minute test, log-RMSSD, the
+70 mg/dL glucose threshold. Expect weaker predictions right after recovery sleep; the game residual corrects for it.
+
+## 2.14 Optional sensors
+
+Used only when present; never block a score. Same pattern as §2.5, weight 0.05 each, own slider:
+
+- **Glucose (CGM or meter):** the last 24 hours' mean against earlier daily means, penalising readings below the
+  user's baseline; a low under 3.9 mmol/L (70 mg/dL [Verify]; a CGM must stay low for 3 readings, Battelino 2019)
+  counts as at least z = −2. A reading under 3.9 in the last 3 hours also shows a live banner on Home.
+- **SpO₂** (lower is worse) and **respiratory rate** (higher is worse).
+- **ECG:** would replace HRV with an ECG-derived value. Not available: Health Connect and Wear OS Health Services
+  have no ECG data type, and Samsung's watch ECG needs a partner licence. Its 3 confidence points stay unearned.
+
+The 0.7 floor applies however many terms are present; optional sensors never make up for missing core data.
+
+## 2.15 Other rules
+
+**Past days.** A past day is stored as its score at wake time + 6 hours, so the week shows the middle of each day, not
+its last minutes awake. Every refresh recalculates today (at the current time) and the previous 2 days with the data
+known now and each day's own settings; older days are never touched.
 
 **Screen stays on.** During the 3-minute test, phone and watch keep the screen on; leaving the app stops the test
 without saving it.
 
 **Moment preparation stays in scope.** Prep tasks cover only sleep, recovery, light, stress and sensors, never the content of the Moment: final stretch adds skipping alcohol and no caffeine after 14:00 the day before; the day itself suggests a 10-minute walk and 2 minutes of box breathing. Reminders: the bedtime reminder is keyed to the wake-up day, so it fires once per night even past midnight; "how did it go?" reads Moments that started in the last 12 hours.
 
-**A day's score starts at wake-up (engine 3.2.0).** Between midnight and waking, when no night has been recorded for
-the new day and it is before the usual wake time, no score is published ("Today's score starts when you wake up").
-Otherwise ten minutes of pulse or yesterday's steps would pass for a score.
-
-**Watch sleep episodes.** The night is the longest sleep episode in the window. Awakenings up to 60 minutes stay in
+**Watch sleep episodes.** The night is the longest sleep episode in the window that ends at 03:00 or later; sleep
+that ends earlier (an evening nap, the phone down for the evening) is a nap of the day before, for every source. Awakenings up to 60 minutes stay in
 the episode as time awake; a longer gap starts a new episode, so a nap is never merged into the night. A night still
 in progress is not reported. If the watch never reports waking, the night ends at its last pulse reading.
 
@@ -206,34 +316,17 @@ in progress is not reported. If the watch never reports waking, the night ends a
 in the background and every 5 minutes while open, a game, a sleep correction. The watch hands new readings to the
 phone at most every 10 minutes and keeps one background pulse reading per 20 seconds. The phone app also asks the watch for its data at most every 15 minutes, only while a watch is connected (never in airplane mode), because phones that block background starts (Xiaomi Autostart) can drop the watch's own deliveries.
 
-**Sleep history.** `refresh()` also resolves any night in the last 30 days that has a valid Health Connect session
-but no resolved night yet, so the first import (30 days) feeds sleep consistency and the 3-night load at once.
-Stored scores of older days are still never recalculated.
+**Sleep history.** `refresh()` also resolves any night in the window that has a valid Health Connect session but no
+resolved night yet, so the first import feeds the sleep model at once, and re-resolves every phone-tier night
+(unstaged Health Connect, screen-use estimate) so watch sleep replaces it whenever it arrives. Nights you edited are
+never replaced.
 
 ---
 
-# 3. Customizable scoring weights
+# 3. Customizable scoring weights (until engine 4)
 
-- All five dimension weights are editable in Setup, in whole percent. Weights cannot be negative; a dimension may
-  be 0%; the total must be exactly 100% (validated with a tolerance of 1e-6 on the stored fractions); all-zero is
-  invalid. Invalid input is rejected, never silently normalized.
-- The UI shows when weights differ from the defaults ("Custom").
-- Saving creates a new `CUSTOM` configuration (new id, `updatedAt`); history is kept, never overwritten.
-- **Reset to default weights:** asks for explicit confirmation, explains that the recommended weights return and
-  that later scores may differ, applies only after confirmation, then recalculates today's score. Cancel changes
-  nothing. Reset never deletes health records, assessments, baselines, Moments or score history.
-- Two configuration types: `DEFAULT` (versioned app configuration) and `CUSTOM`.
-- System-controlled (not user-editable in V1, versioned by the team): normalization, baselines, outliers,
-  data-quality rules, missing-data rules, assessment validity, classification boundaries, internal component
-  weights.
-- **History integrity:** every stored score keeps the configuration id and version, the actual weights, the engine
-  version, the dimension and component scores, the coverage and the calculation time. Past scores are never
-  recomputed when weights change; only today's latest result is.
-- **Late data:** every refresh (each sync) recalculates today and the previous 2 days with the data known now,
-  each with the weights it was first scored with, because sleep, steps and watch data often arrive hours late.
-  Older days are never touched.
-- A future dimension means a new configuration version and an explicit migration, explained to the user.
-  Customization is personalization, not validation; the app never claims custom weights are more accurate.
+Replaced by the score settings of §2.9. Steps, activity and light were dimensions up to engine 4; they are still
+collected and shown, but are not part of the score. Scores stored by engine 4 keep their weights in their stamp.
 
 ---
 
@@ -290,9 +383,10 @@ test on one device, which is why baselines are per device.
   Also stored: median reaction time, **lapses** (reactions ≥ 500 ms, the classic PVT threshold, chosen over PVT-B's
   355 ms because a touchscreen adds delay) and false starts.
 - `speedScore = clamp(50 + 150·ln(speed / usual), 0, 100)`: 10% slower than usual ≈ 34, 10% faster ≈ 64.
-- `game score = speedScore − 5 × (false starts beyond 2)`, clamped to 0–100.
+- `game score = G − 5 × (false starts beyond 2)`, clamped to 0–100, where G is the percentile of §2.6 from 5 earlier
+  tests in 10 days, else `speedScore`.
 - `usual` is a blend: a device reference (phone 3.0/s ≈ 330 ms, watch 2.7/s ≈ 370 ms) mixed with the median speed
-  of the same device's earlier valid tests in the last 28 days, personal share = min(tests, 3) / 3. The first test
+  of the same device's earlier valid tests in the last 10 days, personal share = min(tests, 3) / 3. The first test
   is scored against the reference alone; from the fourth on, against the player's own usual.
 - Valid tests of today that have no score are scored on the next refresh.
 
@@ -305,9 +399,12 @@ never mixed without normalization.
 
 # 5. Peak Cognitive Window
 
-- Uses the last 28 days of valid tests of the current game version. Eligible only with ≥ 7 observation days and, in
-  every window, ≥ 4 valid tests on ≥ 3 distinct days (model v3).
-- Performance per test is normalized per device (robust z of the speed against that device's own 28-day median and
+- Windows: morning 0–4 h after waking, afternoon 4–8 h, evening 8–16 h. A test more than 2 h before the wake time is
+  evening (still up from the day before, no night recorded yet), not morning.
+- Uses the last 10 days of valid tests of the current game version. Eligible with ≥ 5 observation days and, in every
+  window, ≥ 3 valid tests on ≥ 2 distinct days (model v4). The minimums only rule out tiny samples; the gap test below
+  decides whether a difference is real. All three windows are needed: an untested part of the day could be the best.
+- Performance per test is normalized per device (robust z of the speed against that device's own 10-day median and
   MAD, higher is faster), then averaged per window.
 - `peak = argmax(mean performance)`. If the gap to the runner-up is smaller than its standard error (minimum 0.2),
   the result is `NO_CLEAR_PEAK`. Only broad windows are predicted.
@@ -317,48 +414,17 @@ never mixed without normalization.
 
 # 6. Missing data and confidence
 
-- Missing is never zero: no HRV is not zero HRV, no steps record is not zero steps, no light is not darkness, no
-  assessment is not poor performance.
-- `coverage = Σ weights of available dimensions` (active configuration; 0% dimensions count for nothing).
-- `CRS = Σ(weight · score) / Σ(available weights)`. A number is published as soon as any one dimension is
-  available (one data point is enough). Only with nothing at all is the result `INSUFFICIENT_DATA`.
-- Confidence combines how many signals are in today (coverage) with how many full earlier days of data back them:
-
-| Coverage | Full days of data | Confidence |
-|---:|---:|---|
-| ≥ 90% | ≥ 7 | High |
-| ≥ 50% | ≥ 3 | Medium |
-| otherwise | | Low |
-
-- Next to the score: the level, "N of M score parts · D days of data" (parts = sleep, heart, activity, light, game; not the data sources Setup counts), and below High what would raise it
-  ("To raise it: add a Reaction Test; 2 more days of data."). Phone (Home and Why this score) and watch.
-
-Confidence and classification are independent.
-
-## 6.1 Optional extras
-
-Optional extras never add points; they can only subtract, capped at −10 in total, and need 7 days of history:
-respiratory rate ≥ 2 robust SD above usual (−5), skin temperature ≥ 2 SD above usual (−5), overnight SpO₂ < 90%
-or ≥ 4 points below usual (−5), and glucose in the last 24 hours under 3.9 mmol/L (−5) or under 3.0 (−10)
-(IHSG/ADA 2017). From a CGM it must last about 15 minutes (3 readings; Battelino 2019), since single CGM dips are
-often pressure artefacts; one meter reading is enough. Deductions are listed in Why this score. Glucose is not a weighted dimension (it changes by
-the hour and only lows have clear cognitive evidence); a reading under 3.9 from the last 3 hours also shows a live
-banner on Home, and under 3.0 it says to treat first.
+- Missing is never zero: no HRV is not zero HRV, no light is not darkness, no test is not poor performance.
+- A missing recovery signal drops its term (M unchanged); missing sleep follows §2.10.
+- Confidence: §2.8. Confidence and band are independent.
 
 ---
 
 # 7. Personalization and baselines
 
-| Valid days | Baseline |
-|---|---|
-| 1–6 | Reference calibration |
-| 7–20 | Gradual personalization |
-| 21+ | 80% personal, 20% reference |
-
-Per metric: sleep consistency 14 days; HRV, resting HR, activity and light 21–28 days (28-day window); cognitive
-per device and window. Robust normalization `z = (value − median) / (1.4826 · MAD)` with a configured minimum
-scale when MAD is too small. Today's score always uses the baseline built from earlier days, and changing weights
-never resets baselines.
+Baselines are the user's own mean and SD over the trailing 10 days, per signal and per source (watch and phone
+never mixed), compared from 5 days on; today is always compared with earlier days only. Reaction Test baselines are
+per device. From 20 tests the model itself is tuned to the user (§2.7). Changing settings never resets baselines.
 
 ---
 
@@ -412,7 +478,7 @@ never resets baselines.
 - **Personal baselines:** per metric median, MAD, sample count, personal share, calibration version.
 - **Availability states, never conflated:** hardware unavailable, permission not granted, provider unavailable, no
   recent measurement, measurement invalid, measurement valid.
-- **Data:** clear all local data (with confirmation). About: Privacy Policy, Terms & Conditions, version.
+- **Data:** clear all local data (with confirmation). About: About Hercules (what the app does and the research behind it), Privacy Policy, Terms & Conditions, version. No developer menu; demo data loads only through the debug launch extra.
 
 ---
 
@@ -420,27 +486,24 @@ never resets baselines.
 
 ## 10.1 Core (scored)
 
-| Metric | Source | Dimension |
+| Metric | Source | Role |
 |---|---|---|
-| Sleep duration | Health Connect / Hercules watch | Sleep & Recovery |
-| Sleep consistency | Derived | Sleep & Recovery |
-| Sleep continuity | Sleep records | Sleep & Recovery |
-| HRV RMSSD | Health Connect | Cardiovascular |
-| Resting heart rate | Health Connect / Hercules watch | Cardiovascular |
-| Steps | Health Connect / Hercules watch | Activity |
-| Activity intensity | Exercise sessions | Activity |
-| Low-movement time | Hourly steps | Activity, if reliable |
-| Ambient light | Phone `TYPE_LIGHT` | Circadian, if enough samples |
-| Reaction Test | Phone and watch | Cognitive, if valid |
+| Sleep episodes | Health Connect / Hercules watch | Sleep pressure (§2.2) |
+| Usual wake time | Derived from nights | Body-clock peak (§2.3) |
+| HRV RMSSD | Hercules watch / Health Connect | Recovery (§2.5) |
+| Resting heart rate | Hercules watch / Health Connect | Recovery |
+| Skin temperature deviation | Health Connect | Recovery |
+| Reaction Test | Phone and watch | G (§2.6) |
 
-## 10.2 Optional extras (deduction only, §6.1)
+## 10.2 Optional extras (§2.14)
 
-Respiratory rate, skin temperature deviation, SpO₂, continuous glucose (Health Connect `BloodGlucoseRecord`,
-mmol/L). They never add points and never count toward coverage.
+Respiratory rate, SpO₂, glucose (Health Connect `BloodGlucoseRecord`, mmol/L). Each adds a small recovery term and up
+to 7 confidence points in total.
 
 ## 10.3 Supporting (stored, never scored)
 
-Ordinary heart rate, sleep stages, raw beat-to-beat intervals.
+Ordinary heart rate, sleep stages (used only to tell a wearable's night from a phone's), raw beat-to-beat intervals,
+steps, exercise, floors, calories and ambient light (shown, not scored since engine 5).
 
 ## 10.4 Future (not V1)
 
@@ -459,11 +522,11 @@ Promoting a metric to scoring needs a new versioned configuration.
 - **Ambient light:** lux, timestamp, sensor identity and sampling context (`foreground` or `background`). Sampled
   while the app is open and opportunistically by WorkManager; continuous background monitoring is not promised,
   and the phone is not assumed to be near the eyes. "No sensor" and "no recent sample" are different states.
-- **Respiratory rate, skin temperature (deviation, never core temperature), SpO₂:** stored with provenance; used only
-  as deductions when clearly off the personal usual (§6.1). Ordinary heart rate and sleep stages are supporting data.
+- **Respiratory rate, skin temperature (deviation, never core temperature), SpO₂:** stored with provenance and the
+  recording device type; recovery terms when off the personal usual (§2.5, §2.14).
 - **Continuous glucose (optional):** read from Health Connect when a CGM or meter app writes it; stored in mmol/L
-  with provenance, plausibility 1–35 mmol/L, shown under Setup → Sensors & data → Optional extras. Lows deduct
-  (§6.1) and show a live banner on Home.
+  with provenance, plausibility 1–35 mmol/L, shown under Setup → Sensors & data → Optional extras. A recovery term
+  (§2.14); lows also show a live banner on Home.
 - **Beat-to-beat intervals:** only from compatible devices; not interchangeable with Health Connect RMSSD.
 
 ---
@@ -507,7 +570,7 @@ The scoring engine never touches `Context`, `SensorManager`, Health Connect, Wea
 
 # 14. Health Connect
 
-Check availability, request permissions, read with appropriate ranges (initial import 30 days, then the last 3 days
+Check availability, request permissions, read with appropriate ranges (initial import 10 days, then the last 3 days
 on every sync), keep provenance (`dataOrigin` package and device), normalize units, de-duplicate by record id,
 validate quality, store locally, handle revoked permissions and missing record types. Steps use the aggregation
 API; overlapping providers are never summed blindly. WorkManager runs deferred refreshes; opening the app always
@@ -519,8 +582,8 @@ refreshes.
 | Signal | Most reliable first | Why |
 |---|---|---|
 | Sleep | a wearable's staged night in Health Connect → Hercules watch → other Health Connect session | Vendor sleep algorithms are validated; Hercules' detection is simpler; unstaged sessions are often phone estimates |
-| HRV | Health Connect → Hercules watch | Vendors measure overnight at rest; the Hercules watch only catches random beat-to-beat readings |
-| Resting heart rate, steps | Hercules watch (when worn that day) and Health Connect compared: higher steps, lower resting heart rate | Either can miss part of the day, and a partial day reads low on steps and high on resting heart rate |
+| HRV, resting heart rate | Health Connect from a wearable → Hercules watch → Health Connect recorded on a phone (half weight) | Vendors measure overnight at rest; one source per day, each with its own baseline (§2.11) |
+| Steps (shown, not scored) | Hercules watch (when worn that day) and Health Connect compared: the higher wins | A partial day reads low |
 | Ambient light | phone | Only the phone has the sensor |
 
 Sources are never summed. Health Connect has no heart or HRV sensor of its own; those values come from another wearable's app.
@@ -543,9 +606,9 @@ Wearable Data Layer only; no custom Bluetooth.
 - **MessageClient:** watch → phone batches (samples, sessions, assessments) with an acknowledgement listing the
   stored ids. Retries are idempotent (UUIDs / deterministic ids), original timestamps and device identity are
   kept, nothing is marked synced before the phone acknowledges it.
-- **DataClient:** phone → watch state (latest readiness, Moments, brief, settings) and sensor configuration.
+- **DataClient:** phone → watch state (latest readiness, Moments, brief, reminder and score settings) and sensor configuration. The watch saves the phone's score settings, so a score it works out itself uses the same sliders.
 - **CapabilityClient:** finds the companion app.
-- The phone validates incoming records, stores them, and recalculates (today and the previous 2 days, §3).
+- The phone validates incoming records, stores them, and recalculates (now and the previous 2 days, §2.15).
 
 ---
 
@@ -554,8 +617,8 @@ Wearable Data Layer only; no custom Bluetooth.
 No remote API, cloud database, cloud auth, server scoring, cloud sync or remote inference. Each device has its own
 database; they sync when connected. Works offline. No account. The database lives in app-private storage; encrypting it with a Keystore-managed key (SQLCipher) is
 planned but not yet built. Only
-necessary permissions; revocation handled; unnecessary raw streams avoided (raw watch samples are kept 30 days at
-most). Setup can clear all local data. Android backups are disabled.
+necessary permissions; revocation handled; unnecessary raw streams avoided. Everything older than 10 days is deleted
+(§2.12). Setup can clear all local data. Android backups are disabled.
 
 ---
 
@@ -598,24 +661,32 @@ records anywhere except to the user's own paired watch.
 
 # 22. Testing
 
-Unit tests in `shared` cover: classification boundaries, every formula, custom weights and validation, zero
-weights, reset, configuration versioning, reproducible history, missing data, coverage, confidence, baselines
-(initialization, blending, MAD = 0, outliers), cognitive scoring (early and late errors, interruptions, practice
-exclusion, device-specific baselines), peak-window eligibility and no-clear-peak, Moment constraints (five active,
-seven days, past), lifecycle, recommendation priority and de-duplication, optional sensor absence, stale and
-invalid data. Integration and device-compatibility checks follow §22 of the master specification.
+Unit tests in `shared` cover: the sleep model (the paper's ranges: a few lapses rested, the teens after a night awake; 8 h sleep and 2 h awake → high
+P; 24 h awake → low; a nap raises the evening score; the screen-use estimate; three short nights
+lower P progressively; 6 h for 10 nights stays well under the 8 h level), M never above 1 and floored at 0.7,
+short-history and missing signals leave M unchanged, phone HRV at half weight, no game → score = P·M, the 60/40
+blend, the missing-sleep fallbacks, confidence points and caps, settings clamping, calibration bounds, the game
+percentile, 10-day retention, bands, Reaction Test validity and scoring, peak-window eligibility, Moment constraints,
+lifecycle, recommendation priority and de-duplication.
 
 ---
 
 # 23–24. Roadmap and scientific validation
 
-Weights and formulas are hypotheses. Collect 4–8 weeks of data before tuning; evaluate each signal's added value;
-avoid circular validation (Reaction Test is part of the CRS, so the CRS predicting it proves nothing); no machine
-learning in V1; promote optional metrics only after their value and overlap are evaluated.
+Settings and the lapse scale are hypotheses; calibration against each user's tests is the validation loop. Next:
+re-checking the lapse scale and band cut-offs
+against real score distributions. Keep the game out of any claim that "the score predicts the game": it is part of
+the score.
 
 # 25. References
 
-Formula v2 (scoring engine 3.0.0) rests on: Van Dongen et al. 2003 (*Sleep*, chronic restriction); Belenky et al.
+Engine 5: Borbély 1982 (*Hum Neurobiol*) and Borbély et al. 2016 (*J Sleep Res*, two-process model); Van Dongen et
+al. 2003 (*Sleep* 26(2), cumulative cost of wakefulness) and 2004 (*Sleep*, trait-like vulnerability); McCauley et
+al. 2009 (*J Theor Biol*) and 2013 (*Sleep* 36(12), the engine); the 2024 recalibration in *Frontiers in Environmental Health*;
+bioRxiv 2025.01.22.634299 (time constants of the earlier interim engine); MHSRS "Physiologic Predictors of Cognitive Performance";
+*Personal and Ubiquitous Computing* 2025 (wearable sensors and vigilance); Battelino et al. 2019 (CGM events).
+
+Engine 4 and earlier: Formula v2 (scoring engine 3.0.0) rests on: Van Dongen et al. 2003 (*Sleep*, chronic restriction); Belenky et al.
 2003 (*J Sleep Res*); Lim & Dinges 2010 (*Psychol Bull*, meta-analysis); Watson et al. 2015 (AASM/SRS 7 h
 consensus); Li et al. 2022 (*Nature Aging*, 7 h optimum); Phillips et al. 2017 and Windred et al. 2024 (sleep
 regularity); Plews et al. 2013/2014 and Buchheit 2014 (ln RMSSD rolling averages); Forte et al. 2019 (HRV and

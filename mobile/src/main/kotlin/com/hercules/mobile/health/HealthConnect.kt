@@ -20,7 +20,9 @@ import androidx.health.connect.client.records.RestingHeartRateRecord
 import androidx.health.connect.client.records.SkinTemperatureRecord
 import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.StepsRecord
+import androidx.health.connect.client.records.metadata.Device
 import androidx.health.connect.client.records.metadata.Metadata
+import com.hercules.shared.readiness.METADATA_PHONE
 import androidx.health.connect.client.request.AggregateGroupByPeriodRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
@@ -246,6 +248,7 @@ class HealthConnectImporter(private val context: Context, private val store: Cog
                     sourceDevice = device(r.metadata),
                     quality = if (plausible(metric, v)) DataQuality.VALID else DataQuality.INVALID,
                     collection = CollectionMethod.HEALTH_CONNECT,
+                    metadata = if (r.metadata.device?.type == Device.TYPE_PHONE) METADATA_PHONE else null,
                 )
             }
         }

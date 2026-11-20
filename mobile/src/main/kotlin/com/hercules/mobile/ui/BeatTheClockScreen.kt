@@ -304,9 +304,9 @@ private fun FeelCheck(energy: Int, stress: Int, onEnergy: (Int) -> Unit, onStres
             VSpace(4.dp)
             Muted("How are you feeling right now? Skip it if you like.")
             VSpace(12.dp)
-            FeelRow("Energy", listOf("Drained", "Low", "Okay", "Good", "Charged"), null, energy, onEnergy)
+            FeelRow("Energy", BeatTheClock.ENERGY_LABELS, null, energy, onEnergy)
             VSpace(16.dp)
-            FeelRow("Stress", listOf("Calm", "Easy", "Neutral", "Tense", "Very tense"), BeatTheClock.STRESS_FACES, stress, onStress)
+            FeelRow("Stress", BeatTheClock.STRESS_LABELS, BeatTheClock.STRESS_FACES, stress, onStress)
         }
     }
 }
@@ -374,7 +374,7 @@ private fun Result(s: CognitiveSession, playsAfter: Int, onClose: () -> Unit) {
         Text("This test didn't count", style = MaterialTheme.typography.headlineSmall, color = Text1, textAlign = TextAlign.Center)
         VSpace(6.dp)
         Muted(
-            "It needs at least ${BeatTheClock.MIN_TRIALS} reactions, and no more than a quarter of taps before Herc appears.",
+            "A test needs at least ${BeatTheClock.MIN_TRIALS} reactions, with no more than a quarter of taps before Herc appears.",
             Modifier.padding(horizontal = 4.dp),
         )
     } else {
@@ -391,7 +391,7 @@ private fun Result(s: CognitiveSession, playsAfter: Int, onClose: () -> Unit) {
         Muted(
             buildString {
                 append("50 means your usual speed, higher means faster.")
-                append(if (playsAfter > 1) " Today counts the middle score of your $playsAfter tests." else " For your first 3 tests, usual means a typical player.")
+                append(if (playsAfter > 1) " Today counts the middle score of your $playsAfter tests." else " Until Herc knows your speed, usual means a typical player.")
                 if (usual != null) append(" Your usual is about $usual ms.")
             },
             Modifier.padding(horizontal = 4.dp),

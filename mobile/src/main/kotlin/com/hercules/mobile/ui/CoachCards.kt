@@ -2,6 +2,8 @@ package com.hercules.mobile.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -155,7 +157,7 @@ fun InsufficientCard(calc: ReadinessCalculation?, onWhy: () -> Unit, onSetup: ()
         Text(calc?.insufficientReason ?: "Waiting on the first reading", style = MaterialTheme.typography.headlineSmall, color = Text1, textAlign = TextAlign.Center)
         VSpace(8.dp)
         Text(
-            calc?.insufficientDetail ?: "One reading is enough to start: sleep, heart rate, steps, daylight or a Reaction Test.",
+            calc?.insufficientDetail ?: "One night of sleep or a Reaction Test is enough to start.",
             style = MaterialTheme.typography.bodyMedium, color = Text2, textAlign = TextAlign.Center,
             modifier = Modifier.padding(horizontal = 8.dp),
         )
@@ -168,9 +170,9 @@ fun InsufficientCard(calc: ReadinessCalculation?, onWhy: () -> Unit, onSetup: ()
             // Linked but nothing arrives: the tracker app itself has to write to Health Connect.
             EmptyStep(Icons.Rounded.Favorite, "Health Connect is linked, but empty", "Turn on Health Connect sync in your tracker app (Mi Fitness, Samsung Health, Fitbit…). Herc picks it up from there.", onSetup)
         } else {
-            EmptyStep(Icons.Rounded.Favorite, "Connect Health Connect", "Bring in sleep, HRV, resting heart rate, steps and workouts.", onSetup)
+            EmptyStep(Icons.Rounded.Favorite, "Link Health Connect", "Bring in sleep, HRV, resting heart rate, steps and workouts.", onSetup)
         }
-        EmptyStep(Icons.Rounded.Watch, "Or wear the Hercules watch to bed", "It tracks your sleep for you.", onSetup)
+        EmptyStep(Icons.Rounded.Watch, "Or wear the Hercules watch to bed", "It tracks your sleep automatically.", onSetup)
     }
 }
 
@@ -186,6 +188,26 @@ private fun EmptyStep(icon: ImageVector, title: String, hint: String, onClick: (
             Text(title, style = MaterialTheme.typography.bodyLarge, color = Text1)
             Muted(hint)
         }
+    }
+}
+
+/** One labelled progress bar: "Morning ▓▓▓░░ 2/3". [note] replaces the count when something other than a count is missing. */
+@Composable
+private fun ProgressLine(label: String, value: Int, max: Int, note: String? = null) {
+    val done = value >= max
+    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = Text1, modifier = Modifier.width(72.dp))
+        Box(Modifier.weight(1f).height(6.dp).clip(RoundedCornerShape(3.dp)).background(Hairline)) {
+            Box(
+                Modifier.fillMaxWidth((value.coerceIn(0, max).toFloat() / max)).fillMaxHeight()
+                    .clip(RoundedCornerShape(3.dp)).background(if (done) Cyan else Cyan.copy(alpha = 0.55f)),
+            )
+        }
+        HSpace(10.dp)
+        Text(
+            note ?: "${value.coerceAtMost(max)}/$max", fontFamily = Mono, fontSize = 11.sp, color = if (done) Cyan else Text2,
+            modifier = Modifier.width(64.dp), textAlign = TextAlign.End,
+        )
     }
 }
 
@@ -211,7 +233,7 @@ fun PeakCard(peak: PeakWindowPrediction?, today: TimeWindow?, now: Boolean, nowM
                     }
                     peak?.result == PeakResult.PREDICTED -> {
                         Text("${peak.window!!.label} window", style = MaterialTheme.typography.titleLarge, color = Text1)
-                        Muted("Today's has passed. Back at it tomorrow.")
+                        Muted("Today's window has passed. The next one is tomorrow.")
                     }
                     peak?.result == PeakResult.NO_CLEAR_PEAK -> {
                         Text("No clear peak", style = MaterialTheme.typography.titleLarge, color = Text1)
@@ -219,12 +241,17 @@ fun PeakCard(peak: PeakWindowPrediction?, today: TimeWindow?, now: Boolean, nowM
                     }
                     else -> {
                         Text("Herc is still learning", style = MaterialTheme.typography.titleLarge, color = Text1)
-                        val days = peak?.observationDays ?: 0
-                        val weakest = peak?.performance?.minByOrNull { it.sessions }
-                        Muted(
-                            "Needs ${PeakWindowPrediction.MIN_OBSERVATION_DAYS} days and ${PeakWindowPrediction.MIN_SESSIONS_PER_WINDOW} sessions in each window. " +
-                                "So far: $days days" + (weakest?.let { ", ${it.sessions} in the ${it.window.label.lowercase(UiLocale)}." } ?: "."),
-                        )
+                        Muted("Take Reaction Tests in the morning, afternoon and evening. Herc finds your best time once each bar is full.")
+                        VSpace(10.dp)
+                        val need = PeakWindowPrediction.MIN_SESSIONS_PER_WINDOW
+                        ProgressLine("Days", peak?.observationDays ?: 0, PeakWindowPrediction.MIN_OBSERVATION_DAYS)
+                        com.hercules.shared.readiness.AssessmentWindow.entries.forEach { w ->
+                            val p = peak?.performance?.firstOrNull { it.window == w }
+                            val tests = p?.sessions ?: 0
+                            // Enough tests but all on one day: the bar waits at almost-full until another day.
+                            val oneDayShort = tests >= need && (p?.days ?: 0) < PeakWindowPrediction.MIN_DAYS_PER_WINDOW
+                            ProgressLine(w.label, if (oneDayShort) need - 1 else tests, need, if (oneDayShort) "1 more day" else null)
+                        }
                     }
                 }
             }
@@ -283,11 +310,11 @@ fun TonightCard(advice: SleepAdvice, r: Readiness?) {
         advice.tomorrowNote?.let { VSpace(8.dp); Muted(it) }
         if (r != null && advice.ifShort != null && advice.ifTarget != null) {
             VSpace(16.dp)
-            Eyebrow("Tomorrow's readiness")
+            Eyebrow("Tomorrow's score, depending on tonight")
             VSpace(8.dp)
-            ProjectionBar("Sleep 6h", advice.ifShort!!)
+            ProjectionBar("If you sleep 6h", advice.ifShort!!)
             VSpace(8.dp)
-            ProjectionBar("Sleep ${formatHM(advice.targetMinutes)}", advice.ifTarget!!)
+            ProjectionBar("If you sleep ${formatHM(advice.targetMinutes)}", advice.ifTarget!!)
         }
     }
 }
@@ -297,8 +324,8 @@ private fun formatHM(min: Int) = if (min % 60 == 0) "${min / 60}h" else "${min /
 @Composable
 private fun ProjectionBar(label: String, score: Int) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, style = MaterialTheme.typography.bodySmall, color = Text2, modifier = Modifier.weight(0.38f))
-        Box(Modifier.weight(0.5f)) { ScoreBar(score, scoreColor(score), 8.dp) }
+        Text(label, style = MaterialTheme.typography.bodySmall, color = Text2, modifier = Modifier.weight(0.44f))
+        Box(Modifier.weight(0.44f)) { ScoreBar(score, scoreColor(score), 8.dp) }
         Text("~$score", fontFamily = Mono, fontSize = 14.sp, color = Text1, textAlign = TextAlign.End, modifier = Modifier.weight(0.12f))
     }
 }
@@ -308,8 +335,8 @@ private fun ProjectionBar(label: String, score: Int) {
 fun GettingStarted(healthConnected: Boolean, watchLinked: Boolean, practiced: Boolean, onSetup: () -> Unit, onPlay: () -> Unit) {
     val done = listOf(healthConnected, watchLinked, practiced).count { it }
     Section("Get started", trailing = { Text("$done/3", fontFamily = Mono, fontSize = 12.sp, color = Cyan) }) {
-        StartRow(healthConnected, Icons.Rounded.Favorite, "Connect Health Connect", "Feed your score with sleep, heart and activity.", onSetup)
-        StartRow(practiced, Icons.Rounded.Timer, "Take the Reaction Test", "A reaction test. Your first one counts. 3 minutes.", onPlay)
+        StartRow(healthConnected, Icons.Rounded.Favorite, "Link Health Connect", "Feeds your score with sleep and heart signals.", onSetup)
+        StartRow(practiced, Icons.Rounded.Timer, "Take the Reaction Test", "3 minutes. Your very first test already counts.", onPlay)
         StartRow(watchLinked, Icons.Rounded.Watch, "Add your watch (optional)", "Sleep tracking and the Reaction Test on your wrist.", onSetup)
     }
 }

@@ -1,5 +1,7 @@
 package com.hercules.shared.insights
 
+import com.hercules.shared.readiness.RETENTION_DAYS
+
 import com.hercules.shared.data.HerculesRepository
 import com.hercules.shared.model.PersonalRecord
 import com.hercules.shared.model.Sample
@@ -59,11 +61,11 @@ class InsightsService(
     }
 }
 
-/** Raw samples: synced ones kept 30 days, unsynced ones force-deleted after 90 days. */
+/** Raw samples are kept for [RETENTION_DAYS] days, synced or not (spec §2.12). */
 class RetentionPolicy(
     private val repo: HerculesRepository,
-    private val syncedRetentionMs: Long = 30L * 24 * 3600 * 1000,
-    private val hardLimitMs: Long = 90L * 24 * 3600 * 1000,
+    private val syncedRetentionMs: Long = RETENTION_DAYS * 24L * 3600 * 1000,
+    private val hardLimitMs: Long = RETENTION_DAYS * 24L * 3600 * 1000,
 ) {
     suspend fun apply(nowMs: Long): Long =
         repo.deleteSamplesBefore(nowMs - syncedRetentionMs, onlySynced = true) +

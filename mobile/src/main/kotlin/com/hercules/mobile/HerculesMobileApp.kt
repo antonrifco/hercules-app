@@ -6,6 +6,7 @@ import android.util.Log
 import androidx.core.content.edit
 import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.PutDataMapRequest
+import com.hercules.shared.readiness.RETENTION_DAYS
 import com.hercules.shared.sensors.SensorCodec
 import com.hercules.shared.sensors.SensorConfig
 import com.hercules.shared.sensors.SensorReport
@@ -35,6 +36,7 @@ class MobileGraph(private val context: Context) {
     val cognitive = CognitiveService(repo, CognitiveStore(db, Dispatchers.IO), clock = System::currentTimeMillis)
     val healthConnect = HealthConnectImporter(context, cognitive.store, cognitive.dayKeys)
     val light = LightSampler(context, cognitive.store)
+    val screenSleep = com.hercules.mobile.health.ScreenSleepReader(context, cognitive.store, cognitive.dayKeys)
     val capabilities by lazy { PhoneCapabilities(context, healthConnect, light, cognitive.store, cognitive.dayKeys) { lastWatchSync.value } }
 
     private val prefs = context.getSharedPreferences("hercules", Context.MODE_PRIVATE)
@@ -47,13 +49,14 @@ class MobileGraph(private val context: Context) {
     }
 
     /**
-     * Pulls new Health Connect records and recalculates: 30 days the first time, then the last 3, or back to the last
+     * Pulls new Health Connect records and recalculates: 10 days the first time, then the last 3, or back to the last
      * import when that is longer ago (phone off, or background reading not allowed), so no day is skipped.
      */
     suspend fun importHealthAndRefresh() {
         val last = healthConnect.lastImportMs()
-        val days = if (last == null) 30 else ((System.currentTimeMillis() - last) / 86_400_000L + 3).toInt().coerceIn(3, 30)
+        val days = if (last == null) RETENTION_DAYS else ((System.currentTimeMillis() - last) / 86_400_000L + 3).toInt().coerceIn(3, RETENTION_DAYS)
         runCatching { healthConnect.import(days) }.onFailure { Log.w(TAG, "health import failed", it) }
+        runCatching { screenSleep.update() }.onFailure { Log.w(TAG, "screen sleep estimate failed", it) }
         refreshAndPushToWatch()
     }
 

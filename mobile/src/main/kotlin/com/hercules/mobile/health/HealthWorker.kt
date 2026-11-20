@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Background work every 15 minutes (the shortest WorkManager allows): one opportunistic light reading, a Health Connect import, recalculation and a push to
- * the watch. Old light readings are pruned after 60 days.
+ * the watch. Data older than 10 days is deleted by the daily purge in `CognitiveService.refresh`.
  */
 class HealthWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
@@ -22,7 +22,6 @@ class HealthWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         runCatching { g.light.sampleOnce(LightContext.BACKGROUND) }
         g.askWatchToSync()
         g.importHealthAndRefresh()
-        runCatching { g.cognitive.store.deleteLightBefore(System.currentTimeMillis() - 60 * 86_400_000L) }
         return Result.success()
     }
 

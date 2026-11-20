@@ -57,6 +57,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 samplesBetween:
 SELECT * FROM sample WHERE start_ms >= :fromMs AND start_ms < :toMs ORDER BY start_ms, id;
 
+samplesOfTypeBetween:
+SELECT * FROM sample WHERE type = :type AND start_ms >= :fromMs AND start_ms < :toMs ORDER BY start_ms, id;
+
 pendingSamples:
 SELECT * FROM sample WHERE synced = 0 ORDER BY start_ms, id LIMIT :limit;
 
@@ -420,6 +423,9 @@ INSERT OR REPLACE INTO sleep_session VALUES ?;
 sleepSessionsForDay:
 SELECT * FROM sleep_session WHERE day_key = ? ORDER BY start_ms;
 
+sleepSessionsRange:
+SELECT * FROM sleep_session WHERE day_key BETWEEN :fromKey AND :toKey ORDER BY start_ms;
+
 upsertExercise:
 INSERT OR REPLACE INTO exercise_session VALUES ?;
 
@@ -438,8 +444,6 @@ SELECT * FROM light_sample ORDER BY measured_ms DESC LIMIT 1;
 countLightSince:
 SELECT COUNT(*) FROM light_sample WHERE measured_ms >= ?;
 
-deleteLightBefore:
-DELETE FROM light_sample WHERE measured_ms < ?;
 
 upsertCognitiveSession:
 INSERT OR REPLACE INTO cognitive_session VALUES ?;
@@ -543,26 +547,39 @@ DELETE FROM moment_snapshot;
 clearKv:
 DELETE FROM kv;
 
--- remove demo data only (Developers); derived tables are cleared and rebuilt by the caller --
-deleteDemoSamples:
-DELETE FROM sample WHERE device_id = 'demo';
-deleteDemoMetrics:
-DELETE FROM health_metric WHERE id LIKE 'demo:%';
-deleteDemoSleepSessions:
-DELETE FROM sleep_session WHERE id LIKE 'demo:%';
-deleteDemoExercise:
-DELETE FROM exercise_session WHERE id LIKE 'demo:%';
-deleteDemoLight:
-DELETE FROM light_sample WHERE id LIKE 'demo:%';
-deleteDemoRounds:
-DELETE FROM cognitive_round WHERE session_id LIKE 'demo:%';
-deleteDemoCognitive:
-DELETE FROM cognitive_session WHERE id LIKE 'demo:%';
-deleteDemoEvents:
-DELETE FROM plan_event WHERE id LIKE 'demo-%';
-deleteDemoTasks:
-DELETE FROM prep_task_done WHERE event_id LIKE 'demo-%';
-deleteDemoReflections:
-DELETE FROM event_reflection WHERE event_id LIKE 'demo-%';
-deleteDemoSnapshots:
-DELETE FROM moment_snapshot WHERE moment_id LIKE 'demo-%';
+-- Rolling 10-day retention (spec §2.12): raw values, nights, tests and daily scores older than the window go.
+purgeSamples:
+DELETE FROM sample WHERE start_ms < :cutoff;
+
+purgeWorkouts:
+DELETE FROM workout_session WHERE start_ms < :cutoff;
+
+purgeDaily:
+DELETE FROM daily_summary WHERE day_key < :cutoffKey;
+
+purgeMetrics:
+DELETE FROM health_metric WHERE day_key < :cutoffKey;
+
+purgeSleepSessions:
+DELETE FROM sleep_session WHERE day_key < :cutoffKey;
+
+purgeSleep:
+DELETE FROM sleep_night WHERE day_key < :cutoffKey;
+
+purgeExercise:
+DELETE FROM exercise_session WHERE start_ms < :cutoff;
+
+purgeLight:
+DELETE FROM light_sample WHERE measured_ms < :cutoff;
+
+purgeRounds:
+DELETE FROM cognitive_round WHERE session_id IN (SELECT id FROM cognitive_session WHERE start_ms < :cutoff);
+
+purgeCognitive:
+DELETE FROM cognitive_session WHERE start_ms < :cutoff;
+
+purgeReadiness:
+DELETE FROM readiness_day WHERE day_key < :cutoffKey;
+
+purgeEvaluations:
+DELETE FROM kv WHERE key LIKE 'evaluation:%' AND key < :cutoffKvKey;

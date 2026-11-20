@@ -22,6 +22,9 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            // Signed with the debug key until there is a real release key, so it installs over debug builds (same
+            // data). A debug build runs about twice as slow on the watch; use this one on a real watch.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {

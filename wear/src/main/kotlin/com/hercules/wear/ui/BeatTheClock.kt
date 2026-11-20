@@ -258,8 +258,8 @@ private fun FeelCheck(energy: Int, stress: Int, onEnergy: (Int) -> Unit, onStres
         ScalingLazyColumn(state = listState, contentPadding = padding, modifier = Modifier.fillMaxSize()) {
             item { Text("DONE · QUICK CHECK", fontSize = 9.sp, letterSpacing = 1.2.sp, color = BCyan) }
             item { Text("How do you feel?", style = MaterialTheme.typography.titleSmall, color = Color.White) }
-            item { Stepper("Energy", null, energy, onEnergy) }
-            item { Stepper("Stress", BeatTheClock.STRESS_FACES, stress, onStress) }
+            item { Stepper("Energy", BeatTheClock.ENERGY_LABELS, null, energy, higherIsBetter = true, onEnergy) }
+            item { Stepper("Stress", BeatTheClock.STRESS_LABELS, BeatTheClock.STRESS_FACES, stress, higherIsBetter = false, onStress) }
             item { Button(onClick = onSave, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) { Text("See result") } }
             item { OutlinedButton(onClick = onSkip, modifier = Modifier.fillMaxWidth()) { Text("Skip") } }
         }
@@ -267,17 +267,24 @@ private fun FeelCheck(energy: Int, stress: Int, onEnergy: (Int) -> Unit, onStres
 }
 
 @Composable
-private fun Stepper(label: String, faces: List<String>?, value: Int, onChange: (Int) -> Unit) {
-    // Centred label over a centred stepper: nothing sits near the round edge.
+private fun Stepper(label: String, words: List<String>, faces: List<String>?, value: Int, higherIsBetter: Boolean, onChange: (Int) -> Unit) {
+    // Centred label over a centred stepper: nothing sits near the round edge. The word under the picture changes
+    // with the value, coloured from red (bad) to green (good), so the scale reads without guessing.
+    val good = if (higherIsBetter) value else 6 - value
+    val tone = listOf(Color(0xFFFF4D6D), Color(0xFFFF8A3D), Color(0xFFFFC53D), Color(0xFFB4E05A), Color(0xFF4ADE80))[good - 1]
     Column(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(label.uppercase(), fontSize = 9.sp, letterSpacing = 1.2.sp, color = BText2)
         Row(verticalAlignment = Alignment.CenterVertically) {
             StepButton("−", "Less $label", enabled = value > 1) { onChange(value - 1) }
             // Energy is Herc himself, from drained to prime; stress uses plain faces.
-            if (faces == null) Herc(listOf(HercMood.DRAINED, HercMood.LOW, HercMood.FAIR, HercMood.GOOD, HercMood.PRIME)[value - 1], Modifier.padding(horizontal = 8.dp), size = 34.dp)
-            else Text(faces[value - 1], fontSize = 22.sp, modifier = Modifier.padding(horizontal = 12.dp))
+            if (faces == null) Herc(listOf(HercMood.DRAINED, HercMood.LOW, HercMood.FAIR, HercMood.GOOD, HercMood.PRIME)[value - 1], Modifier.padding(horizontal = 6.dp), size = 54.dp)
+            else Text(faces[value - 1], fontSize = 34.sp, modifier = Modifier.padding(horizontal = 10.dp))
             StepButton("+", "More $label", enabled = value < 5) { onChange(value + 1) }
         }
+        Text(
+            words[value - 1], fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = tone,
+            modifier = Modifier.semantics { contentDescription = "$label: ${words[value - 1]}" },
+        )
     }
 }
 
@@ -318,7 +325,7 @@ private fun Result(s: CognitiveSession, onDone: () -> Unit) {
             }
             item {
                 Text(
-                    if (score == null) "Needs ${BeatTheClock.MIN_TRIALS}+ reactions and few false starts."
+                    if (score == null) "Not counted: needs ${BeatTheClock.MIN_TRIALS}+ reactions and few false starts."
                     else "${BeatTheClock.verdict(score)}\n50 is your usual. Higher is faster.",
                     fontSize = 10.sp, color = BText2, textAlign = TextAlign.Center,
                 )

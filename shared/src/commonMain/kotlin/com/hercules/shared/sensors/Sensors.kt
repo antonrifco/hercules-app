@@ -9,12 +9,12 @@ import kotlinx.serialization.json.Json
  */
 @Serializable
 enum class SensorKind(val label: String, val feeds: String) {
-    HEART_RATE("Heart rate", "Recovery"),
-    SLEEP("Sleep", "Sleep score"),
-    STEPS("Steps", "Activity"),
-    CALORIES("Calories", "Workout stats"),
-    DISTANCE("Distance", "Workout stats"),
-    FLOORS("Floors", "Workout stats"),
+    HEART_RATE("Heart rate", "feeds recovery"),
+    SLEEP("Sleep", "feeds the sleep model"),
+    STEPS("Steps", "today's stats"),
+    CALORIES("Calories", "today's stats"),
+    DISTANCE("Distance", "today's stats"),
+    FLOORS("Floors", "today's stats"),
 }
 
 /** The user's choice. Either device may change it; the newest [updatedMs] wins. */

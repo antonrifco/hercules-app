@@ -76,7 +76,7 @@ class RepositoryTest {
         assertTrue(insights.refresh().isEmpty(), "second run breaks nothing new")
     }
 
-    @Test fun syncMarksOnlyAcceptedAndRetentionRespectsSynced() = runTest {
+    @Test fun syncMarksOnlyAcceptedAndRetentionKeepsTenDays() = runTest {
         val old = dayStart - 40L * 24 * 60 * min
         val ancient = dayStart - 100L * 24 * 60 * min
         val oldSynced = steps(1.0, old)
@@ -86,10 +86,10 @@ class RepositoryTest {
         acceptOne.syncOnce(maxBatches = 1)
         assertEquals(3, repo.observePendingSampleCount().first())
 
-        // ancient (unsynced, >90d) and the synced 40d-old one are deleted; unsynced 40d-old + recent kept
+        // Everything older than 10 days goes, synced or not (spec §2.12); today's sample stays.
         val deleted = RetentionPolicy(repo).apply(dayStart)
-        assertEquals(2, deleted)
-        assertEquals(2, repo.countSamples())
+        assertEquals(3, deleted)
+        assertEquals(1, repo.countSamples())
     }
 
     @Test fun receivedSessionsAreStoredAsSummarized() = runTest {

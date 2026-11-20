@@ -4,6 +4,8 @@
 
     <!-- No INTERNET permission: everything stays on the phone and the watch (spec §17). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Optional, granted in system settings: screen on/off and unlock times for a phone-only sleep estimate. -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
 
     <!-- Health Connect, read only. Required for the score: sleep, HRV, resting HR, steps, exercise. -->
     <uses-permission android:name="android.permission.health.READ_SLEEP" />

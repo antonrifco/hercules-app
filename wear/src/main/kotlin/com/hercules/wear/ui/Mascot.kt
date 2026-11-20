@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -66,6 +67,9 @@ fun Herc(
     eyesOpen: Float? = null,
     eyeColor: Color? = null,
 ) {
+    // Not parsed yet (first second after launch): keep his space and fade him in when ready.
+    val shown by androidx.compose.animation.core.animateFloatAsState(if (hercReady.value) 1f else 0f, tween(300), label = "herc-in")
+    if (!hercReady.value) { androidx.compose.foundation.layout.Box(modifier.size(size)); return }
     val t = rememberInfiniteTransition(label = "herc")
     val blink by t.animateFloat(
         1f, 1f,
@@ -74,7 +78,7 @@ fun Herc(
     )
     val glow by t.animateFloat(0.55f, 1f, infiniteRepeatable(tween(1800, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "glow")
     // Faces crossfade when the band changes; the launch animation keeps one face and opens the eyes instead.
-    Crossfade(mood, animationSpec = tween(450), label = "face", modifier = modifier.size(size)) { m ->
+    Crossfade(mood, animationSpec = tween(450), label = "face", modifier = modifier.size(size).graphicsLayer { alpha = shown }) { m ->
         Canvas(Modifier.size(size).semantics { contentDescription = "Herc the lion, ${m.label.lowercase()}" }) {
             val box = if (pose == HercPose.HEAD) HercArt.HEAD_BOX else IconBox
             val bw = box[2] - box[0]
@@ -104,7 +108,20 @@ private val FaceDark = Color(0xFFF3C378)
 private val Nose = Color(0xFF1A0F08)
 private val EyeRim = Color(0xFF2A1608)
 
-private val paths = HashMap<String, Path>()
+// Shared by the UI and background work (widgets, complications), so it must be thread-safe.
+private val paths = java.util.concurrent.ConcurrentHashMap<String, Path>()
+/**
+ * Parses every face's paths ahead of time, off the main thread. Herc is a few hundred vector paths; parsing them on
+ * the first draw held up the app's first frame on the watch.
+ */
+fun warmHerc() {
+    (HercArt.HEADS + HercArt.EYES).forEach { face -> face.forEach { pathOf(it.d) } }
+    hercReady.value = true
+}
+
+/** True once [warmHerc] is done. Until then Herc isn't drawn, so the first frame never waits for the parsing. */
+private val hercReady = androidx.compose.runtime.mutableStateOf(false)
+
 private fun pathOf(d: String): Path = paths.getOrPut(d) { PathParser().parsePathString(d).toPath() }
 
 private fun DrawScope.drawLion(face: Int, eyes: Color, open: Float, glow: Float) {

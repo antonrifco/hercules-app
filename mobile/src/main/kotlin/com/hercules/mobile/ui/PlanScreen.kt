@@ -73,6 +73,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.graphicsLayer
@@ -91,7 +92,6 @@ import com.hercules.shared.cognitive.EventStatus
 import com.hercules.shared.cognitive.PlanEvent
 import com.hercules.shared.cognitive.ReadinessBand
 import com.hercules.shared.readiness.AssessmentWindow
-import com.hercules.shared.readiness.DefaultScoring
 import com.hercules.shared.readiness.Dimension
 import com.hercules.shared.readiness.MomentRules
 import com.hercules.shared.readiness.MomentStatus
@@ -328,7 +328,7 @@ fun MomentDialog(g: MobileGraph, nowMs: Long, existing: PlanEvent? = null, onDis
                         )
                     }
                 }
-                Muted(if (urgency == Urgency.CRITICAL) "Its prep comes first. Your score itself doesn't change." else "Prepared for as usual.")
+                Muted(if (urgency == Urgency.CRITICAL) "Its prep comes first. Your score itself doesn't change." else "The usual prep plan.")
                 VSpace(14.dp)
                 Eyebrow("When")
                 VSpace(8.dp)
@@ -391,7 +391,7 @@ private fun PeakHint(window: AssessmentWindow, wakeMs: Long, startMs: Long) {
     val text = when {
         startMs in from until to -> "Right in your peak window (${clockOf(from)}–${clockOf(to)}): when you're at your sharpest."
         startMs in (from - near) until (to + near) -> "Close to your peak window (${clockOf(from)}–${clockOf(to)})."
-        else -> "Outside your peak window (${clockOf(from)}–${clockOf(to)}). No problem: Herc will get you ready for the time you picked."
+        else -> "Outside your peak window (${clockOf(from)}–${clockOf(to)}). That's fine: Herc gets you ready for the time you picked."
     }
     Row(verticalAlignment = Alignment.Top) {
         Icon(Icons.Rounded.Bolt, null, tint = Cyan, modifier = Modifier.size(14.dp).padding(top = 2.dp))
@@ -581,20 +581,20 @@ fun EventDetail(
     }
 }
 
-/** On-demand guide: the score scale, the five dimensions, Reaction Test windows, and the limits. */
+/** On-demand guide: the score scale, how the score is made, Reaction Test windows, and the limits. */
 @Composable
-fun GuideContent(weights: Map<Dimension, Double> = DefaultScoring.DEFAULT.weights) {
+fun GuideContent() {
     Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp).verticalScroll(rememberScrollState())) {
         Eyebrow("Guide")
         VSpace(6.dp)
         Text("Reading your score", style = MaterialTheme.typography.headlineSmall, color = Text1)
-        Muted("Your cognitive state (0–100) shows how ready you are to focus and make sharp calls today, measured against your own normal.")
+        Muted("Your cognitive score (1–100) estimates how alert you are right now: how ready you are to focus and make sharp calls, measured against your own normal.")
         VSpace(18.dp)
         ReadinessBand.entries.forEachIndexed { i, b ->
             val upper = if (i == 0) 100 else ReadinessBand.entries[i - 1].minScore - 1
             Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("${b.minScore}–$upper".padEnd(7), fontFamily = Mono, fontSize = 13.sp, color = b.color, modifier = Modifier.width(72.dp))
-                Herc(b.mood(), size = 30.dp)
+                Text("${b.minScore}–$upper".padEnd(7), fontFamily = Mono, fontSize = 13.sp, color = b.color, modifier = Modifier.width(64.dp))
+                Herc(b.mood(), size = 52.dp)
                 HSpace(10.dp)
                 Column {
                     Eyebrow(b.label, color = b.color)
@@ -603,33 +603,37 @@ fun GuideContent(weights: Map<Dimension, Double> = DefaultScoring.DEFAULT.weight
             }
         }
         Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("--".padEnd(7), fontFamily = Mono, fontSize = 13.sp, color = InsufficientColor, modifier = Modifier.width(72.dp))
-            Herc(HercMood.SLEEPING, size = 30.dp)
+            Text("--".padEnd(7), fontFamily = Mono, fontSize = 13.sp, color = InsufficientColor, modifier = Modifier.width(64.dp))
+            Herc(HercMood.SLEEPING, size = 52.dp)
             HSpace(10.dp)
             Column {
                 Eyebrow("Insufficient data", color = InsufficientColor)
-                Text("Nothing has come in for today yet. One reading is enough to start; until then Herc won't guess.", style = MaterialTheme.typography.bodyMedium, color = Text1)
+                Text("No sleep on record and no recent Reaction Test. Either one is enough to start; until then Herc won't guess.", style = MaterialTheme.typography.bodyMedium, color = Text1)
             }
         }
         VSpace(18.dp)
-        Eyebrow("Five dimensions", color = Text1)
+        Eyebrow("How the score is made", color = Text1)
         VSpace(8.dp)
-        Dimension.entries.forEach { d ->
-            val w = weights[d] ?: 0.0
-            Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        listOf(
+            Dimension.SLEEP to "A published sleep model (McCauley 2013) predicts your alertness from every night and nap of the last 10 days and the time of day. Sleep debt builds over short nights; your body clock adds a daily rise and dip.",
+            Dimension.CARDIO to "HRV, resting heart rate and skin temperature (plus glucose, oxygen and breathing when you have them) are compared with your last 10 days. Only readings worse than your usual lower the score, by at most 30%.",
+            Dimension.COGNITIVE to "A Reaction Test from the last 2 hours is blended in at 60%: it is the one direct measure of how you're doing. Without sleep on record, the test alone gives the score.",
+        ).forEach { (d, text) ->
+            Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.Top) {
                 Icon(d.icon, null, tint = Cyan, modifier = Modifier.size(16.dp))
                 HSpace(10.dp)
-                Text(d.label, style = MaterialTheme.typography.bodyMedium, color = Text1, modifier = Modifier.weight(1f))
-                Text("${(w * 100).roundToInt()}%", fontFamily = Mono, color = Text1)
+                Column {
+                    Text(d.label, style = MaterialTheme.typography.bodyMedium, color = Text1)
+                    Text(text, style = MaterialTheme.typography.bodySmall, color = Text2)
+                }
             }
-            ScoreBar((w * 250).toInt().coerceAtMost(100), Cyan, 2.dp)
         }
         VSpace(8.dp)
-        Muted("Missing dimensions are left out and the rest re-weighted. Coverage says how much of the weight had data; confidence follows from it.")
+        Muted("The score follows the day: it is highest soon after a good night and falls as the hours awake add up. From 20 Reaction Tests, Hercules tunes the model to you. Confidence (0–100%) says how much data is behind the number.")
         VSpace(18.dp)
         Eyebrow("Reaction Test", color = Text1)
         VSpace(6.dp)
-        Muted("Optional. Play any time, once or several times a day; the day counts the median of your runs. Herc files each run under a part of your day:")
+        Muted("Optional. Play any time, as often as you like. For 2 hours afterwards the score uses the middle result of your recent tests. Each test is filed under a part of your day:")
         VSpace(8.dp)
         AssessmentWindow.entries.forEach { w ->
             Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -640,12 +644,12 @@ fun GuideContent(weights: Map<Dimension, Double> = DefaultScoring.DEFAULT.weight
             }
         }
         VSpace(8.dp)
-        Muted("After ${PeakWindowPrediction.MIN_OBSERVATION_DAYS} days with at least ${PeakWindowPrediction.MIN_SESSIONS_PER_WINDOW} runs in every part of the day, Herc predicts your peak focus window.")
+        Muted("After ${PeakWindowPrediction.MIN_OBSERVATION_DAYS} days with at least ${PeakWindowPrediction.MIN_SESSIONS_PER_WINDOW} Reaction Tests in every part of the day (on ${PeakWindowPrediction.MIN_DAYS_PER_WINDOW} different days), Herc predicts your peak focus window.")
         VSpace(18.dp)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Rounded.Info, null, tint = Text2, modifier = Modifier.size(14.dp))
             HSpace(8.dp)
-            Muted("An estimate for everyday decisions, not a medical device.")
+            Muted("A wellness estimate for everyday decisions, not a medical or safety assessment. Don't use it to decide whether you can drive or operate machinery.")
         }
     }
 }

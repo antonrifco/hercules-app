@@ -4,7 +4,7 @@
 
 ![Hercules — Know when your brain is ready.](docs/images/hercules-hero.jpg)
 
-**Know when your brain is ready.** Hercules turns the signals your phone, watch and Health Connect already collect (sleep, heart rate variability, resting heart rate, activity, daylight) plus a 3-minute reaction test, **Reaction Test**, into a daily **Cognitive Readiness Score (0–100)**. It shows how much to trust that number, finds the time of day you tend to think best, and helps you prepare for important **Moments** in the next 7 days.
+**Know when your brain is ready.** Hercules turns the signals your phone, watch and Health Connect already collect (sleep, heart rate variability, resting heart rate, skin temperature) plus a 3-minute reaction test, **Reaction Test**, into a **cognitive score (1–100)** for right now. It shows how much to trust that number, finds the time of day you tend to think best, and helps you prepare for important **Moments** in the next 7 days.
 
 Android phone and Wear OS watch today (Kotlin Multiplatform), built so iOS and watchOS can follow with the same core logic. The full product and technical specification is [`docs/SPEC.md`](docs/SPEC.md).
 
@@ -24,13 +24,13 @@ Hercules answers three questions, in three menus:
 | *When do I tend to perform best?* | **Home**: Peak Cognitive Window, once enough reaction tests exist |
 | *What can I do to prepare for an important Moment?* | **Moments**: up to 5 Moments, 7 days ahead, with preparation status |
 
-**Setup** holds Health Connect, sensors and devices, scoring weights, baselines, reminders, data and legal pages.
+**Setup** holds Health Connect, sensors and devices, score settings, baselines, About Hercules, reminders, data and legal pages.
 
 ## 2. Daily flow
 
 1. **Data arrives on its own.** Health Connect is read when the app opens, every 5 minutes while it is open, and about every 15 minutes in the background (the watch records its sensors continuously and hands new readings to the phone within about 10 minutes; the phone also asks the watch for them every 15 minutes while it is connected). Every new batch of data recalculates the score. "Sync now" is optional. The Hercules watch is one more provider.
-2. **A score appears from the first data point.** One night of sleep or one Reaction Test is enough. The confidence line under the score says how far to trust it.
-3. **Reaction Test (optional, any time, 3 minutes).** A reaction test modelled on the brief Psychomotor Vigilance Test (PVT-B), the standard measure of how tiredness slows attention. Herc pops up every 1 to 4 seconds; tap anywhere as fast as you can, 45 times (about 3 minutes). The screen shows how far you are ("3 of 45") and a timer that runs from Herc's appearance until your tap. Tapping before he appears is a false start. The score compares your reaction speed with your usual (50 = usual) and shows your typical reaction time, slow reactions (500 ms+) and false starts. The first test is scored against a typical-player reference; from the fourth on, against your own usual. Phone and watch keep separate baselines, since their screens respond differently.
+2. **A score appears from the first night or test.** One night of sleep or one Reaction Test is enough. The confidence line under the score says how far to trust it.
+3. **Reaction Test (optional, any time, 3 minutes).** A reaction test modelled on the brief Psychomotor Vigilance Test (PVT-B), the standard measure of how tiredness slows attention. Herc pops up every 1 to 4 seconds; tap anywhere as fast as you can, 45 times (about 3 minutes). The screen shows how far you are ("3 of 45") and a timer that runs from Herc's appearance until your tap. Tapping before he appears is a false start. The test score compares your reaction speed with your usual (50 = usual) and shows your typical reaction time, slow reactions (500 ms+) and false starts. The first test is scored against a typical-player reference; from the fourth on, against your own usual; from five tests in 10 days, it is your rank among them. For 2 hours after a test, it makes up 60% of your score. Phone and watch keep separate baselines, since their screens respond differently.
 4. **One next step.** The coach (`Coach.kt`) picks the single most useful action: play, prepare for a Moment, reflect on one, sleep earlier, or use your peak window. Phone and watch say the same thing.
 5. **Sleep looks wrong?** Tap **Edit times** (or **Add sleep**) in the Sleep section. A corrected night is never overwritten by automatic detection.
 
@@ -40,7 +40,7 @@ Hercules answers three questions, in three menus:
 
 **Reminders** (all optional, in Setup): morning score, Reaction Test, Moment prep (evening before and shortly ahead), bedtime, after a Moment, and focus start (off by default). **Only one device delivers each reminder:** the watch while it is worn, the phone otherwise.
 
-**Home-screen widgets** (Setup › Home screen widgets): today's score with a Test Reaction button (2×2), today's stats (2×2) and this week's scores (4×2). They update whenever the score does. On Xiaomi, allow *Home screen shortcuts* for Hercules first.
+**Home-screen widgets** (Setup › Home screen widgets): today's score with a Test Reaction button (2×2), today's steps, distance, resting pulse and sleep (2×2) and the last 10 days' scores (4×2). They update whenever the score does. On Xiaomi, allow *Home screen shortcuts* for Hercules first.
 
 **Watch:** score with Herc, level and confidence, one next step, today's pulse, sleep and steps, Reaction Test (same rules as the phone), live pulse while the app is open, Sync now, upcoming Moments, and a tracking-status screen. A **watch-face complication** ("Hercules score") puts the score on the watch face; tapping it opens the app.
 
@@ -54,35 +54,45 @@ Hercules answers three questions, in three menus:
 | 40–54 | **Low** | Postpone non-urgent big decisions if you can |
 | 0–39 | **Drained** | Light tasks, recover, sleep early |
 
-**Confidence** sits right under the score and is separate from the level:
+The score follows the day: highest soon after a good night, falling as the hours awake add up.
 
-| Signals in today | Full days of data | Confidence |
-|---|---|---|
-| ≥ 90% of the weighted signals | ≥ 7 | High |
-| ≥ 50% (sleep alone is 65%) | ≥ 3 | Medium |
-| less | | Low |
+**Confidence** (0–100%) sits right under the score and is separate from the level. It adds up points for what is
+behind the number: sleep from a watch 35 (phone estimate 15, usual sleep assumed 5), 8+ days of data 15 (5–7: 8),
+HRV 8, resting heart rate 8 and skin temperature 8 (phone readings 4), a Reaction Test in the last 2 hours 19 (or 12
+once Hercules is tuned to you), up to 7 for extra sensors, minus 5 for custom settings. **High** 75%+, **Medium**
+50–74%, **Low** under 50%. Without sleep from a watch it can't reach High. It reads like *"Medium confidence · 61% ·
+sleep: phone · 6 days of data"*, and below High it says what would raise it. **Why this score** opens from the score
+and lists every part.
 
-It reads like *"Medium confidence · 4 of 5 score parts · 5 days of data"*, and below High it says what would raise it (*"To raise it: add a Reaction Test; 2 more days of data."*). **Why this score** opens from the score and shows every dimension, metric, deduction and the configuration used.
+## 4. How the score is built (engine 5)
 
-## 4. How the score is built (default configuration v4)
+1. **Sleep model:** McCauley et al. 2013, a published model of attention lapses under sleep loss (values from the
+   paper), runs through every night and nap of the last 10 days. Sleep debt builds over short nights; the body clock
+   adds a daily rise and dip, moved to your usual wake time. Predicted lapses become **predicted alertness P**.
+2. **Recovery M** (0.7–1): HRV, resting heart rate and skin temperature, each against your own last 10 days. Only
+   readings worse than your usual lower the score (5% per standard deviation to start), by at most 30% in total.
+   Optional: glucose, blood oxygen and breathing rate the same way.
+3. **Reaction Test G**: if you took one in the last 2 hours, `score = 60% G + 40% P×M`; otherwise `score = P×M`.
+4. **Tuned to you:** from 20 tests, Hercules fits your body-clock peak and how much each recovery signal matters for
+   you.
 
-| Dimension | Weight | What is measured | Evidence |
-|---|---|---|---|
-| Sleep & Recovery | 65% | 3-night sleep load (0.60 / 0.25 / 0.15; 7–9 h = full marks) 55%, sleep regularity 25%, continuity 20% | Van Dongen 2003, Lim & Dinges 2010, Watson 2015, Phillips 2017 |
-| Cardiovascular | 10% | HRV (ln RMSSD, 3-night average vs. your 28-day usual) 70%, resting heart rate vs. usual 30% | Plews 2013/2014, Buchheit 2014, Forte 2019 |
-| Physical Activity | 10% | Yesterday's steps, exercise minutes, low-movement hours (more is not always better) | Chang 2012, Wheeler 2020 |
-| Circadian Alignment | 5% | Phone light sensor: bright mornings and days, dim evenings | Brown 2022 |
-| Cognitive Performance | 10% | Today's Reaction Test: reaction speed (median of the day's tests). One test counts 60% of this weight, two 80%, three or more in full | |
-
-- **Missing is never zero.** A missing dimension is left out and the others are re-weighted; it lowers confidence, not the score.
-- **Optional extras only subtract** (max −10 in total, after 7 days of history): breathing rate or skin temperature clearly above your usual (−5 each), low overnight oxygen (−5), glucose under 3.9 mmol/L in the last 24 hours (−5) or under 3.0 (−10), for about 15 minutes on a CGM (one dip is ignored) or one meter reading. A low glucose reading from the last 3 hours also shows a live banner on Home.
-- **Weights are editable** in Setup (must total 100%, never silently normalized). Reset asks for confirmation. Every stored score keeps the configuration and engine version it was calculated with.
-- **New data updates the score.** Every sync recalculates today and the previous 2 days (late sleep or steps land on the right day), each with its original weights. Older days are never rewritten.
-- **Today tiles** (steps, distance, resting and peak pulse, energy, floors) come from Health Connect's totals or the Hercules watch, whichever recorded more, and have their own **Sync** button.
+- **Missing is never zero.** A missing signal is left out. Without a watch, sleep comes from Health Connect or,
+  if you allow Usage Access, from your screen going off and your first unlock (never your apps). With no sleep on
+  record, a recent test alone gives the score; otherwise your usual sleep window stands in (Low confidence).
+- **One source per signal:** a wearable's reading beats a phone's, and each keeps its own baseline. Phone readings
+  count half.
+- **Score settings** (Setup): sliders for sleep influence, body clock, each recovery signal and the test's weight.
+  Reset asks first. Any change lowers confidence by 5 points. Every stored score keeps the settings and engine
+  version it was calculated with.
+- **New data updates the score.** Every sync recalculates now and the previous 2 days (a past day is shown as it
+  stood 6 hours after waking). Older days are never rewritten.
+- **10 days only.** Everything older than 10 days is deleted from your devices, day by day. Only the tuning numbers
+  and your settings are kept.
+- **Today tiles** (steps, distance, resting and peak pulse, energy, floors) come from Health Connect's totals or the Hercules watch, whichever recorded more, and have their own **Sync** button. Steps, activity and light are shown, not scored.
 
 ## 5. Peak Cognitive Window
 
-Each Reaction Test is filed under morning (0–4 h after waking), afternoon (4–8 h) or evening (8 h+). After 7 days, with at least 4 valid tests on 3 different days in every part of the day (current game version only), Hercules names the part of the day you perform best, or says there is no clear peak.
+Each Reaction Test is filed under morning (0–4 h after waking), afternoon (4–8 h) or evening (8–16 h; still up late counts as evening). After 5 days, with at least 3 valid tests on 2 different days in every part of the day (current game version only), Hercules names the part of the day you perform best, or says there is no clear peak.
 
 ## 6. Moments (up to 7 days ahead)
 
@@ -94,8 +104,8 @@ Add a title, urgency (Normal or Critical), date and hour. Each Moment gets a **p
 
 ## 8. Important limits
 
-- Hercules is a **decision aid, not a medical device**. It doesn't diagnose anything.
-- The formula rests on published research, but the weights are product hypotheses, not a clinical validation of this app.
+- Hercules is a **wellness estimate, not a medical or safety assessment**. It doesn't diagnose anything, and it must never decide whether you can drive or operate machinery.
+- The model rests on published research (McCauley 2013), but the 1–100 scale and the settings are product hypotheses, not a clinical validation of this app. Caffeine, alcohol, medication and illness aren't modelled.
 - Data stays on your devices. No backend, no account.
 
 ---
@@ -125,7 +135,7 @@ All scoring and coaching logic is in `shared`, so the watch can compute a score 
 
 | Module | Contents |
 |---|---|
-| `shared/` | `readiness/` `Scoring.kt` (dimensions, CRS, confidence, extras), `Assessment.kt` (Reaction Test, peak window), `Moments.kt`, `HealthData.kt`, `Stats.kt` · `cognitive/` `CognitiveService` (orchestration) + `CognitiveStore`, `Coach`, `Nudges`, `ReadinessEngine` (sleep analysis) · `model/`, `insights/`, `data/` watch samples and daily summaries · `sensors/` · `sync/` batch sync + wire format · `demo/` synthetic data · `sqldelight/` schema |
+| `shared/` | `readiness/` `Scoring.kt` (sleep model, recovery, calibration, confidence, settings), `Assessment.kt` (Reaction Test, peak window), `Moments.kt`, `HealthData.kt`, `Stats.kt` · `cognitive/` `CognitiveService` (orchestration) + `CognitiveStore`, `Coach`, `Nudges`, `ReadinessEngine` (sleep analysis) · `model/`, `insights/`, `data/` watch samples and daily summaries · `sensors/` · `sync/` batch sync + wire format · `demo/` synthetic data · `sqldelight/` schema |
 | `wear/` | `health/` passive monitoring, sleep, sensor settings · `sync/` phone sink, periodic worker, `WatchStateSource` · `notify/` reminders · `ui/` home, Reaction Test, Moments (Wear Compose M3) |
 | `mobile/` | `health/` Health Connect reader, background worker, phone light sensor · `sync/` receives watch batches · `notify/` reminders · `ui/` Home (`TodayScreen`, `CoachCards`), Moments (`PlanScreen`), Setup (`DataScreen`), `BeatTheClockScreen`, onboarding (`Journey`), legal |
 
@@ -177,8 +187,7 @@ Both apps share the `applicationId` `com.hercules.app`, which the Wearable Data 
 adb shell am start -n com.hercules.app/com.hercules.mobile.ui.MainActivity --ez demo true
 ```
 
-You can also use **Setup → Developers → Load demo data**.
-The same page has a **Score check**: how well the body part of your score has tracked your Reaction Test results (needs 30 days with both).
+**Setup → Score settings** also shows **Personal tuning**: tests counted toward the 20 needed, and the fitted values once tuned.
 
 The watch has the same switch, so its UI can be checked on an unpaired Wear OS emulator (grant the sensor permissions first, or tap Allow):
 
@@ -186,7 +195,7 @@ The watch has the same switch, so its UI can be checked on an unpaired Wear OS e
 adb -s <watch-serial> shell am start -n com.hercules.app/com.hercules.wear.ui.MainActivity --ez demo true
 ```
 
-With no data at all the score shows "Waiting on the first reading"; any one reading gives a (low-confidence) score.
+With no sleep and no recent test the score shows "Waiting on sleep or a Reaction Test"; a night or a test gives a score.
 
 **Synthetic sensors on a Wear emulator:**
 
@@ -219,11 +228,10 @@ The UI is designed as a **precision instrument**, not a wellness toy: matte blac
 
 | Journey step | Illustration |
 |---|---|
-| Onboarding 01 · Meet Herc | `ill_score`: head profile inside a precision dial |
-| Onboarding 02 · Health Connect | `ill_sleep`: sleep wave flowing into a watch |
-| Onboarding 03 · Reaction Test | `ill_checkin`: rings aligning |
-| Onboarding 04 · Moments, and the empty Moments screen | `ill_plan`: seven ascending platforms to a diamond |
-| Onboarding 05 · The watch | `ill_no_watch`: broken signal arc |
+| Welcome dialog 1 · One score | `ill_score`: head profile inside a precision dial |
+| Welcome dialog 2 · No logging | `ill_sleep`: sleep wave flowing into a watch |
+| Welcome dialog 3 · Test, then plan | `ill_checkin`: rings aligning |
+| Empty Moments screen | `ill_plan`: seven ascending platforms to a diamond |
 
 **Launch.** The system splash (Android 12+ API, backported) shows the mark on the brand black. On a cold start it hands off to an **animated splash**: Kling 3.0 via Higgsfield, converted to an animated WebP in `res/raw/splash_anim.webp` and played with `AnimatedImageDrawable`. Tap to skip.
 

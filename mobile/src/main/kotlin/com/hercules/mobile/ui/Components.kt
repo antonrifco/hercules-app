@@ -172,6 +172,7 @@ fun stampOf(ms: Long) = fmt("EEE, d MMM, HH:mm", ms)
 fun longDate(ms: Long) = fmt("EEEE, d MMMM", ms)
 fun shortDate(ms: Long) = fmt("EEE, d MMM", ms)
 fun weekdayShort(ms: Long) = fmt("EEE", ms)
+fun dayOfMonth(ms: Long) = fmt("d", ms)
 
 fun dayTag(daysUntil: Int): String = when {
     daysUntil < 0 -> "Done"
@@ -221,6 +222,12 @@ fun PanelBox(modifier: Modifier = Modifier, accent: Color? = null, content: @Com
         if (accent != null) Box(Modifier.width(3.dp).fillMaxHeight().background(accent))
         Box(Modifier.weight(1f).padding(16.dp)) { content() }
     }
+}
+
+/** "Last sync", "Last data", "Last: …": when something last arrived. One look everywhere: small, pale white. */
+@Composable
+fun LastText(text: String, modifier: Modifier = Modifier) {
+    Text(text, style = MaterialTheme.typography.bodySmall, color = Text1, modifier = modifier)
 }
 
 @Composable
@@ -422,4 +429,23 @@ fun Illustration(res: Int, modifier: Modifier = Modifier) {
         modifier = modifier,
         contentScale = androidx.compose.ui.layout.ContentScale.Fit,
     )
+}
+
+/**
+ * The app's backdrop behind every page: still black, with a faint dot grid and two soft glows (cyan top right,
+ * green lower left), so pages don't feel flat without fighting the cards. The Reaction Test stays plain.
+ */
+fun androidx.compose.ui.graphics.drawscope.DrawScope.appBackdrop() {
+    val w = size.width
+    val h = size.height
+    drawRect(androidx.compose.ui.graphics.Brush.radialGradient(listOf(Cyan.copy(alpha = 0.10f), androidx.compose.ui.graphics.Color.Transparent), center = androidx.compose.ui.geometry.Offset(w * 0.9f, h * 0.05f), radius = w * 0.9f))
+    drawRect(androidx.compose.ui.graphics.Brush.radialGradient(listOf(Prima.copy(alpha = 0.07f), androidx.compose.ui.graphics.Color.Transparent), center = androidx.compose.ui.geometry.Offset(w * 0.05f, h * 0.7f), radius = w * 0.8f))
+    val step = 22.dp.toPx()
+    val dot = 1.dp.toPx()
+    var y = step / 2
+    while (y < h) {
+        var x = step / 2
+        while (x < w) { drawCircle(Hairline, dot, androidx.compose.ui.geometry.Offset(x, y)); x += step }
+        y += step
+    }
 }

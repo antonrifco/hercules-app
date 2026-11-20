@@ -21,6 +21,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.remote.interactions.RemoteActivityHelper
+import com.hercules.shared.cognitive.grouped
 import com.hercules.shared.cognitive.ActionKind
 import com.hercules.shared.cognitive.Level
 import com.hercules.shared.cognitive.RecommendedAction
@@ -190,7 +191,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) {
             // Let the wake-up animation finish before the app draws over it.
-            val until = android.os.SystemClock.uptimeMillis() + 900
+            val until = android.os.SystemClock.uptimeMillis() + 500
             splash.setKeepOnScreenCondition { android.os.SystemClock.uptimeMillis() < until }
         }
         if (savedInstanceState == null) launch = intent
@@ -211,13 +212,15 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+
 @Composable
 private fun HerculesWearNav(launch: Intent?, onLaunchHandled: () -> Unit) {
     val ctx = LocalContext.current
     var permissions by remember { mutableStateOf(Permissions.state(ctx)) }
     val nav = rememberSwipeDismissableNavController()
     val scope = rememberCoroutineScope()
-    var state by remember { mutableStateOf<WatchState?>(null) }
+    // Opens on the last state shown (saved), then refreshes: no blank screen while today is recalculated.
+    var state by remember { mutableStateOf(ctx.graph.watchState.cached()) }
     var eventId by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
 
@@ -233,7 +236,9 @@ private fun HerculesWearNav(launch: Intent?, onLaunchHandled: () -> Unit) {
             runCatching { kotlinx.coroutines.withTimeout(20_000) { PassiveRegistrar.enable(ctx) } }
                 .onFailure { android.util.Log.w("Hercules", "passive re-register failed", it) }
         }
-        // While the app is visible: keep summaries fresh and hand tracked data to the phone.
+        // While the app is visible: keep summaries fresh and hand tracked data to the phone. Starts a moment after
+        // opening, so the first screen's calculation doesn't compete with the sync for the watch's CPU.
+        delay(4_000)
         while (true) {
             runCatching { ctx.graph.insights.refresh() }
             SyncWorker.runNow(ctx)
@@ -412,7 +417,7 @@ internal fun HomeScreen(
                                     )
                                 }
                             }
-                            WEyebrow(r.calc.confidence.label, WText2)
+                            WEyebrow(if (r.calc.confidencePct > 0) "${r.calc.confidence.label} · ${r.calc.confidencePct}%" else r.calc.confidence.label, WText2)
                         }
                         brief?.peak?.let { w ->
                             Spacer(Modifier.height(4.dp))
@@ -449,7 +454,7 @@ internal fun HomeScreen(
                         StatColumn(state?.sleepMinutes?.let { formatDuration(it) } ?: "--", "sleep") {
                             Icon(Icons.Rounded.Bedtime, null, tint = WCyan, modifier = Modifier.size(15.dp))
                         }
-                        StatColumn(daily?.steps?.takeIf { it > 0 }?.toString() ?: "--", "steps") {
+                        StatColumn(daily?.steps?.takeIf { it > 0 }?.grouped() ?: "--", "steps") {
                             Icon(Icons.AutoMirrored.Rounded.DirectionsWalk, null, tint = WCyan, modifier = Modifier.size(15.dp))
                         }
                     }
@@ -690,7 +695,7 @@ internal fun TonightScreen(advice: SleepAdvice?, hasScore: Boolean) {
         ScalingLazyColumn(state = listState, contentPadding = padding, modifier = Modifier.fillMaxSize()) {
             item { Herc(HercMood.SLEEPING, size = 44.dp) }
             if (advice == null) {
-                item { Text("Your sleep game plan shows up once today is scored.", fontSize = 12.sp, color = WText2, textAlign = TextAlign.Center) }
+                item { Text("Your bedtime plan appears once today has a score.", fontSize = 12.sp, color = WText2, textAlign = TextAlign.Center) }
                 return@ScalingLazyColumn
             }
             item { WEyebrow("Lights out by", WText2) }
@@ -760,7 +765,7 @@ internal fun StatusScreen(state: WatchState?, onSensors: () -> Unit, onPermissio
                     StatusLine(
                         ok = !bgMissing, icon = Icons.Rounded.Lock,
                         title = if (bgMissing) "Nights may be missed" else "Night tracking on",
-                        hint = if (bgMissing) "Allow \"all the time\"." else "Hercules can read sensors while you sleep.",
+                        hint = if (bgMissing) "Allow \"all the time\"." else "Hercules reads your sensors while you sleep.",
                     )
                     if (bgMissing && bg != null) Button(onClick = { backgroundLauncher.launch(bg) }, modifier = Modifier.fillMaxWidth()) { Text("Fix") }
                 },
@@ -772,7 +777,7 @@ internal fun StatusScreen(state: WatchState?, onSensors: () -> Unit, onPermissio
                             sync?.lastOkMs != null -> "Synced ${ago(now - sync!!.lastOkMs!!)}"
                             else -> "Not synced yet"
                         },
-                        hint = if (problem != null) "Bring your phone close and open Hercules." else "Sends to your phone about every 15 min.",
+                        hint = if (problem != null) "Bring your phone close and open Hercules." else "Sends new readings about every 10 min.",
                     )
                 },
                 (mins != null) to {

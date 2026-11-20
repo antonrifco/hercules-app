@@ -95,6 +95,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.edit
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hercules.mobile.MobileGraph
+import com.hercules.shared.readiness.RETENTION_DAYS
 import com.hercules.shared.cognitive.ActionKind
 import com.hercules.shared.cognitive.DailyBrief
 import com.hercules.shared.cognitive.Evaluation
@@ -116,7 +117,6 @@ import com.hercules.shared.readiness.Availability
 import com.hercules.shared.readiness.BeatTheClock
 import com.hercules.shared.readiness.CognitiveSession
 import com.hercules.shared.readiness.ConfigurationType
-import com.hercules.shared.readiness.DimensionScorer
 import com.hercules.shared.readiness.PeakResult
 import com.hercules.shared.readiness.PeakWindowPrediction
 import com.hercules.shared.readiness.PrepPhase
@@ -144,52 +144,50 @@ class TodayData(
 }
 
 private const val HOUR = 3_600_000L
-private val sleepScorer = DimensionScorer()
+/** Colour for a night's length: full marks for 7–9 h, lower for short nights (display only). */
+private fun sleepHoursScore(h: Double): Int = when {
+    h < 5 -> 25
+    h < 6 -> 45
+    h < 7 -> 65
+    h <= 9 -> 90
+    else -> 70
+}
 private val BtcColor = Color(0xFFFFD166)
 private val MONTHS = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 private enum class Sheet { REFLECT, LEARN, WHY }
 
 /** Lighter surface for the sections that should stand out on Home (Tips, Your day). */
-private val BrightPanel = Color(0xFF232B40)
+internal val BrightPanel = Color(0xFF232B40)
 /** Lines, tracks and secondary text that stay readable on [BrightPanel]. */
 private val BrightRule = Color(0xFF4A5678)
-private val BrightSubtle = Color(0xFFB8BED6)
+internal val BrightSubtle = Color(0xFFB8BED6)
 
 /**
- * How sure the score is, in two plain parts: how much of today's score has data (coverage) and how many days of
- * history back it. Confidence needs both; the hint says what would raise it.
+ * How sure the score is: a percentage built from the data behind it (spec §2.8), each part listed with the points
+ * it earned out of what it could. The hint says what would raise it.
  */
 @Composable
 private fun ConfidenceExplainer(calc: ReadinessCalculation) {
     val c = calc.confidence.color
-    val pct = (calc.coverage * 100).roundToInt()
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(BrightPanel).padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Dot(c, 8.dp)
             HSpace(8.dp)
-            Text(calc.confidence.label, style = MaterialTheme.typography.titleMedium, color = c)
+            Text("${calc.confidence.label} · ${calc.confidencePct}%", style = MaterialTheme.typography.titleMedium, color = c)
         }
         VSpace(4.dp)
-        Text("How much to trust today's number. It rests on two things:", style = MaterialTheme.typography.bodyMedium, color = LocalSubtle.current)
-        VSpace(12.dp)
-        Text("Coverage · $pct%", style = MaterialTheme.typography.bodyLarge, color = Text1)
-        Text(
-            "${calc.signalsIn} of ${calc.signalsTotal} parts of the score (sleep, heart, activity, light, reaction) have data today, carrying $pct% of the score's weight. " +
-                "Missing ones are left out, not counted as zero.",
-            style = MaterialTheme.typography.bodySmall, color = LocalSubtle.current,
-        )
-        VSpace(6.dp); ScoreBar(pct, c, 3.dp)
-        VSpace(12.dp)
-        val days = calc.historyDays
-        Text("History · ${if (days == 0) "first day" else "$days ${if (days == 1) "day" else "days"}"}", style = MaterialTheme.typography.bodyLarge, color = Text1)
-        Text(
-            "Earlier days let Herc compare today with your usual. Medium needs $MIN_CONFIDENT_DAYS days, High $HIGH_CONFIDENCE_DAYS.",
-            style = MaterialTheme.typography.bodySmall, color = LocalSubtle.current,
-        )
-        VSpace(6.dp); ScoreBar((days.coerceAtMost(HIGH_CONFIDENCE_DAYS) * 100) / HIGH_CONFIDENCE_DAYS, c, 3.dp)
-        VSpace(12.dp)
-        Text("High: 90%+ coverage and $HIGH_CONFIDENCE_DAYS+ days · Medium: 70%+ and $MIN_CONFIDENT_DAYS+ days", style = MaterialTheme.typography.bodySmall, color = LocalSubtle.current)
+        Text("How much to trust this number. It reaches 100% only with every sensor in.", style = MaterialTheme.typography.bodyMedium, color = LocalSubtle.current)
+        VSpace(6.dp); ScoreBar(calc.confidencePct, c, 3.dp)
+        VSpace(10.dp)
+        calc.confidenceParts.forEach { p ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                Text(p.label, style = MaterialTheme.typography.bodySmall, color = Text1, modifier = Modifier.weight(1f))
+                Text(if (p.max > 0) "${p.points} / ${p.max}" else "${p.points}", fontFamily = Mono, fontSize = 12.sp, color = if (p.points > 0) Text1 else LocalSubtle.current)
+            }
+        }
+        VSpace(8.dp)
+        Text("High 75%+ · Medium 50–74% · Low under 50%. Without sleep from a watch it can't reach High.", style = MaterialTheme.typography.bodySmall, color = LocalSubtle.current)
         calc.confidenceHint?.let { VSpace(8.dp); Text(it, style = MaterialTheme.typography.bodyMedium, color = Text1) }
     }
 }
@@ -363,7 +361,7 @@ private fun AssessCard(brief: DailyBrief, sessions: List<CognitiveSession>, onPl
         Muted(
             when {
                 runs.isEmpty() -> "A 3-minute reaction test that shows how sharp you are. Take it any time, as often as you like."
-                else -> "Scores are out of 100. 50 is your usual; higher is faster. Today counts the middle score of your tests."
+                else -> "Out of 100: 50 is your usual speed, higher is faster. Today uses the middle score of your tests."
             },
         )
         if (runs.isNotEmpty()) {
@@ -428,6 +426,17 @@ internal fun ScoreBreakdown(calc: ReadinessCalculation) {
         CompositionLocalProvider(LocalRule provides BrightRule, LocalSubtle provides BrightSubtle) { ConfidenceExplainer(calc) }
     }
     calc.insufficientDetail?.let { VSpace(8.dp); Text(it, style = MaterialTheme.typography.bodyMedium, color = Text1) }
+    if (calc.score != null) {
+        VSpace(10.dp)
+        val parts = buildList {
+            calc.alertness?.let { add("Predicted alertness $it") }
+            calc.recovery?.let { add("× recovery %.2f".format(UiLocale, it)) }
+            calc.gameScore?.let { g ->
+                add(if (calc.alertness != null) "blended ${(calc.gameShare * 100).roundToInt()}% with Reaction Test $g" else "Reaction Test $g (no sleep on record)")
+            }
+        }
+        Text(parts.joinToString(" "), style = MaterialTheme.typography.bodyMedium, color = Text1)
+    }
     calc.modifiers.forEach { m ->
         VSpace(6.dp)
         Text("${m.label}: ${m.points} points", style = MaterialTheme.typography.bodyMedium, color = Color(0xFFFFC857))
@@ -447,7 +456,12 @@ internal fun ScoreBreakdown(calc: ReadinessCalculation) {
                 Column(Modifier.weight(1f)) {
                     Text(d.dimension.label, style = MaterialTheme.typography.bodyLarge, color = Text1)
                     Text(
-                        "${(d.weight * 100).roundToInt()}% weight" + if (!d.available) " · ${d.availability.label.lowercase(UiLocale)}" else "",
+                        when (d.dimension) {
+                            com.hercules.shared.readiness.Dimension.SLEEP -> "Predicted alertness from sleep and time of day"
+                            com.hercules.shared.readiness.Dimension.CARDIO -> calc.recovery?.let { "Multiplies alertness by %.2f".format(UiLocale, it) } ?: "Can only lower the score"
+                            com.hercules.shared.readiness.Dimension.COGNITIVE -> if (d.weight > 0) "${(d.weight * 100).roundToInt()}% of the score" else "Counts for 2 hours after a test"
+                            else -> "Not part of the score"
+                        } + if (!d.available) " · ${d.availability.label.lowercase(UiLocale)}" else "",
                         style = MaterialTheme.typography.bodySmall, color = Text2,
                     )
                 }
@@ -479,8 +493,8 @@ internal fun ScoreBreakdown(calc: ReadinessCalculation) {
     VSpace(8.dp)
     val s = calc.stamp
     Muted(
-        (if (s.configType == ConfigurationType.DEFAULT) "Recommended weights" else "Your custom weights") +
-            ". Missing data is left out, never counted as zero.",
+        (if (s.configType == ConfigurationType.DEFAULT) "Recommended settings" else "Your custom settings") +
+            ". Missing data is left out, never counted as zero. A wellness estimate, not a medical or safety assessment.",
     )
 }
 
@@ -602,7 +616,7 @@ private fun LearnContent(r: Readiness?) {
         VSpace(6.dp)
         Text(r?.learningNote ?: "Herc knows your normal. Fully calibrated.", style = MaterialTheme.typography.headlineSmall, color = Text1)
         VSpace(12.dp)
-        Muted("Hercules compares you with your own normal. For the first 7 days it uses reference values; from day 7 your own history counts more each day, up to 80% after 3 weeks.")
+        Muted("Hercules compares you with your own last 10 days. Heart signals count once they have 5 days of history, and Reaction Tests are ranked against your own from your 5th test. Until then, research reference values fill in.")
     }
 }
 
@@ -663,10 +677,10 @@ private fun SleepBlock(sleep: SleepNight?, week: List<SleepNight>, today: String
         }
     }) {
         if (sleep == null) {
-            Muted("No sleep logged last night. It comes from Health Connect or the Hercules watch, or add it yourself.")
+            Muted("No sleep recorded last night. It comes in from Health Connect, the Hercules watch or your screen use. You can also add it yourself.")
         } else {
             Row(Modifier.fillMaxWidth()) {
-                FactTile(Icons.Rounded.Bedtime, formatDuration(sleep.asleepMinutes), "asleep", Modifier.weight(1f), scoreColor(sleepScorer.sleepDurationScore(sleep.asleepMinutes / 60.0)))
+                FactTile(Icons.Rounded.Bedtime, formatDuration(sleep.asleepMinutes), "asleep", Modifier.weight(1f), scoreColor(sleepHoursScore(sleep.asleepMinutes / 60.0)))
                 FactTile(Icons.Rounded.NightsStay, clockOf(sleep.startMs), "bedtime", Modifier.weight(1f), Brand)
                 FactTile(Icons.Rounded.WbSunny, clockOf(sleep.endMs), "woke up", Modifier.weight(1f), Brand)
                 FactTile(Icons.Rounded.Favorite, sleep.awakeMinutes?.let { "${it}m" } ?: "--", "awake", Modifier.weight(1f), Brand)
@@ -678,25 +692,27 @@ private fun SleepBlock(sleep: SleepNight?, week: List<SleepNight>, today: String
                 Eyebrow(
                     when {
                         sleep.corrected -> "Times edited by you"
+                        sleep.provider == "Phone screen use" -> "Estimated from screen use"
                         sleep.source == SleepNight.SOURCE_HEALTH_CONNECT -> "Health Connect · ${sleep.provider ?: "provider"}"
-                        else -> "Auto-tracked by your watch"
+                        else -> "Tracked by the Hercules watch"
                     },
                 )
             }
         }
         VSpace(18.dp)
-        val keys = (-6..0).map { dk.plusDays(today, it) }
+        // The last 10 nights: the window the sleep model and baselines use. Labelled by date, since weekdays repeat.
+        val keys = (-(RETENTION_DAYS - 1)..0).map { dk.plusDays(today, it) }
         val byKey = week.associateBy { it.dayKey }
         MiniBars(
             values = keys.map { k -> byKey[k]?.let { it.asleepMinutes / 60f } },
             max = 10f,
-            labels = keys.map { weekdayShort(dk.startOf(it) + 12 * HOUR) },
-            colorOf = { scoreColor(sleepScorer.sleepDurationScore(it.toDouble())) },
+            labels = keys.map { dayOfMonth(dk.startOf(it) + 12 * HOUR) },
+            colorOf = { scoreColor(sleepHoursScore(it.toDouble())) },
             target = 7f,
             valueLabel = { "%.1f".format(UiLocale, it) },
         )
         VSpace(6.dp)
-        Muted("Hours asleep per night. The dashed line is the 7h target.")
+        Muted("Hours asleep, last ${RETENTION_DAYS} nights (by the date you woke up). The dashed line is the 7h target.")
     }
     if (correcting) CorrectSleepDialog(g, today, sleep) { correcting = false }
 }
@@ -766,44 +782,40 @@ private fun CorrectSleepDialog(g: MobileGraph, today: String, sleep: SleepNight?
 @Composable
 private fun WeekBlock(trend: List<Readiness>, sleepWeek: List<SleepNight>, today: String, g: MobileGraph) {
     val dk = g.cognitive.dayKeys
-    val keys = (-13..0).map { dk.plusDays(today, it) }
+    // Scores are kept 10 days, so the chart shows those; the tiles sum up the last 7.
+    val keys = (-(RETENTION_DAYS - 1)..0).map { dk.plusDays(today, it) }
     val byKey = trend.associateBy { it.dayKey }
     val thisWeek = keys.takeLast(7).mapNotNull { byKey[it] }
-    val lastWeek = keys.take(7).mapNotNull { byKey[it] }
     val avg = thisWeek.map { it.score }.average().takeIf { !it.isNaN() }?.roundToInt()
-    val prev = lastWeek.map { it.score }.average().takeIf { !it.isNaN() }?.roundToInt()
     val best = thisWeek.maxByOrNull { it.score }
-    val sleepAvg = sleepWeek.map { it.asleepMinutes }.average().takeIf { !it.isNaN() }?.roundToInt()
+    val worst = thisWeek.minByOrNull { it.score }.takeIf { thisWeek.size >= 2 }
+    val sleepAvg = sleepWeek.filter { it.dayKey >= dk.plusDays(today, -6) }.map { it.asleepMinutes }.average().takeIf { !it.isNaN() }?.roundToInt()
     Section("This week") {
         Row(Modifier.fillMaxWidth()) {
             FactTile(Icons.Rounded.Insights, avg?.toString() ?: "--", "avg score", Modifier.weight(1f), avg?.let { scoreColor(it) } ?: Cyan)
-            FactTile(
-                if ((avg ?: 0) >= (prev ?: 0)) Icons.AutoMirrored.Rounded.TrendingUp else Icons.AutoMirrored.Rounded.TrendingDown,
-                if (avg != null && prev != null) "%+d".format(avg - prev) else "--", "vs last week", Modifier.weight(1f), Cyan,
-            )
             FactTile(Icons.Rounded.Star, best?.let { weekdayShort(dk.startOf(it.dayKey) + 12 * HOUR) } ?: "--", "best day", Modifier.weight(1f), Cyan)
+            FactTile(Icons.AutoMirrored.Rounded.TrendingDown, worst?.let { weekdayShort(dk.startOf(it.dayKey) + 12 * HOUR) } ?: "--", "lowest day", Modifier.weight(1f), Cyan)
             FactTile(Icons.Rounded.Bedtime, sleepAvg?.let { formatDuration(it) } ?: "--", "avg sleep", Modifier.weight(1f), Brand)
         }
         VSpace(16.dp)
         MiniBars(
             values = keys.map { k -> byKey[k]?.score?.toFloat() },
             max = 100f,
-            labels = keys.mapIndexed { i, k -> if (i % 2 == 1) k.takeLast(2) else "" },
+            labels = keys.map { it.takeLast(2).trimStart('0') },
             colorOf = { scoreColor(it.roundToInt()) },
             target = 70f,
             valueLabel = { it.roundToInt().toString() },
             // The month only under the first date shown and wherever it changes.
             subLabels = run {
                 var last = ""
-                keys.mapIndexed { i, k ->
-                    if (i % 2 == 0) return@mapIndexed ""
+                keys.map { k ->
                     val m = MONTHS.getOrElse(k.substring(5, 7).toInt() - 1) { "" }
                     if (m == last) "" else m.also { last = it }
                 }
             },
         )
         VSpace(6.dp)
-        Muted("Daily score, last 14 days. Days without enough data stay empty. Dashed line: 70 is Good.")
+        Muted("Daily score, last ${RETENTION_DAYS} days. Empty days had too little data. The dashed line marks 70 (Good). Tiles cover the last 7 days.")
     }
 }
 
@@ -861,11 +873,10 @@ internal fun TodayStats(s: DailySummary?, hc: HealthConnectImporter.DayTotals? =
         }
         // When the numbers were last refreshed, per source, so a stale tile is easy to spot.
         VSpace(10.dp)
-        Text(
-            "Last retrieved:\n" +
+        LastText(
+            "Last data:\n" +
                 "Health Connect - ${lastHcMs?.let { stampOf(it) } ?: "not yet"}\n" +
-                "Watch App - ${lastWatchMs?.let { stampOf(it) } ?: "not yet"}",
-            style = MaterialTheme.typography.bodySmall, color = LocalSubtle.current,
+                "Hercules watch - ${lastWatchMs?.let { stampOf(it) } ?: "not yet"}",
         )
     }
 }

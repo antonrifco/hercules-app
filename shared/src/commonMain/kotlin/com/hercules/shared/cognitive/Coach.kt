@@ -3,12 +3,12 @@ package com.hercules.shared.cognitive
 import com.hercules.shared.insights.DayKeys
 import com.hercules.shared.readiness.AssessmentWindow
 import com.hercules.shared.readiness.Dimension
-import com.hercules.shared.readiness.DimensionScorer
 import com.hercules.shared.readiness.MetricKey
 import com.hercules.shared.readiness.PeakResult
 import com.hercules.shared.readiness.PeakWindowPrediction
 import com.hercules.shared.readiness.PrepPhase
 import com.hercules.shared.readiness.ScoringParams
+import com.hercules.shared.readiness.SleepModel
 import kotlinx.serialization.Serializable
 import kotlin.math.roundToInt
 
@@ -94,7 +94,6 @@ data class DailyBrief(
  * notification planner so they never disagree.
  */
 class Coach(private val dayKeys: DayKeys) {
-    private val scorer = DimensionScorer()
 
     fun dayPart(nowMs: Long): DayPart = when (dayKeys.minuteOfDay(nowMs) / 60) {
         in 4..10 -> DayPart.MORNING
@@ -116,22 +115,22 @@ class Coach(private val dayKeys: DayKeys) {
         val dims = r.dimensions.filter { it.available }
         val weakest = dims.minByOrNull { it.score!! }
         if (weakest != null && weakest.score!! < 65) return Reason(weakest.dimension, lowText(r, weakest.dimension), good = false)
-        val best = dims.filter { it.dimension != Dimension.ACTIVITY }.maxByOrNull { it.score!! } ?: return null
+        val best = dims.maxByOrNull { it.score!! } ?: return null
         return Reason(best.dimension, goodText(r, best.dimension), good = true)
     }
 
-    private fun sleepValue(r: Readiness) = r.dimension(Dimension.SLEEP).metrics.firstOrNull { it.key == MetricKey.SLEEP_DURATION }?.value
+    private fun sleepValue(r: Readiness) = r.dimension(Dimension.SLEEP)?.metrics?.firstOrNull { it.key == MetricKey.SLEEP_DURATION }?.value
 
     private fun lowText(r: Readiness, d: Dimension): String = when (d) {
-        Dimension.SLEEP -> sleepValue(r)?.let { "Short night: $it." } ?: "Sleep fell short of what you need."
-        Dimension.CARDIO -> "Your body is still recovering."
+        Dimension.SLEEP -> "Sleep pressure is high" + (sleepValue(r)?.let { ". Last night: $it." } ?: ".")
+        Dimension.CARDIO -> "Your body signals are off your usual."
         Dimension.ACTIVITY -> "Yesterday's movement was off your usual."
         Dimension.CIRCADIAN -> "Your daylight rhythm slipped yesterday."
         Dimension.COGNITIVE -> "Your reactions were slower than usual today."
     }
 
     private fun goodText(r: Readiness, d: Dimension): String = when (d) {
-        Dimension.SLEEP -> sleepValue(r)?.let { "Slept strong: $it." } ?: "Slept strong."
+        Dimension.SLEEP -> sleepValue(r)?.let { "Well rested: $it." } ?: "Well rested."
         Dimension.CARDIO -> "Fully recharged."
         Dimension.ACTIVITY -> "Yesterday's movement hit the mark."
         Dimension.CIRCADIAN -> "Daylight rhythm on point."
@@ -179,26 +178,26 @@ class Coach(private val dayKeys: DayKeys) {
             targetMinutes = sleepTargetMinutes,
             shiftEarlierMinutes = shift,
             tomorrowNote = note,
-            ifShort = r?.let { projectTomorrow(it, 6.0) },
-            ifTarget = r?.let { projectTomorrow(it, sleepTargetMinutes / 60.0) },
+            ifShort = r?.let { projectTomorrow(it, bed, 6.0) },
+            ifTarget = r?.let { projectTomorrow(it, bed, sleepTargetMinutes / 60.0) },
             wakeDayKey = tomorrow,
         )
     }
 
-    /** Today's score with only sleep duration replaced by [hours]. A rough estimate, labelled as such. */
-    fun projectTomorrow(r: Readiness, hours: Double): Int {
-        val dims = r.dimensions.map { d ->
-            if (d.dimension != Dimension.SLEEP) return@map d
-            val metrics = d.metrics.map { m ->
-                if (m.key == MetricKey.SLEEP_DURATION) m.copy(score = scorer.sleepDurationScore(hours)) else m
-            }
-            val avail = metrics.filter { it.score != null }
-            val s = if (avail.isEmpty()) null else (avail.sumOf { it.score!! * it.key.internalWeight } / avail.sumOf { it.key.internalWeight }).roundToInt()
-            d.copy(score = s, metrics = metrics)
-        }
-        val avail = dims.filter { it.available }
-        if (avail.isEmpty()) return r.score
-        return (avail.sumOf { it.weight * it.score!! } / avail.sumOf { it.weight }).roundToInt().coerceIn(0, 100)
+    /**
+     * Tomorrow morning's score (3 hours after waking) if you go to bed at [bedMs] and sleep [hours]: the sleep model
+     * runs on from today's state, with today's recovery and settings. A rough estimate, labelled as such.
+     */
+    fun projectTomorrow(r: Readiness, bedMs: Long, hours: Double): Int {
+        val c = r.calc
+        val start = SleepModel.State(c.pressure ?: return r.score, c.homeostat ?: return r.score, c.bodyClock ?: return r.score)
+        val sleepMs = (hours * HOUR_MS).toLong()
+        val later = SleepModel.project(
+            start, c.atMs, listOf(maxOf(0L, bedMs - c.atMs) to false, sleepMs to true, 3 * HOUR_MS to false),
+            c.offsetH ?: 0.0, SleepModel.phiOf(c.peakHour ?: SleepModel.peakOf(SleepModel.PHI)), c.amplitude ?: SleepModel.DEFAULT_AMPLITUDE,
+        )
+        val adj = 100 - c.stamp.settings.sleepInfluence * (100 - SleepModel.alertness(later.p))
+        return (adj * (c.recovery ?: 1.0)).roundToInt().coerceIn(1, 100)
     }
 
     /**

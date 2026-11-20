@@ -46,6 +46,10 @@ class HerculesRepository(
         q.samplesBetween(fromMs, toMs).executeAsList().mapNotNull { it.toModel() }
     }
 
+    suspend fun samplesOfType(type: MetricType, fromMs: Long, toMs: Long): List<Sample> = withContext(io) {
+        q.samplesOfTypeBetween(type.wire, fromMs, toMs).executeAsList().mapNotNull { it.toModel() }
+    }
+
     fun observeLatest(type: MetricType): Flow<Sample?> =
         q.latestOfType(type.wire).asFlow().mapToOneOrNull(io).map { it?.toModel() }
 

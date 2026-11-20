@@ -1,23 +1,16 @@
 package com.hercules.shared
 
 import com.hercules.shared.cognitive.ReadinessBand
-import com.hercules.shared.readiness.ActivityInput
 import com.hercules.shared.readiness.AssessmentWindow
 import com.hercules.shared.readiness.Availability
-import com.hercules.shared.readiness.Baselines
 import com.hercules.shared.readiness.BeatTheClock
 import com.hercules.shared.readiness.CognitiveInput
 import com.hercules.shared.readiness.CognitiveRound
 import com.hercules.shared.readiness.CognitiveSession
-import com.hercules.shared.readiness.ConfigurationType
 import com.hercules.shared.readiness.DayInputs
-import com.hercules.shared.readiness.DefaultScoring
-import com.hercules.shared.readiness.StrainInput
 import com.hercules.shared.readiness.confidenceBasis
 import com.hercules.shared.readiness.DeviceKind
 import com.hercules.shared.readiness.Dimension
-import com.hercules.shared.readiness.DimensionScorer
-import com.hercules.shared.readiness.LightInput
 import com.hercules.shared.readiness.MomentPreparationEngine
 import com.hercules.shared.readiness.MomentRules
 import com.hercules.shared.readiness.MomentStatus
@@ -33,13 +26,21 @@ import com.hercules.shared.readiness.PrepTask
 import com.hercules.shared.readiness.ReadinessCalculator
 import com.hercules.shared.readiness.ReadinessConfidence
 import com.hercules.shared.readiness.RoundValidity
-import com.hercules.shared.readiness.ScoringConfiguration
 import com.hercules.shared.readiness.SessionStatus
 import com.hercules.shared.readiness.Stats
+import com.hercules.shared.readiness.Calibration
+import com.hercules.shared.readiness.CalibrationPoint
+import com.hercules.shared.readiness.Calibrator
+import com.hercules.shared.readiness.MetricKey
+import com.hercules.shared.readiness.Recovery
+import com.hercules.shared.readiness.ScoreSettings
+import com.hercules.shared.readiness.Signal
+import com.hercules.shared.readiness.SignalSource
+import com.hercules.shared.readiness.SleepEpisode
+import com.hercules.shared.readiness.SleepModel
+import com.hercules.shared.readiness.ScreenSleep
 import com.hercules.shared.readiness.Urgency
-import com.hercules.shared.readiness.WeightValidation
 import com.hercules.shared.readiness.confidenceFor
-import com.hercules.shared.readiness.validateWeights
 import kotlin.math.abs
 import kotlin.random.Random
 import com.hercules.shared.readiness.ReactionRun
@@ -59,252 +60,189 @@ private const val D = 24 * H
 
 class ScoringTest {
     private val calc = ReadinessCalculator()
-    private val scorer = DimensionScorer()
+    private val day = "2026-11-10"
+    /** Midnight of [day] in the tests' clock (UTC, hours from a fixed origin). */
+    private val t0 = 1_000 * D
 
-    private fun night(day: Int, asleep: Int = 480, awake: Int? = 30, mid: Double = 180.0) =
-        NightInput("d$day", 0, 1, asleep, awake, mid)
-
-    private fun full(
-        night: NightInput? = night(0),
-        hrv: Double? = 45.0,
-        rhr: Double? = 58.0,
-        activity: ActivityInput? = ActivityInput(8000, 30, 3, 14),
-        light: LightInput? = LightInput(listOf(3000.0, 2500.0), listOf(500.0, 400.0), listOf(20.0, 15.0)),
-        cognitive: CognitiveInput? = CognitiveInput(60, "Phone · Morning"),
-    ) = DayInputs(
-        "d0", night, (1..13).map { night(-it, mid = 180.0 + (it % 3) * 10) },
-        hrv, List(25) { 44.0 + it % 5 }, rhr, List(25) { 57.0 + it % 3 }, List(25) { 8000.0 + it * 10 }, activity, light, cognitive,
-    )
-
-    @Test fun classificationBoundaries() {
-        assertEquals(ReadinessBand.PRIMA, ReadinessBand.of(100))
-        assertEquals(ReadinessBand.PRIMA, ReadinessBand.of(85))
-        assertEquals(ReadinessBand.BAIK, ReadinessBand.of(84))
-        assertEquals(ReadinessBand.BAIK, ReadinessBand.of(70))
-        assertEquals(ReadinessBand.CUKUP, ReadinessBand.of(69))
-        assertEquals(ReadinessBand.CUKUP, ReadinessBand.of(55))
-        assertEquals(ReadinessBand.RENDAH, ReadinessBand.of(54))
-        assertEquals(ReadinessBand.RENDAH, ReadinessBand.of(40))
-        assertEquals(ReadinessBand.TERKURAS, ReadinessBand.of(39))
-        assertEquals(ReadinessBand.TERKURAS, ReadinessBand.of(0))
+    /** [nights] nights of [hours] each, waking at 07:00, the last one ending on the morning of day 0. */
+    private fun nights(n: Int, hours: Double): List<SleepEpisode> = (n - 1 downTo 0).map { back ->
+        val wake = t0 - back * D + 7 * H
+        SleepEpisode(wake - (hours * H).toLong(), wake)
     }
 
-    @Test fun allDimensionsAvailableGivesFullCoverageAndHighConfidence() {
-        val c = calc.calculate(full(), DefaultScoring.DEFAULT)
-        assertNotNull(c.score)
-        assertEquals(1.0, c.coverage, 1e-9)
-        assertEquals(ReadinessConfidence.HIGH, c.confidence)
-        assertEquals(DefaultScoring.DEFAULT.id, c.stamp.configId)
-        assertTrue(c.dimensions.all { it.availability == Availability.AVAILABLE })
-    }
-
-    @Test fun weightedMeanOverAvailableDimensions() {
-        val c = calc.calculate(full(), DefaultScoring.DEFAULT)
-        val expected = c.dimensions.sumOf { it.weight * it.score!! } / c.dimensions.sumOf { it.weight }
-        assertEquals(kotlin.math.round(expected).toInt(), c.score)
-    }
-
-    @Test fun missingCognitiveRenormalizesAndLowersCoverage() {
-        val c = calc.calculate(full(cognitive = null), DefaultScoring.DEFAULT)
-        assertEquals(0.90, c.coverage, 1e-9)
-        // Everything but the game is 90%: High once there is a week of history.
-        assertEquals(ReadinessConfidence.HIGH, c.confidence)
-        val avail = c.dimensions.filter { it.available }
-        val expected = avail.sumOf { it.weight * it.score!! } / avail.sumOf { it.weight }
-        assertEquals(kotlin.math.round(expected).toInt(), c.score)
-        assertEquals(Availability.NO_DATA, c.dimensions.first { it.dimension == Dimension.COGNITIVE }.availability)
-    }
-
-    @Test fun noSleepStillScoresFromOtherSignals() {
-        val c = calc.calculate(full(night = null), DefaultScoring.DEFAULT)
-        assertNotNull(c.score)
-        assertNull(c.insufficientReason)
-    }
-
-    @Test fun sleepActivityAndLightGiveMediumConfidenceAndANote() {
-        // Sleep 65 + activity 10 + light 5 = 80%: three of five parts, with sleep in, is Medium.
-        val c = calc.calculate(full(hrv = null, rhr = null, cognitive = null), DefaultScoring.DEFAULT)
-        assertEquals(0.80, c.coverage, 1e-9)
-        assertNotNull(c.score)
-        assertEquals(ReadinessConfidence.MEDIUM, c.confidence)
-        assertEquals(3, c.signalsIn)
-        assertEquals(5, c.signalsTotal)
-        assertEquals("To raise it: add overnight heart data and a Reaction Test.", c.confidenceHint)
-    }
-
-    @Test fun withoutSleepConfidenceIsLow() {
-        // Heart 10 + activity 10 + light 5 = 25%.
-        val c = calc.calculate(full(night = null, cognitive = null), DefaultScoring.DEFAULT)
-        assertNotNull(c.score)
-        assertEquals(ReadinessConfidence.LOW, c.confidence)
-    }
-
-    @Test fun oneReadingIsEnoughForAScore() {
-        val only = DayInputs("d0", null, emptyList(), null, emptyList(), null, emptyList(), emptyList(), null, null, CognitiveInput(60, "Phone"))
-        val c = calc.calculate(only, DefaultScoring.DEFAULT)
-        assertNotNull(c.score)
-        assertEquals(ReadinessConfidence.LOW, c.confidence)
-        assertEquals(0, c.historyDays)
-        assertEquals("1 of 5 score parts · first day of data", c.confidenceBasis)
-        assertTrue(c.confidenceHint!!.contains("3 more days"))
-    }
-
-    @Test fun confidenceGrowsWithSignalsAndDays() {
-        fun withDays(n: Int) = full().let { f ->
-            f.copy(previousNights = f.previousNights.take(n), hrvHistory = f.hrvHistory.take(n), restingHrHistory = f.restingHrHistory.take(n), stepsHistory = f.stepsHistory.take(maxOf(n - 1, 0)))
-        }
-        // Steps only: two earlier days plus yesterday's activity make three full days.
-        val stepsOnly = DayInputs("d0", null, emptyList(), null, emptyList(), null, emptyList(), listOf(8000.0, 9000.0), ActivityInput(8000, 30, 3, 14), null, null)
-        assertEquals(3, calc.calculate(stepsOnly, DefaultScoring.DEFAULT).historyDays)
-        val two = calc.calculate(withDays(2), DefaultScoring.DEFAULT)
-        assertEquals(ReadinessConfidence.LOW, two.confidence)
-        assertEquals("To raise it: 1 more day of data.", two.confidenceHint)
-        val three = calc.calculate(withDays(3), DefaultScoring.DEFAULT)
-        assertEquals(ReadinessConfidence.MEDIUM, three.confidence)
-        assertEquals("To raise it: 4 more days of data.", three.confidenceHint)
-        val week = calc.calculate(withDays(7), DefaultScoring.DEFAULT)
-        assertEquals(ReadinessConfidence.HIGH, week.confidence)
-        assertNull(week.confidenceHint)
-        assertEquals("5 of 5 score parts · 7 days of data", week.confidenceBasis)
-    }
-
-    @Test fun extrasOnlySubtractAndAreCapped() {
-        val base = calc.calculate(full(), DefaultScoring.DEFAULT)
-        val strain = StrainInput(
-            respiratoryRate = 19.0, respiratoryRateHistory = List(14) { 14.0 + it % 2 * 0.4 },
-            skinTempDelta = 1.2, skinTempHistory = List(14) { 0.0 + it % 2 * 0.1 },
-            spo2 = 88.0, spo2History = List(14) { 96.0 },
+    private fun input(
+        episodes: List<SleepEpisode> = nights(10, 8.0),
+        hoursAwake: Double = 2.0,
+        source: SignalSource? = SignalSource.WATCH,
+        hrv: Signal? = null,
+        rhr: Signal? = null,
+        temp: Signal? = null,
+        game: CognitiveInput? = null,
+        historyDays: Int = 9,
+        settings: ScoreSettings = ScoreSettings.DEFAULT,
+    ): DayInputs {
+        val at = (episodes.lastOrNull()?.endMs ?: (t0 + 7 * H)) + (hoursAwake * H).toLong()
+        return DayInputs(
+            dayKey = day, atMs = at, hourOfDay = ((at - t0) / H.toDouble()) % 24, lastNight = null, sleepSource = source,
+            episodes = episodes, usualWakeHour = 7.0, hrv = hrv, restingHr = rhr, skinTemp = temp, cognitive = game,
+            historyDays = historyDays, settings = settings,
         )
-        val hit = calc.calculate(full().copy(strain = strain), DefaultScoring.DEFAULT)
-        assertEquals(-10, hit.modifiers.sumOf { it.points })
-        assertEquals(base.score!! - 10, hit.score)
-        val calm = StrainInput(14.2, List(14) { 14.0 + it % 2 * 0.4 }, 0.05, List(14) { it % 2 * 0.1 }, 96.0, List(14) { 96.0 })
-        assertEquals(base.score, calc.calculate(full().copy(strain = calm), DefaultScoring.DEFAULT).score)
     }
 
-    @Test fun glucoseLowsSubtract() {
-        val base = calc.calculate(full(), DefaultScoring.DEFAULT).score!!
-        fun with(readings: List<Double>) = calc.calculate(full().copy(strain = StrainInput(glucose24h = readings)), DefaultScoring.DEFAULT).score!!
-        // Meter: one finger-prick low counts.
-        assertEquals(base, with(listOf(5.2)))
-        assertEquals(base - 5, with(listOf(3.6)))
-        assertEquals(base - 10, with(listOf(2.8)))
-        // CGM (288 readings a day): one dip is ignored, ~15 minutes low counts.
-        val normal = List(285) { 5.5 }
-        assertEquals(base, with(normal + listOf(2.8, 5.4, 5.6)))
-        assertEquals(base - 10, with(normal + listOf(2.9, 2.8, 2.9)))
-        assertEquals(base - 5, with(normal + listOf(3.5, 3.6, 3.4)))
+    private fun p(i: DayInputs) = calc.calculate(i).alertness!!
+
+    @Test fun lapsesBuildAwakeAndClearAsleep() {
+        val s = SleepModel.State(8.0, 40.0, 1.0)
+        assertTrue(SleepModel.step(s, 12.0, asleep = false, h = 1.0, phi = SleepModel.PHI, amp = 1.0).p > s.p - 0.5)
+        assertTrue(SleepModel.step(s, 2.0, asleep = true, h = 1.0, phi = SleepModel.PHI, amp = 1.0).p < s.p)
+        assertTrue(SleepModel.step(s, 2.0, asleep = true, h = 1.0, phi = SleepModel.PHI, amp = 1.0).k < s.k, "κ decays in sleep")
+        assertNull(SleepModel.at(emptyList(), 1000, 0.0, SleepModel.PHI, 1.0, 7.0))
+        assertNull(SleepModel.at(nights(1, 8.0), t0 - 2 * D, 0.0, SleepModel.PHI, 1.0, 7.0), "nothing before the first night")
     }
 
-    @Test fun nothingAtAllMeansNoScore() {
-        val none = DayInputs("d0", null, emptyList(), null, emptyList(), null, emptyList(), emptyList(), null, null, null)
-        val c = calc.calculate(none, DefaultScoring.DEFAULT)
+    @Test fun reproducesThePapersRanges() {
+        // Rested: a few lapses. A night without sleep: well into the teens (McCauley 2013, Fig. 3-4 scale).
+        val rested = SleepModel.at(nights(10, 8.0), t0 + 9 * H, 0.0, SleepModel.PHI, 1.0, 7.0)!!.p
+        val noSleep = SleepModel.at(nights(10, 8.0), t0 + 31 * H, 0.0, SleepModel.PHI, 1.0, 7.0)!!.p
+        assertTrue(rested in 2.0..6.0, "rested $rested")
+        assertTrue(noSleep in 12.0..22.0, "24 h awake $noSleep")
+    }
+
+    @Test fun restedAndShortlyAwakeIsHighAndADayAwakeIsLow() {
+        assertTrue(p(input(hoursAwake = 2.0)) >= 85, "after 8 h sleep and 2 h awake")
+        assertTrue(p(input(hoursAwake = 24.0)) < 45, "after 24 h awake")
+        assertTrue(p(input(hoursAwake = 48.0)) < p(input(hoursAwake = 24.0)))
+    }
+
+    @Test fun sleepDebtCarriesOver() {
+        val full = nights(7, 8.0)
+        val p0 = p(input(full))
+        val p1 = p(input(full.dropLast(1) + nights(1, 5.0)))
+        val p3 = p(input(full.dropLast(3) + nights(3, 5.0)))
+        assertTrue(p1 < p0)
+        assertTrue(p3 < p1, "three short nights lower P more than one")
+    }
+
+    @Test fun chronicSixHourSleepKeepsPredictedAlertnessBelowEightHours() {
+        val eight = p(input(nights(10, 8.0)))
+        val six = (3..10).map { p(input(nights(it, 6.0))) }
+        assertTrue(six.zipWithNext().all { (a, b) -> b <= a }, "keeps going down or holds, never rises: $six")
+        assertTrue(six.last() < eight - 5, "6 h for 10 nights stays well under the 8 h level")
+    }
+
+    @Test fun withoutAGameTheScoreIsPTimesM() {
+        val i = input(hrv = Signal(30.0, List(9) { 50.0 + it }, SignalSource.WATCH))
+        val c = calc.calculate(i)
+        assertTrue(abs(c.alertness!! * c.recovery!! - c.score!!) <= 1.0, "P×M = ${c.alertness} × ${c.recovery}, score ${c.score}")
+    }
+
+    @Test fun recoveryOnlySubtractsAndHasAFloor() {
+        val good = calc.calculate(input(hrv = Signal(90.0, List(9) { 50.0 + it }, SignalSource.WATCH)))
+        assertEquals(1.0, good.recovery!!, 1e-9)
+        val terrible = Recovery.modifier(listOf(Recovery.Term(MetricKey.HRV, -4.0, 4.0, 1.0, 4.0, SignalSource.WATCH)))
+        assertEquals(0.7, terrible, 1e-9)
+    }
+
+    @Test fun missingOrShortHistorySignalsChangeNothing() {
+        val base = calc.calculate(input())
+        val short = calc.calculate(input(hrv = Signal(20.0, List(4) { 50.0 }, SignalSource.WATCH)))
+        assertEquals(1.0, base.recovery)
+        assertEquals(1.0, short.recovery)
+        assertEquals(base.score, short.score)
+    }
+
+    @Test fun phoneHrvCountsHalf() {
+        val hist = List(9) { 50.0 + it }
+        val watch = Recovery.terms(input(hrv = Signal(30.0, hist, SignalSource.WATCH))).single()
+        val phone = Recovery.terms(input(hrv = Signal(30.0, hist, SignalSource.PHONE))).single()
+        assertEquals(watch.penalty / 2, phone.penalty, 1e-9)
+    }
+
+    @Test fun aRecentGameIsBlendedSixtyForty() {
+        val c = calc.calculate(input(game = CognitiveInput(90, "Phone")))
+        assertEquals(0.6, c.gameShare, 1e-9)
+        assertTrue(abs(0.6 * 90 + 0.4 * c.alertness!! * c.recovery!! - c.score!!) <= 1.0, "within rounding")
+    }
+
+    @Test fun gameOnlyWhenThereIsNoSleep() {
+        val c = calc.calculate(input(episodes = emptyList(), source = null, game = CognitiveInput(64, "Phone")))
+        assertEquals(64, c.score)
+        assertEquals(ReadinessConfidence.LOW, c.confidence)
+    }
+
+    @Test fun nothingUsableGivesNoScore() {
+        val c = calc.calculate(input(episodes = emptyList(), source = null))
         assertNull(c.score)
         assertEquals(ReadinessConfidence.INSUFFICIENT, c.confidence)
-        assertNotNull(c.insufficientReason)
     }
 
-    @Test fun confidenceThresholds() {
-        assertEquals(ReadinessConfidence.HIGH, confidenceFor(0.90, 7))
-        assertEquals(ReadinessConfidence.MEDIUM, confidenceFor(0.90, 6))
-        assertEquals(ReadinessConfidence.MEDIUM, confidenceFor(0.89, 30))
-        assertEquals(ReadinessConfidence.MEDIUM, confidenceFor(0.50, 3))
-        assertEquals(ReadinessConfidence.LOW, confidenceFor(0.49, 30))
-        assertEquals(ReadinessConfidence.LOW, confidenceFor(0.95, 2))
-        assertEquals(ReadinessConfidence.LOW, confidenceFor(0.20, 0))
+    @Test fun confidencePoints() {
+        val full = calc.calculate(
+            input(
+                hrv = Signal(55.0, List(9) { 55.0 }, SignalSource.WATCH), rhr = Signal(58.0, List(9) { 58.0 }, SignalSource.WATCH),
+                temp = Signal(0.0, List(9) { 0.0 }, SignalSource.WATCH), game = CognitiveInput(60, "Phone"),
+            ),
+        )
+        assertEquals(93, full.confidencePct)
+        assertEquals(ReadinessConfidence.HIGH, full.confidence)
+        val phoneSleep = calc.calculate(input(source = SignalSource.PHONE, hrv = Signal(55.0, List(9) { 55.0 }, SignalSource.PHONE), game = CognitiveInput(60, "Phone")))
+        assertEquals(15 + 15 + 4 + 19, phoneSleep.confidencePct)
+        val assumed = calc.calculate(input(source = SignalSource.ASSUMED, historyDays = 2))
+        assertEquals(5, assumed.confidencePct)
+        assertEquals(ReadinessConfidence.LOW, assumed.confidence)
+        val custom = calc.calculate(input(settings = ScoreSettings(gameWeight = 0.4)))
+        assertEquals(35 + 15 - 5, custom.confidencePct)
     }
 
-    @Test fun weightValidationRejectsInvalidAndNeverNormalizes() {
-        val d = DefaultScoring.DEFAULT.weights
-        assertIs<WeightValidation.Valid>(validateWeights(d))
-        assertIs<WeightValidation.Invalid>(validateWeights(d + (Dimension.SLEEP to 0.70))) // 105%
-        assertIs<WeightValidation.Invalid>(validateWeights(d + (Dimension.SLEEP to -0.05)))
-        assertIs<WeightValidation.Invalid>(validateWeights(Dimension.entries.associateWith { 0.0 }))
-        assertIs<WeightValidation.Invalid>(validateWeights(d - Dimension.CARDIO))
-        assertIs<WeightValidation.Valid>(validateWeights(mapOf(Dimension.SLEEP to 0.5, Dimension.CARDIO to 0.5, Dimension.ACTIVITY to 0.0, Dimension.CIRCADIAN to 0.0, Dimension.COGNITIVE to 0.0)))
+    @Test fun withoutWatchSleepConfidenceIsNeverHigh() {
+        val all = input(
+            source = SignalSource.PHONE, hrv = Signal(55.0, List(9) { 55.0 }, SignalSource.WATCH), rhr = Signal(58.0, List(9) { 58.0 }, SignalSource.WATCH),
+            temp = Signal(0.0, List(9) { 0.0 }, SignalSource.WATCH), game = CognitiveInput(60, "Phone"),
+        ).copy(spo2 = Signal(97.0, List(9) { 97.0 }, SignalSource.WATCH), glucose = Signal(5.5, List(9) { 5.5 }, SignalSource.WATCH))
+        assertEquals(74, calc.calculate(all).confidencePct)
+        assertEquals(ReadinessConfidence.MEDIUM, confidenceFor(74))
+        assertEquals(ReadinessConfidence.HIGH, confidenceFor(75))
+        assertEquals(ReadinessConfidence.LOW, confidenceFor(49))
     }
 
-    @Test fun oneGameCountsLessThanThree() {
-        fun mind(runs: Int) = calc.calculate(full(cognitive = CognitiveInput(10, "Phone", runs)), DefaultScoring.DEFAULT)
-        assertEquals(0.06, mind(1).dimensions.first { it.dimension == Dimension.COGNITIVE }.weight, 1e-9)
-        assertEquals(0.08, mind(2).dimensions.first { it.dimension == Dimension.COGNITIVE }.weight, 1e-9)
-        assertEquals(0.10, mind(5).dimensions.first { it.dimension == Dimension.COGNITIVE }.weight, 1e-9)
-        // The same bad game pulls the score down less when it is the only one.
-        assertTrue(mind(1).score!! > mind(3).score!!)
+    @Test fun slidersScaleTheModel() {
+        val base = p(input(hoursAwake = 12.0))
+        val strong = p(input(hoursAwake = 12.0, settings = ScoreSettings(sleepInfluence = 1.5)))
+        assertTrue(strong < base)
+        assertEquals(ScoreSettings(gameWeight = 0.8), ScoreSettings(gameWeight = 2.0).clamped())
+        assertTrue(ScoreSettings.DEFAULT.isDefault)
     }
 
-    @Test fun zeroWeightDimensionIsExcludedAndMarked() {
-        val w = mapOf(Dimension.SLEEP to 0.45, Dimension.CARDIO to 0.25, Dimension.ACTIVITY to 0.10, Dimension.CIRCADIAN to 0.0, Dimension.COGNITIVE to 0.20)
-        val config = ScoringConfiguration.custom("c1", w, 5)
-        val c = calc.calculate(full(), config)
-        assertEquals(Availability.ZERO_WEIGHT, c.dimensions.first { it.dimension == Dimension.CIRCADIAN }.availability)
-        assertEquals(1.0, c.coverage, 1e-9)
-        assertEquals(ConfigurationType.CUSTOM, c.stamp.configType)
-        assertTrue(config.differsFromDefault)
-        assertTrue(!DefaultScoring.DEFAULT.differsFromDefault)
+    @Test fun scoreStaysInOneToHundred() {
+        val c = calc.calculate(input(hoursAwake = 40.0))
+        assertTrue(c.score!! in 1..100)
     }
 
-    @Test fun reproducibleWithSameInputsAndConfig() {
-        assertEquals(calc.calculate(full(), DefaultScoring.DEFAULT), calc.calculate(full(), DefaultScoring.DEFAULT))
+    @Test fun calibrationWaitsForTwentySessionsAndStaysBounded() {
+        val eps = nights(10, 8.0)
+        val pts = List(20) { i -> CalibrationPoint(game = 60.0 + i, atMs = t0 - (i % 9) * D + (9 + i % 8) * H, hrvBad = (i % 3).toDouble()) }
+        assertFalse(Calibrator.fit(pts, eps, 0.0, 7.0, Calibration(sessions = 19), 0).fitted)
+        val fit = Calibrator.fit(pts, eps, 0.0, 7.0, Calibration(sessions = 20), 0)
+        assertTrue(fit.fitted)
+        assertTrue(fit.hrvWeight in 0.0..Calibrator.MAX_WEIGHT)
+        assertTrue(fit.amplitude in Calibrator.AMPLITUDES)
     }
 
-    @Test fun sleepDurationCurve() {
-        assertEquals(100, scorer.sleepDurationScore(8.0))
-        assertTrue(scorer.sleepDurationScore(6.0) < scorer.sleepDurationScore(7.0))
-        assertTrue(scorer.sleepDurationScore(4.0) < 40)
-    }
-
-    @Test fun continuityNeedsAwakeTime() {
-        val (_, metrics) = scorer.sleep(full(night = night(0, awake = null)))
-        assertEquals(Availability.NO_DATA, metrics.first { it.key.name == "SLEEP_CONTINUITY" }.availability)
-    }
-
-    @Test fun lightNeedsTwoPeriods() {
-        assertNull(scorer.circadian(full(light = LightInput(listOf(3000.0, 2000.0), emptyList(), emptyList()))).first)
-        assertNotNull(scorer.circadian(full(light = LightInput(listOf(3000.0, 2000.0), emptyList(), listOf(10.0, 12.0)))).first)
-    }
-
-    @Test fun lowMovementNeedsReliableWear() {
-        val (_, m) = scorer.activity(full(activity = ActivityInput(8000, 20, 2, 4)))
-        assertEquals(Availability.NOT_RELIABLE, m.first { it.key.name == "LOW_MOVEMENT" }.availability)
-    }
-
-    @Test fun outOfRangeHrvIsNotReliable() {
-        val (score, m) = scorer.cardio(full(hrv = 900.0))
-        assertEquals(Availability.NOT_RELIABLE, m.first { it.key.name == "HRV" }.availability)
-        assertNotNull(score) // resting HR still scores
-    }
-}
-
-class BaselineTest {
-    @Test fun personalShareGrowsFromSevenDays() {
-        assertEquals(0.0, Baselines.personalShare(6))
-        assertTrue(Baselines.personalShare(7) > 0.0)
-        assertTrue(Baselines.personalShare(14) < Baselines.personalShare(20))
-        assertEquals(0.8, Baselines.personalShare(21))
-        assertEquals(0.8, Baselines.personalShare(60))
-    }
-
-    @Test fun referenceOnlyBeforeSevenDays() {
-        val b = Baselines.blend(listOf(80.0, 82.0), 42.0 to 12.0)
-        assertEquals(42.0, b.median)
-        assertEquals(0.0, b.personalShare)
-    }
-
-    @Test fun madZeroUsesMinimumScale() {
-        assertEquals(0.0, Stats.mad(List(10) { 50.0 }))
-        val z = Stats.robustZ(54.0, 50.0, 0.0, minScale = 4.0)
-        assertEquals(1.0, z, 1e-9)
-    }
-
-    @Test fun medianAndMadResistOutliers() {
-        val v = listOf(50.0, 51.0, 49.0, 50.0, 52.0, 48.0, 500.0)
-        assertEquals(50.0, Stats.median(v))
-        assertTrue(Stats.mad(v)!! <= 2.0)
+    @Test fun bandsAndBasis() {
+        assertEquals(ReadinessBand.PRIMA, ReadinessBand.of(85))
+        assertEquals(ReadinessBand.TERKURAS, ReadinessBand.of(39))
+        assertTrue("%" !in calc.calculate(input()).confidenceBasis)
     }
 }
 
 class BeatTheClockTest {
+    @Test fun fromFiveTestsTheScoreIsAPercentileOfTheLastTenDays() {
+        assertNull(BeatTheClock.percentile(3.0, List(4) { 2.5 }))
+        assertEquals(100, BeatTheClock.percentile(3.0, listOf(2.0, 2.1, 2.2, 2.3, 2.4)))
+        assertEquals(0, BeatTheClock.percentile(1.0, listOf(2.0, 2.1, 2.2, 2.3, 2.4)))
+        assertEquals(50, BeatTheClock.percentile(2.2, listOf(2.0, 2.1, 2.2, 2.3, 2.4)))
+    }
+
     /** A test of [n] reactions at [ms] each, plus [early] false starts. */
     private fun rounds(ms: Long, n: Int = 40, early: Int = 0): List<CognitiveRound> =
         (0 until n).map { BeatTheClock.reaction("r$it", "s", it, 2_000, ms) } +
@@ -399,8 +337,10 @@ class PeakWindowTest {
     )
 
     @Test fun notEnoughDataUntilEligible() {
-        val few = (1..5).flatMap { d -> AssessmentWindow.entries.map { s(d, it, 3.0) } }
-        assertEquals(PeakResult.NOT_ENOUGH_DATA, PeakWindowPredictor.predict(few, now).result)
+        val fewDays = (1..4).flatMap { d -> AssessmentWindow.entries.map { s(d, it, 3.0) } }
+        assertEquals(PeakResult.NOT_ENOUGH_DATA, PeakWindowPredictor.predict(fewDays, now).result, "4 days")
+        val noEvening = (1..8).flatMap { d -> listOf(s(d, AssessmentWindow.MORNING, 3.4), s(d, AssessmentWindow.AFTERNOON, 3.0)) }
+        assertEquals(PeakResult.NOT_ENOUGH_DATA, PeakWindowPredictor.predict(noEvening, now).result, "an untested part of the day could be the best")
     }
 
     @Test fun predictsClearMorningPeak() {
@@ -430,14 +370,23 @@ class PeakWindowTest {
         assertEquals(0, PeakWindowPredictor.predict(olderGame, now).validSessionCount)
     }
 
-    @Test fun eligibleWithFourGamesOnThreeDaysPerWindow() {
-        // 8 days, each window played on 4 of them: enough under the thresholds.
-        val list = (1..8).flatMap { d ->
+    @Test fun eligibleWithThreeTestsOnTwoDaysPerWindowOverFiveDays() {
+        // 6 days, each part of the day tested on 3 of them: enough, and a clear morning peak shows.
+        val list = (1..6).flatMap { d ->
             AssessmentWindow.entries.filter { (d + it.ordinal) % 2 == 0 }.map { w ->
                 s(d, w, if (w == AssessmentWindow.MORNING) 3.4 else 2.9)
             }
         }
-        assertTrue(PeakWindowPredictor.predict(list, now).result != PeakResult.NOT_ENOUGH_DATA)
+        val p = PeakWindowPredictor.predict(list, now)
+        assertEquals(PeakResult.PREDICTED, p.result)
+        assertEquals(AssessmentWindow.MORNING, p.window)
+    }
+
+    @Test fun lateNightBeforeTheUsualWakeIsEveningNotMorning() {
+        val wake = 7 * H
+        assertEquals(AssessmentWindow.EVENING, AssessmentWindow.at(wake, 1 * H), "01:00, still up from yesterday")
+        assertEquals(AssessmentWindow.MORNING, AssessmentWindow.at(wake, 6 * H), "06:00, up early")
+        assertEquals(AssessmentWindow.EVENING, AssessmentWindow.at(wake, 22 * H))
     }
 }
 
@@ -542,10 +491,6 @@ class MomentsTest {
         assertEquals(listOf("Critical", "Normal later"), merged.second)
         assertTrue(out.map { it.first.priority }.zipWithNext().all { (x, y) -> x <= y })
     }
-
-    @Test fun roundingGuard() {
-        assertTrue(abs(DefaultScoring.DEFAULT.weights.values.sum() - 1.0) < 1e-9)
-    }
 }
 
 class ReactionRunTest {
@@ -566,5 +511,30 @@ class ReactionRunTest {
         assertEquals(1, rounds.count { it.validity == RoundValidity.FALSE_START })
         assertTrue(rounds.filter { it.validity == RoundValidity.VALID }.all { it.reactionMs == 300L })
         assertEquals(SessionStatus.FULLY_VALID, BeatTheClock.status(rounds))
+    }
+}
+
+class ScreenSleepTest {
+    private val h = 3_600_000L
+    private fun off(t: Double) = ScreenSleep.Event((t * h).toLong(), ScreenSleep.Kind.OFF)
+    private fun unlock(t: Double) = ScreenSleep.Event((t * h).toLong(), ScreenSleep.Kind.UNLOCK)
+
+    @Test fun theNightRunsFromScreenOffToTheFirstUnlock() {
+        val e = ScreenSleep.estimate(listOf(unlock(20.0), off(23.5), off(23.7), unlock(31.0), off(31.2)), 18 * h, 38 * h, 40 * h)!!
+        assertEquals((23.5 * h).toLong(), e.startMs)
+        assertEquals(31 * h, e.endMs)
+        assertEquals(0, e.awakeMinutes)
+    }
+
+    @Test fun aBriefCheckAtNightDoesntSplitIt() {
+        val e = ScreenSleep.estimate(listOf(off(23.0), unlock(27.0), off(27.1), unlock(31.0)), 18 * h, 38 * h, 40 * h)!!
+        assertEquals(23 * h, e.startMs)
+        assertEquals(31 * h, e.endMs)
+        assertEquals(6, e.awakeMinutes)
+    }
+
+    @Test fun shortGapsAndUnfinishedNightsAreIgnored() {
+        assertNull(ScreenSleep.estimate(listOf(off(23.0), unlock(25.0)), 18 * h, 38 * h, 40 * h), "2 h is not a night")
+        assertNull(ScreenSleep.estimate(listOf(off(23.0), unlock(31.0)), 18 * h, 38 * h, 30 * h), "no unlock yet")
     }
 }

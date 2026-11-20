@@ -11,7 +11,7 @@ import com.hercules.shared.readiness.CognitiveSession
 import com.hercules.shared.readiness.CollectionMethod
 import com.hercules.shared.readiness.ConfigurationType
 import com.hercules.shared.readiness.DataQuality
-import com.hercules.shared.readiness.DefaultScoring
+import com.hercules.shared.readiness.Calibration
 import com.hercules.shared.readiness.DeviceKind
 import com.hercules.shared.readiness.ExerciseRecord
 import com.hercules.shared.readiness.HealthMetric
@@ -21,7 +21,7 @@ import com.hercules.shared.readiness.LightSample
 import com.hercules.shared.readiness.MomentStatus
 import com.hercules.shared.readiness.PeakWindowPrediction
 import com.hercules.shared.readiness.RoundValidity
-import com.hercules.shared.readiness.ScoringConfiguration
+import com.hercules.shared.readiness.ScoreSettings
 import com.hercules.shared.readiness.SessionStatus
 import com.hercules.shared.readiness.SleepSessionRecord
 import com.hercules.shared.readiness.Urgency
@@ -113,6 +113,15 @@ class CognitiveStore(db: HerculesDatabase, private val io: CoroutineDispatcher =
         }
     }
 
+    suspend fun sleepSessionsRange(fromKey: String, toKey: String): List<SleepSessionRecord> = withContext(io) {
+        q.sleepSessionsRange(fromKey, toKey).executeAsList().map {
+            SleepSessionRecord(
+                it.id, it.day_key, it.start_ms, it.end_ms, it.asleep_min.toInt(), it.awake_min?.toInt(), it.deep_min?.toInt(),
+                it.rem_min?.toInt(), it.light_min?.toInt(), it.source_package, it.source_device, enumOr(it.quality, DataQuality.INVALID),
+            )
+        }
+    }
+
     suspend fun sleepSessions(dayKey: String): List<SleepSessionRecord> = withContext(io) {
         q.sleepSessionsForDay(dayKey).executeAsList().map {
             SleepSessionRecord(
@@ -168,7 +177,6 @@ class CognitiveStore(db: HerculesDatabase, private val io: CoroutineDispatcher =
 
     suspend fun latestLight(): LightSample? = withContext(io) { q.latestLight().executeAsOneOrNull()?.toModel() }
     suspend fun countLightSince(ms: Long): Long = withContext(io) { q.countLightSince(ms).executeAsOne() }
-    suspend fun deleteLightBefore(ms: Long) = withContext(io) { q.deleteLightBefore(ms) }
 
     // ---------------------------------------------------------------- Reaction Test
     suspend fun saveSession(s: CognitiveSession, synced: Boolean = false) = withContext(io) {
@@ -248,25 +256,37 @@ class CognitiveStore(db: HerculesDatabase, private val io: CoroutineDispatcher =
         }
     }
 
-    // ---------------------------------------------------------------- scoring configuration (history kept)
-    suspend fun activeConfig(): ScoringConfiguration = withContext(io) { q.activeConfig().executeAsOneOrNull()?.toModel().current() }
-    fun observeActiveConfig(): Flow<ScoringConfiguration> = q.activeConfig().asFlow().mapToOneOrNull(io).map { it?.toModel().current() }
+    // ---------------------------------------------------------------- score settings and calibration (kv)
+    suspend fun scoreSettings(): ScoreSettings = kvGet(KEY_SETTINGS)?.let { decodeSettings(it) } ?: ScoreSettings.DEFAULT
+    fun observeScoreSettings(): Flow<ScoreSettings> = observeKv(KEY_SETTINGS).map { it?.let { s -> decodeSettings(s) } ?: ScoreSettings.DEFAULT }
+    suspend fun saveScoreSettings(s: ScoreSettings) = kvPut(KEY_SETTINGS, cognitiveJson.encodeToString(ScoreSettings.serializer(), s))
+    private fun decodeSettings(s: String) = runCatching { cognitiveJson.decodeFromString(ScoreSettings.serializer(), s) }.getOrNull()
 
-    /** An older stored default follows the current default; custom weights are kept as they are. */
-    private fun ScoringConfiguration?.current(): ScoringConfiguration =
-        if (this == null || (type == ConfigurationType.DEFAULT && version < DefaultScoring.CONFIG_VERSION)) DefaultScoring.DEFAULT else this
+    suspend fun calibration(): Calibration =
+        kvGet(KEY_CALIBRATION)?.let { runCatching { cognitiveJson.decodeFromString(Calibration.serializer(), it) }.getOrNull() } ?: Calibration()
+    fun observeCalibration(): Flow<Calibration> = observeKv(KEY_CALIBRATION).map { s ->
+        s?.let { runCatching { cognitiveJson.decodeFromString(Calibration.serializer(), it) }.getOrNull() } ?: Calibration()
+    }
+    suspend fun saveCalibration(c: Calibration) = kvPut(KEY_CALIBRATION, cognitiveJson.encodeToString(Calibration.serializer(), c))
 
-    /** Stores [c] as a new history entry and makes it the only active one. Older entries are never changed. */
-    suspend fun activateConfig(c: ScoringConfiguration) = withContext(io) {
-        q.transaction {
-            q.deactivateConfigs()
-            q.insertConfig(
-                ConfigRow(c.id, c.version.toLong(), c.type.name, c.sleepWeight, c.cardiovascularWeight, c.activityWeight, c.circadianWeight, c.cognitiveWeight, c.updatedAtMs, 1),
-            )
-        }
+    /**
+     * Percentage weights from before engine 5 are discarded; true once if the user had set their own, so the app can
+     * say so (spec §2.9).
+     */
+    suspend fun takeWeightsResetNotice(): Boolean = withContext(io) {
+        if (q.kvGet(KEY_WEIGHTS_NOTICE).executeAsOneOrNull() != null) return@withContext false
+        q.kvPut(KEY_WEIGHTS_NOTICE, "1")
+        q.activeConfig().executeAsOneOrNull()?.type == ConfigurationType.CUSTOM.name
     }
 
-    suspend fun configHistory(): List<ScoringConfiguration> = withContext(io) { q.configHistory().executeAsList().map { it.toModel() } }
+    /** Rolling retention: deletes raw values, nights, tests, scores and evaluations before [cutoffKey] / [cutoffMs]. */
+    suspend fun purgeBefore(cutoffKey: String, cutoffMs: Long) = withContext(io) {
+        q.transaction {
+            q.purgeSamples(cutoffMs); q.purgeWorkouts(cutoffMs); q.purgeDaily(cutoffKey); q.purgeMetrics(cutoffKey)
+            q.purgeSleepSessions(cutoffKey); q.purgeSleep(cutoffKey); q.purgeExercise(cutoffMs); q.purgeLight(cutoffMs)
+            q.purgeRounds(cutoffMs); q.purgeCognitive(cutoffMs); q.purgeReadiness(cutoffKey); q.purgeEvaluations("evaluation:$cutoffKey")
+        }
+    }
 
     // ---------------------------------------------------------------- peak window
     suspend fun savePeak(p: PeakWindowPrediction, startDay: String, endDay: String) = withContext(io) {
@@ -370,17 +390,6 @@ class CognitiveStore(db: HerculesDatabase, private val io: CoroutineDispatcher =
         }
     }
 
-    /**
-     * Deletes everything the demo loader wrote (ids "demo:…"/"demo-…", device "demo"), plus the derived tables, which
-     * mix demo and real input and are rebuilt by the caller. Your own records stay.
-     */
-    suspend fun removeDemo() = withContext(io) {
-        q.transaction {
-            q.deleteDemoSamples(); q.deleteDemoMetrics(); q.deleteDemoSleepSessions(); q.deleteDemoExercise(); q.deleteDemoLight()
-            q.deleteDemoRounds(); q.deleteDemoCognitive(); q.deleteDemoEvents(); q.deleteDemoTasks(); q.deleteDemoReflections(); q.deleteDemoSnapshots()
-            q.clearSleep(); q.clearReadiness(); q.clearDaily(); q.clearRecords(); q.clearBaselines(); q.clearPeaks()
-        }
-    }
 
     // ---------------------------------------------------------------- mapping
     private fun SleepRow.toModel() = SleepNight(
@@ -396,9 +405,6 @@ class CognitiveStore(db: HerculesDatabase, private val io: CoroutineDispatcher =
 
     private fun LightRow.toModel() = LightSample(id, lux, measured_ms, sensor, enumOr(context, LightContext.FOREGROUND))
 
-    private fun ConfigRow.toModel() = ScoringConfiguration(
-        id, version.toInt(), enumOr(type, ConfigurationType.CUSTOM), sleep_weight, cardio_weight, activity_weight, circadian_weight, cognitive_weight, updated_ms,
-    )
 
     private fun EventRow.toModel(): PlanEvent? = runCatching {
         PlanEvent(
@@ -420,3 +426,7 @@ class CognitiveStore(db: HerculesDatabase, private val io: CoroutineDispatcher =
 
 internal inline fun <reified E : Enum<E>> enumOrNull(s: String): E? = enumValues<E>().firstOrNull { it.name == s }
 internal inline fun <reified E : Enum<E>> enumOr(s: String, default: E): E = enumOrNull<E>(s) ?: default
+
+private const val KEY_SETTINGS = "score_settings"
+private const val KEY_CALIBRATION = "calibration"
+private const val KEY_WEIGHTS_NOTICE = "weights_reset_notice_v5"

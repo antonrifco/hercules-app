@@ -44,6 +44,8 @@ open class HerculesWearApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Herc's paths are slow to parse on a watch: do it now, off the main thread, so the first frame doesn't wait.
+        Thread({ com.hercules.wear.ui.warmHerc() }, "herc-warm").start()
         graph = WearGraph(this)
         SyncWorker.schedulePeriodic(this)
         com.hercules.wear.notify.WatchReminderWorker.schedule(this)

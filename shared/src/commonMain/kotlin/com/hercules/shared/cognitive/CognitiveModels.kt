@@ -67,7 +67,7 @@ data class Suggestion(val title: String, val detail: String, val tone: Tone)
 @Serializable
 data class TimeWindow(val window: AssessmentWindow, val startMs: Long, val endMs: Long)
 
-/** A published score (coverage ≥ 70% and sleep available). Everything it was calculated with travels along. */
+/** A published score. Everything it was calculated with travels along. */
 @Serializable
 data class Readiness(
     val dayKey: String,
@@ -83,7 +83,7 @@ data class Readiness(
     val coverage: Double get() = calc.coverage
     val confidence: ReadinessConfidence get() = calc.confidence
     val dimensions: List<DimensionScore> get() = calc.dimensions
-    fun dimension(d: Dimension): DimensionScore = calc.dimensions.first { it.dimension == d }
+    fun dimension(d: Dimension): DimensionScore? = calc.dimensions.firstOrNull { it.dimension == d }
 }
 
 /** Today's evaluation: a published [readiness], or the reasons there isn't one yet (INSUFFICIENT_DATA). */
@@ -179,6 +179,10 @@ data class WatchState(
     val playsToday: Int = 0,
     /** Wake time the phone uses today, so both devices file runs under the same part of the day. */
     val wakeMs: Long? = null,
+    /** The phone's score settings, so a score worked out on the watch uses the same sliders. */
+    val scoreSettings: com.hercules.shared.readiness.ScoreSettings? = null,
+    /** The phone's tuning (it sees tests from both devices), so the watch scores with the same fitted values. */
+    val calibration: com.hercules.shared.readiness.Calibration? = null,
 )
 
 /** How a Moment felt afterwards, 1 (rough) to 5 (great). Shown next to readiness, never claimed to be caused by it. */
@@ -186,6 +190,14 @@ data class WatchState(
 data class EventReflection(val eventId: String, val rating: Int, val createdMs: Long)
 
 /** "6h 40m" */
+/** 12345 → "12,345": thousand separators for every number shown in the apps. */
+fun Long.grouped(): String {
+    val digits = kotlin.math.abs(this).toString().reversed().chunked(3).joinToString(",").reversed()
+    return if (this < 0) "-$digits" else digits
+}
+fun Int.grouped(): String = toLong().grouped()
+fun Double.grouped(): String = kotlin.math.round(this).toLong().grouped()
+
 fun formatDuration(minutes: Int): String = if (minutes >= 60) "${minutes / 60}h ${minutes % 60}m" else "${minutes}m"
 
 internal const val MIN_MS = 60_000L

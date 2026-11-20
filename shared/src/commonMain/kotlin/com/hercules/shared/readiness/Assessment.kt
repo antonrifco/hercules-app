@@ -19,7 +19,7 @@ enum class DeviceKind(val label: String) { PHONE("Phone"), WATCH("Watch") }
 enum class AssessmentWindow(val label: String, val fromHours: Double, val toHours: Double) {
     MORNING("Morning", 0.0, 4.0),
     AFTERNOON("Afternoon", 4.0, 8.0),
-    EVENING("Evening", 8.0, 12.0);
+    EVENING("Evening", 8.0, 16.0);
 
     fun startMs(wakeMs: Long): Long = wakeMs + (fromHours * HOUR).toLong()
     fun endMs(wakeMs: Long): Long = wakeMs + (toHours * HOUR).toLong()
@@ -27,11 +27,17 @@ enum class AssessmentWindow(val label: String, val fromHours: Double, val toHour
 
     companion object {
         private const val HOUR = 3_600_000.0
+        private const val EARLY_H = 2.0
 
-        /** Always a part of the day: before waking counts as morning, late at night as evening. */
+        /**
+         * Always a part of the day. Up to [EARLY_H] hours before the wake time counts as morning (up early); further
+         * before it you are still up from the day before (no night recorded yet, so [wakeMs] is today's usual
+         * wake-up), which is evening, not morning.
+         */
         fun at(wakeMs: Long, t: Long): AssessmentWindow {
             val h = (t - wakeMs) / HOUR
             return when {
+                h < -EARLY_H -> EVENING
                 h < AFTERNOON.fromHours -> MORNING
                 h < EVENING.fromHours -> AFTERNOON
                 else -> EVENING
@@ -133,7 +139,9 @@ object BeatTheClock {
     const val FALSE_START_PENALTY = 5
     /** Games on a device before its usual is fully personal; until then it leans on the reference below. */
     const val MIN_BASELINE_SESSIONS = 3
-    const val BASELINE_DAYS = 28
+    const val BASELINE_DAYS = RETENTION_DAYS
+    /** From this many earlier tests in the window, the game score is the percentile of the test among them (spec §2.6). */
+    const val PERCENTILE_SESSIONS = 5
     /** Typical touchscreen speed until there is a personal usual: about 330 ms on a phone, 370 ms on a watch. */
     fun referenceSpeed(device: DeviceKind): Double = when (device) { DeviceKind.PHONE -> 3.0; DeviceKind.WATCH -> 2.7 }
     /** Points per unit of ln(speed / usual): 10% slower than usual ≈ 34, 10% faster ≈ 64. */
@@ -193,12 +201,23 @@ object BeatTheClock {
         var total: Int? = null
         if (speed != null) {
             speedScore = speedScore(speed, usualSpeed(history, deviceKind, startMs))
-            total = (speedScore - FALSE_START_PENALTY * maxOf(0, falseStarts - FREE_FALSE_STARTS)).coerceIn(0, 100)
+            val g = percentile(speed, baselineSessions(history, deviceKind, startMs).mapNotNull { it.speed }) ?: speedScore
+            total = (g - FALSE_START_PENALTY * maxOf(0, falseStarts - FREE_FALSE_STARTS)).coerceIn(0, 100)
         }
         return CognitiveSession(
             id, deviceKind, deviceId, window, dayKey, startMs, endMs, status,
             speed, median, lapses, if (rounds.isEmpty()) null else falseStarts, speedScore, total, GAME_VERSION, rounds,
         )
+    }
+
+    /**
+     * G = 100 × the share of this device's earlier tests in the window that were slower (ties count half). Null with
+     * fewer than [PERCENTILE_SESSIONS] of them: then the 50-anchored [speedScore] applies.
+     */
+    fun percentile(speed: Double, earlier: List<Double>): Int? {
+        if (earlier.size < PERCENTILE_SESSIONS) return null
+        val below = earlier.count { it < speed } + 0.5 * earlier.count { it == speed }
+        return (100 * below / earlier.size).roundToInt().coerceIn(0, 100)
     }
 
     /** This device's usual speed: the reference at first, fully personal after [MIN_BASELINE_SESSIONS] games. */
@@ -211,6 +230,9 @@ object BeatTheClock {
 
     /** The quick check's five stress choices, 1 (calm) to 5 (tense). Energy uses Herc's five faces instead. */
     val STRESS_FACES = listOf("😌", "🙂", "😐", "😟", "😰")
+    /** The words for each choice, 1 to 5, the same on phone and watch. */
+    val ENERGY_LABELS = listOf("Drained", "Low", "Okay", "Good", "Charged")
+    val STRESS_LABELS = listOf("Calm", "Easy", "Neutral", "Tense", "Very tense")
 
     /** A game score in plain words. 50 is the player's usual, so the words compare against that. */
     fun verdict(score: Int): String = when {
@@ -254,12 +276,15 @@ data class PeakWindowPrediction(
     val modelVersion: Int = MODEL_VERSION,
 ) {
     companion object {
-        /** v3: reaction speed (game v4). v2: only games of the current version; 7 days, 4 games on 3 days. */
-        const val MODEL_VERSION = 3
-        const val WINDOW_DAYS = 28
-        const val MIN_OBSERVATION_DAYS = 7
-        const val MIN_SESSIONS_PER_WINDOW = 4
-        const val MIN_DAYS_PER_WINDOW = 3
+        /**
+         * v4: 5 days, 3 tests on 2 days per part of the day; the gap test below decides whether a difference is
+         * real, so the minimums only rule out tiny samples. v3: reaction speed (game v4), 7 days, 4 tests on 3 days.
+         */
+        const val MODEL_VERSION = 4
+        const val WINDOW_DAYS = RETENTION_DAYS
+        const val MIN_OBSERVATION_DAYS = 5
+        const val MIN_SESSIONS_PER_WINDOW = 3
+        const val MIN_DAYS_PER_WINDOW = 2
         const val MIN_GAP = 0.2
     }
 }
@@ -273,7 +298,7 @@ object PeakWindowPredictor {
             it.gameVersion == BeatTheClock.GAME_VERSION && it.valid && it.window != null && it.speed != null && it.startMs in from..nowMs
         }
 
-        // Normalize per device: robust z of the speed against that device's own 28-day distribution (higher = faster).
+        // Normalize per device: robust z of the speed against that device's own 10-day distribution (higher = faster).
         val perf = usable.groupBy { it.deviceKind }.flatMap { (_, list) ->
             val speeds = list.map { it.speed!! }
             val m = Stats.median(speeds)!!

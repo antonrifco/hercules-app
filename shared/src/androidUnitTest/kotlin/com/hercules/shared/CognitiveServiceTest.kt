@@ -3,6 +3,7 @@ package com.hercules.shared
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import com.hercules.shared.cognitive.CognitiveService
 import com.hercules.shared.cognitive.CognitiveStore
+import com.hercules.shared.readiness.ScreenSleep
 import com.hercules.shared.readiness.AssessmentWindow
 import com.hercules.shared.readiness.CollectionMethod
 import com.hercules.shared.readiness.DataQuality
@@ -17,12 +18,12 @@ import com.hercules.shared.readiness.Dimension
 import com.hercules.shared.readiness.MomentRules
 import com.hercules.shared.readiness.MomentStatus
 import com.hercules.shared.readiness.PeakResult
-import com.hercules.shared.readiness.DefaultScoring
+import com.hercules.shared.readiness.ScoreSettings
+import com.hercules.shared.readiness.SignalSource
 import com.hercules.shared.readiness.PrepPhase
 import com.hercules.shared.readiness.PrepStatus
 import com.hercules.shared.readiness.RoundValidity
 import com.hercules.shared.readiness.Urgency
-import com.hercules.shared.readiness.WeightValidation
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import com.hercules.shared.data.HerculesRepository
@@ -64,10 +65,12 @@ class CognitiveServiceTest {
         val ev = cognitive.refresh()
         val r = assertNotNull(ev.readiness, ev.calc.insufficientReason)
         assertTrue(r.score in 30..75, "score=${r.score}")
-        assertTrue(ev.calc.coverage >= 0.7)
-        assertEquals(DefaultScoring.DEFAULT.id, ev.calc.stamp.configId)
+        assertTrue(ev.calc.confidencePct >= 50, "confidence=${ev.calc.confidencePct}")
+        assertEquals(ConfigurationType.DEFAULT, ev.calc.stamp.configType)
         assertTrue(r.suggestions.any { it.title.startsWith("Short on sleep") })
-        assertTrue(cognitive.store.readinessRange("2026-10-27", "2026-11-10").size >= 10)
+        // Only the last 10 days are kept.
+        assertTrue(cognitive.store.readinessRange("2026-10-27", "2026-11-10").size in 5..11)
+        assertTrue(cognitive.store.readinessRange("2026-10-01", "2026-10-30").isEmpty())
 
         val peak = assertNotNull(cognitive.store.latestPeak())
         assertEquals(PeakResult.PREDICTED, peak.result)
@@ -89,26 +92,23 @@ class CognitiveServiceTest {
         assertEquals("demo-pitch", state.nextEvent?.event?.id)
     }
 
-    @Test fun customWeightsAreValidatedAndHistoryKeepsItsConfig() = runTest {
+    @Test fun customSettingsCostConfidenceAndHistoryKeepsItsSettings() = runTest {
         val (repo, insights, cognitive) = services()
         DemoData.load(repo, insights, cognitive, now)
         val yesterday = cognitive.store.readiness("2026-11-09")!!
-        assertEquals(DefaultScoring.DEFAULT.id, yesterday.calc.stamp.configId)
+        assertEquals(ConfigurationType.DEFAULT, yesterday.calc.stamp.configType)
+        val before = cognitive.evaluation()!!.calc.confidencePct
 
-        val bad = cognitive.saveWeights(Dimension.entries.associateWith { 0.3 })
-        assertIs<WeightValidation.Invalid>(bad)
-        assertEquals(ConfigurationType.DEFAULT, cognitive.config().type)
-
-        val w = mapOf(Dimension.SLEEP to 0.60, Dimension.CARDIO to 0.20, Dimension.ACTIVITY to 0.0, Dimension.CIRCADIAN to 0.0, Dimension.COGNITIVE to 0.20)
-        assertIs<WeightValidation.Valid>(cognitive.saveWeights(w))
+        cognitive.saveSettings(ScoreSettings(gameWeight = 5.0))
+        assertEquals(0.8, cognitive.settings().gameWeight)
         val today = cognitive.evaluation()!!
         assertEquals(ConfigurationType.CUSTOM, today.calc.stamp.configType)
-        // Yesterday's stored score is untouched.
-        assertEquals(yesterday, cognitive.store.readiness("2026-11-09"))
+        assertEquals(before - 5, today.calc.confidencePct)
+        // Yesterday's stored score keeps the settings it was made with.
+        assertEquals(ConfigurationType.DEFAULT, cognitive.store.readiness("2026-11-09")!!.calc.stamp.configType)
 
-        cognitive.restoreDefaultWeights()
-        assertEquals(ConfigurationType.DEFAULT, cognitive.config().type)
-        assertEquals(2, cognitive.store.configHistory().size) // custom, then restored default
+        cognitive.restoreDefaultSettings()
+        assertTrue(cognitive.settings().isDefault)
     }
 
     @Test fun beatTheClockScoresFromTheFirstGameAnyTimeAnyNumber() = runTest {
@@ -187,25 +187,25 @@ class CognitiveServiceTest {
         assertTrue(cognitive.upcoming().isEmpty())
     }
 
+    private fun hcNight(day: String, id: String = "hc:$day") = SleepSessionRecord(
+        id, day, dk.startOf(day) - 2 * 3_600_000L, dk.startOf(day) + 6 * 3_600_000L, 450, 30, null, null, null, "phone.app", null, DataQuality.VALID,
+    )
+
     @Test fun lateDataRecalculatesTheLastDaysButNotOlderOnes() = runTest {
         val (_, _, cognitive) = services()
-        fun metric(type: HealthMetricType, day: String, v: Double) = HealthMetric(
-            "t:$type:$day", type, v, dk.startOf(day) + 7 * 3_600_000L, dk.startOf(day) + 7 * 3_600_000L, now, day,
-            "test", null, DataQuality.VALID, CollectionMethod.HEALTH_CONNECT,
-        )
-        // Resting heart rate for yesterday arrives today: yesterday gets a score it never had.
-        cognitive.store.upsertMetrics(listOf(metric(HealthMetricType.RESTING_HR, "2026-11-09", 58.0)))
+        // Yesterday's night arrives today: yesterday gets a score it never had.
+        cognitive.store.upsertSleepSessions(listOf(hcNight("2026-11-09")))
         cognitive.refresh()
         val first = assertNotNull(cognitive.store.evaluation("2026-11-09"))
         assertNotNull(first.calc.score)
-        // Then yesterday's HRV arrives: yesterday is recalculated with more coverage.
-        cognitive.store.upsertMetrics(listOf(metric(HealthMetricType.HRV_RMSSD, "2026-11-09", 45.0)))
+        // The night before it arrives too: yesterday is recalculated (more sleep history behind it).
+        cognitive.store.upsertSleepSessions(listOf(hcNight("2026-11-08")))
         cognitive.refresh()
         val second = assertNotNull(cognitive.store.evaluation("2026-11-09"))
-        assertTrue(second.calc.dimensions.first { it.dimension == Dimension.CARDIO }.metrics.any { it.key.name == "HRV" && it.score != null })
+        assertNotNull(second.calc.score)
         assertEquals(first.calc.stamp.configId, second.calc.stamp.configId)
         // Older than the recalculation window: left alone.
-        cognitive.store.upsertMetrics(listOf(metric(HealthMetricType.RESTING_HR, "2026-11-05", 58.0)))
+        cognitive.store.upsertSleepSessions(listOf(hcNight("2026-11-05")))
         cognitive.refresh()
         assertNull(cognitive.store.evaluation("2026-11-05"))
     }
@@ -213,48 +213,82 @@ class CognitiveServiceTest {
     @Test fun withoutTheWatchThePhonesHealthConnectIsUsed() = runTest {
         val (_, _, cognitive) = services()
         val day = "2026-11-10"
-        val start = dk.startOf(day) - 2 * 3_600_000L
-        cognitive.store.upsertSleepSessions(listOf(
-            SleepSessionRecord("hc:1", day, start, start + 8 * 3_600_000L, 450, 30, null, null, null, "phone.app", null, DataQuality.VALID),
-        ))
-        cognitive.store.upsertMetrics(listOf(
-            HealthMetric("hc:rhr", HealthMetricType.RESTING_HR, 57.0, now - 3_600_000L, now - 3_600_000L, now, day, "phone.app", null, DataQuality.VALID, CollectionMethod.HEALTH_CONNECT),
-        ))
+        cognitive.store.upsertSleepSessions(listOf(hcNight(day)))
         val ev = cognitive.refresh()
         assertEquals(com.hercules.shared.cognitive.SleepNight.SOURCE_HEALTH_CONNECT, cognitive.store.sleep(day)?.source)
+        // An unstaged night is a phone estimate: it scores, but confidence can't reach High.
+        assertEquals(SignalSource.PHONE, ev.calc.sleepSource)
         assertNotNull(ev.calc.dimensions.first { it.dimension == Dimension.SLEEP }.score)
-        assertNotNull(ev.calc.dimensions.first { it.dimension == Dimension.CARDIO }.score)
+        assertTrue(ev.calc.confidencePct <= 74)
     }
 
-    @Test fun aMonthOfHealthConnectSleepIsUsedFromTheFirstDay() = runTest {
+    @Test fun sleepEndingBeforeThreeIsNotLastNight() = runTest {
         val (_, _, cognitive) = services()
-        // The first import brings 30 nights at once; all of them must become nights, not only the last three.
-        cognitive.store.upsertSleepSessions((0..20).map { back ->
-            val day = dk.plusDays("2026-11-10", -back)
-            val start = dk.startOf(day) - 2 * 3_600_000L
-            SleepSessionRecord("hc:$back", day, start, start + 8 * 3_600_000L, 450, 30, null, null, null, "phone.app", null, DataQuality.VALID)
-        })
+        val day = dk.plusDays("2026-11-10", -4)
+        // The phone down 20:00–00:05 (TV evening): ends too early to be the night of [day].
+        val evening = SleepSessionRecord("screen:$day", day, dk.startOf(day) - 4 * 3_600_000L, dk.startOf(day) + 5 * 60_000L, 245, 0, null, null, null, ScreenSleep.SOURCE, "phone", DataQuality.VALID)
+        cognitive.store.upsertSleepSessions(listOf(evening))
+        cognitive.refresh()
+        assertEquals(null, cognitive.store.sleep(day))
+    }
+
+    @Test fun lateWatchSleepReplacesAPhoneNightEvenDaysLater() = runTest {
+        val (_, _, cognitive) = services()
+        val day = dk.plusDays("2026-11-10", -5)
+        // First only the phone's screen-use estimate for that night: it becomes the night.
+        val screen = SleepSessionRecord("screen:$day", day, dk.startOf(day) - 1 * 3_600_000L, dk.startOf(day) + 7 * 3_600_000L, 480, 0, null, null, null, ScreenSleep.SOURCE, "phone", DataQuality.VALID)
+        cognitive.store.upsertSleepSessions(listOf(screen))
+        cognitive.refresh()
+        assertEquals("Phone screen use", cognitive.store.sleep(day)?.provider)
+        // Days later the watch's staged night for it syncs: it replaces the estimate.
+        val watch = SleepSessionRecord("hc:w:$day", day, dk.startOf(day) - 30 * 60_000L, dk.startOf(day) + 6 * 3_600_000L, 360, 20, 80, 90, 190, "com.xiaomi.wearable", "Xiaomi Watch", DataQuality.VALID)
+        cognitive.store.upsertSleepSessions(listOf(watch))
+        cognitive.refresh()
+        assertEquals("com.xiaomi.wearable", cognitive.store.sleep(day)?.provider)
+        assertEquals(360, cognitive.store.sleep(day)?.asleepMinutes)
+    }
+
+    @Test fun aNapCountsAsSleep() = runTest {
+        val (_, _, cognitive) = services()
+        val day = "2026-11-10"
+        cognitive.store.upsertSleepSessions((0..4).map { hcNight(dk.plusDays(day, -it)) })
+        val evening = dk.startOf(day) + 18 * 3_600_000L
+        val without = cognitive.refresh(evening).calc
+        // A 1-hour nap after lunch, from Health Connect: less sleep pressure by the evening.
+        val nap = SleepSessionRecord("hc:nap", day, dk.startOf(day) + 13 * 3_600_000L, dk.startOf(day) + 14 * 3_600_000L, 60, 0, null, null, null, "phone.app", null, DataQuality.VALID)
+        cognitive.store.upsertSleepSessions(listOf(nap))
+        val with = cognitive.refresh(evening).calc
+        assertTrue(with.alertness!! > without.alertness!!, "nap ${with.alertness} vs ${without.alertness}")
+        assertEquals(dk.startOf(day) + 6 * 3_600_000L, cognitive.store.sleep(day)?.endMs, "the nap doesn't replace the night")
+    }
+
+    @Test fun onlyTheLastTenDaysAreKept() = runTest {
+        val (_, _, cognitive) = services()
+        // The first import can bring more nights than the window: all within it become nights, older ones go.
+        cognitive.store.upsertSleepSessions((0..20).map { back -> hcNight(dk.plusDays("2026-11-10", -back)) })
         val ev = cognitive.refresh()
-        assertEquals(21, cognitive.store.sleepRange("2026-10-01", "2026-11-10").size)
-        assertNotNull(ev.calc.dimensions.first { it.dimension == Dimension.SLEEP }.metrics.first { it.key == com.hercules.shared.readiness.MetricKey.SLEEP_CONSISTENCY }.score)
+        assertEquals(11, cognitive.store.sleepRange("2026-10-01", "2026-11-10").size)
+        assertTrue(cognitive.store.sleepSessions("2026-10-25").isEmpty())
+        assertEquals(10, ev.calc.historyDays)
     }
 
     @Test fun noScoreBetweenMidnightAndWaking() = runTest {
-        // 00:30 with yesterday's steps on record: enough for a number, but the day has not started.
+        // 00:30 with the night before on record: the day has not started.
         val night = dk.startOf("2026-11-10") + 30 * 60_000L
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
         HerculesDatabase.Schema.create(driver)
         val db = HerculesDatabase(driver)
         val cognitive = CognitiveService(HerculesRepository(db, Dispatchers.Unconfined), CognitiveStore(db, Dispatchers.Unconfined), dk, clock = { night })
-        cognitive.store.upsertMetrics(listOf(
-            HealthMetric("hc:steps:2026-11-09", HealthMetricType.STEPS_DAILY, 9000.0, night - 86_400_000L, night, night, "2026-11-09", "phone.app", null, DataQuality.VALID, CollectionMethod.HEALTH_CONNECT),
-        ))
+        cognitive.store.upsertSleepSessions(listOf(hcNight("2026-11-09")))
         val ev = cognitive.refresh()
         assertNull(ev.calc.score)
         assertEquals(com.hercules.shared.readiness.REASON_BEFORE_WAKE, ev.calc.insufficientReason)
-        // The same data after the usual wake-up time (07:00 by default) gives a score.
+        // After the usual wake-up time, with no night recorded, the usual sleep window stands in (Low confidence).
         val morning = CognitiveService(HerculesRepository(db, Dispatchers.Unconfined), CognitiveStore(db, Dispatchers.Unconfined), dk, clock = { night + 8 * 3_600_000L })
-        assertNotNull(morning.refresh().calc.score)
+        val later = morning.refresh().calc
+        assertNotNull(later.score)
+        assertEquals(SignalSource.ASSUMED, later.sleepSource)
+        assertEquals(com.hercules.shared.readiness.ReadinessConfidence.LOW, later.confidence)
     }
 
     @Test fun noDataMeansInsufficientNotZero() = runTest {

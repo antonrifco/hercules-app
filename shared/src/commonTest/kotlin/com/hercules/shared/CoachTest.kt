@@ -15,7 +15,8 @@ import com.hercules.shared.insights.DayKeys
 import com.hercules.shared.readiness.AssessmentWindow
 import com.hercules.shared.readiness.CognitiveInput
 import com.hercules.shared.readiness.DayInputs
-import com.hercules.shared.readiness.DefaultScoring
+import com.hercules.shared.readiness.SignalSource
+import com.hercules.shared.readiness.SleepEpisode
 import com.hercules.shared.readiness.NightInput
 import com.hercules.shared.readiness.PeakResult
 import com.hercules.shared.readiness.PeakWindowPrediction
@@ -37,8 +38,11 @@ class CoachTest {
 
     private fun readiness(baselineDays: Int = 20): Readiness {
         val calc = ReadinessCalculator().calculate(
-            DayInputs(day, NightInput(day, 0, 1, 470, 20, 180.0), emptyList(), 45.0, List(20) { 45.0 }, 58.0, List(20) { 58.0 }, emptyList(), null, null, CognitiveInput(60, "Phone")),
-            DefaultScoring.DEFAULT,
+            DayInputs(
+                dayKey = day, atMs = wake + 2 * 3_600_000L, hourOfDay = 9.0, lastNight = NightInput(day, wake - 470 * 60_000L, wake, 470, 20, 180.0),
+                sleepSource = SignalSource.WATCH, episodes = listOf(SleepEpisode(wake - 470 * 60_000L, wake)), usualWakeHour = 7.0,
+                cognitive = CognitiveInput(60, "Phone"), historyDays = baselineDays,
+            ),
         )
         val s = calc.score!!
         return Readiness(day, s, ReadinessBand.of(s), calc, baselineDays, wake, emptyList(), wake)

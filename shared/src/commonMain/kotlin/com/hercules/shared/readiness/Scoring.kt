@@ -1,46 +1,65 @@
 package com.hercules.shared.readiness
 
 import kotlinx.serialization.Serializable
+import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.exp
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sin
 import kotlin.math.ln
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
-/** Version of the scoring engine (formulas, normalization, missing-data rules). Stored with every score. */
-private const val DAY_MS = 86_400_000L
+/**
+ * Version of the scoring engine (formulas, normalization, missing-data rules). Stored with every score.
+ * 5.0.0: sleep model × recovery modifier, blended with a recent Reaction Test (docs/SPEC.md §2). Replaces the
+ * weighted five-part score of engine 4.
+ */
+const val SCORING_ENGINE_VERSION = "5.0.0"
 
-const val SCORING_ENGINE_VERSION = "4.0.0"
+/** How many days of raw data, sessions and scores the device keeps; baselines and calibration use the same window. */
+const val RETENTION_DAYS = 10
 
-/** The five readiness dimensions of the CRS (spec §2.3). */
+private const val HOUR_MS = 3_600_000.0
+
+/** The parts of the score. ACTIVITY and CIRCADIAN were scored up to engine 4 and stay only so older rows still load. */
 @Serializable
 enum class Dimension(val label: String, val short: String) {
-    SLEEP("Sleep & Recovery", "Sleep"),
-    CARDIO("Cardiovascular Readiness", "Heart"),
-    ACTIVITY("Physical Activity", "Activity"),
-    CIRCADIAN("Circadian Alignment", "Light"),
-    COGNITIVE("Cognitive Performance", "Mind"),
+    SLEEP("Sleep and body clock", "Sleep"),
+    CARDIO("Recovery", "Recovery"),
+    ACTIVITY("Physical activity", "Activity"),
+    CIRCADIAN("Light", "Light"),
+    COGNITIVE("Reaction Test", "Reaction"),
 }
 
-/** Contributing metrics with their fixed, system-controlled share inside their dimension (spec §2.4–2.8, §3.6). */
+/** What a part of the score is made of. Entries marked "engine 4" are never produced any more; kept for stored rows. */
 @Serializable
-enum class MetricKey(val label: String, val dimension: Dimension, val internalWeight: Double) {
-    // v2 (evidence review, docs/SPEC.md §2): cumulative sleep load leads; HRV outweighs resting HR.
-    SLEEP_DURATION("Sleep duration", Dimension.SLEEP, 0.55),
-    SLEEP_CONSISTENCY("Sleep consistency", Dimension.SLEEP, 0.25),
-    SLEEP_CONTINUITY("Sleep continuity", Dimension.SLEEP, 0.20),
-    HRV("Heart rate variability", Dimension.CARDIO, 0.70),
-    RESTING_HR("Resting heart rate", Dimension.CARDIO, 0.30),
-    STEPS("Steps", Dimension.ACTIVITY, 0.20),
-    INTENSITY("Activity intensity", Dimension.ACTIVITY, 0.50),
-    LOW_MOVEMENT("Low-movement time", Dimension.ACTIVITY, 0.30),
-    LIGHT("Light exposure", Dimension.CIRCADIAN, 1.00),
-    BTC_SPEED("Reaction speed", Dimension.COGNITIVE, 1.00),
-    // The time-estimation game (before game v4). Never produced any more; kept only so scores stored then still load.
-    BTC_ACCURACY("Timing accuracy", Dimension.COGNITIVE, 0.0),
-    BTC_CONSISTENCY("Timing consistency", Dimension.COGNITIVE, 0.0),
-    BTC_BIAS("Timing bias", Dimension.COGNITIVE, 0.0),
+enum class MetricKey(val label: String, val dimension: Dimension) {
+    SLEEP_DURATION("Last night", Dimension.SLEEP),
+    SLEEP_PRESSURE("Sleep pressure", Dimension.SLEEP),
+    BODY_CLOCK("Body clock", Dimension.SLEEP),
+    HRV("Heart rate variability", Dimension.CARDIO),
+    RESTING_HR("Resting heart rate", Dimension.CARDIO),
+    SKIN_TEMP("Skin temperature", Dimension.CARDIO),
+    SPO2("Blood oxygen", Dimension.CARDIO),
+    RESPIRATORY_RATE("Breathing rate", Dimension.CARDIO),
+    GLUCOSE("Glucose", Dimension.CARDIO),
+    BTC_SPEED("Reaction speed", Dimension.COGNITIVE),
+    // engine 4
+    SLEEP_CONSISTENCY("Sleep consistency", Dimension.SLEEP),
+    SLEEP_CONTINUITY("Sleep continuity", Dimension.SLEEP),
+    STEPS("Steps", Dimension.ACTIVITY),
+    INTENSITY("Activity intensity", Dimension.ACTIVITY),
+    LOW_MOVEMENT("Low-movement time", Dimension.ACTIVITY),
+    LIGHT("Light exposure", Dimension.CIRCADIAN),
+    BTC_ACCURACY("Timing accuracy", Dimension.COGNITIVE),
+    BTC_CONSISTENCY("Timing consistency", Dimension.COGNITIVE),
+    BTC_BIAS("Timing bias", Dimension.COGNITIVE),
 }
 
-/** Why a metric or dimension has no score. Never treated as zero. */
+/** Why a metric or part has no score. Never treated as zero. */
 @Serializable
 enum class Availability(val label: String) {
     AVAILABLE("Available"),
@@ -65,6 +84,7 @@ data class MetricScore(
 data class DimensionScore(
     val dimension: Dimension,
     val score: Int?,
+    /** Share of the final score this part carries (sleep and recovery share the body part). */
     val weight: Double,
     val metrics: List<MetricScore>,
     val availability: Availability,
@@ -72,179 +92,81 @@ data class DimensionScore(
     val available: Boolean get() = score != null && weight > 0.0
 }
 
-// ------------------------------------------------------------------ configuration (spec §3)
-
 @Serializable
 enum class ConfigurationType { DEFAULT, CUSTOM }
 
+// ------------------------------------------------------------------ user settings (spec §2.9)
+
+/**
+ * The score's sliders. They scale the model's own parameters, so its structure stays intact. The time constants
+ * and the recovery floor are not adjustable. Any non-default setting costs 5 confidence points.
+ */
 @Serializable
-data class ScoringConfiguration(
-    val id: String,
-    /** Version of the dimension set this configuration was written for. A new dimension means a new version. */
-    val version: Int,
-    val type: ConfigurationType,
-    val sleepWeight: Double,
-    val cardiovascularWeight: Double,
-    val activityWeight: Double,
-    val circadianWeight: Double,
-    val cognitiveWeight: Double,
-    val updatedAtMs: Long,
+data class ScoreSettings(
+    /** k_s, 0.5–1.5: how strongly predicted alertness moves the score. */
+    val sleepInfluence: Double = 1.0,
+    /** Multipliers 0–2 on each recovery signal's weight. */
+    val hrv: Double = 1.0,
+    val restingHr: Double = 1.0,
+    val temperature: Double = 1.0,
+    /** Multiplier 0–2 on the body-clock amplitude. */
+    val bodyClock: Double = 1.0,
+    /** g, 0–0.8: the Reaction Test's share when one was played in the last 2 hours. */
+    val gameWeight: Double = 0.6,
+    /** Optional extras, multipliers 0–2. */
+    val glucose: Double = 1.0,
+    val oxygen: Double = 1.0,
+    val breathing: Double = 1.0,
 ) {
-    fun weight(d: Dimension): Double = when (d) {
-        Dimension.SLEEP -> sleepWeight
-        Dimension.CARDIO -> cardiovascularWeight
-        Dimension.ACTIVITY -> activityWeight
-        Dimension.CIRCADIAN -> circadianWeight
-        Dimension.COGNITIVE -> cognitiveWeight
-    }
+    val isDefault: Boolean get() = differences(DEFAULT) == 0
 
-    val weights: Map<Dimension, Double> get() = Dimension.entries.associateWith { weight(it) }
+    private fun differences(o: ScoreSettings) = listOf(
+        sleepInfluence - o.sleepInfluence, hrv - o.hrv, restingHr - o.restingHr, temperature - o.temperature,
+        bodyClock - o.bodyClock, gameWeight - o.gameWeight, glucose - o.glucose, oxygen - o.oxygen, breathing - o.breathing,
+    ).count { abs(it) > 1e-6 }
 
-    /** True when any weight differs from the recommended defaults. */
-    val differsFromDefault: Boolean
-        get() = Dimension.entries.any { abs(weight(it) - DefaultScoring.DEFAULT.weight(it)) > WEIGHT_TOLERANCE }
-
-    companion object {
-        const val WEIGHT_TOLERANCE = 1e-6
-
-        fun custom(id: String, weights: Map<Dimension, Double>, nowMs: Long) = ScoringConfiguration(
-            id = id,
-            version = DefaultScoring.CONFIG_VERSION,
-            type = ConfigurationType.CUSTOM,
-            sleepWeight = weights[Dimension.SLEEP] ?: 0.0,
-            cardiovascularWeight = weights[Dimension.CARDIO] ?: 0.0,
-            activityWeight = weights[Dimension.ACTIVITY] ?: 0.0,
-            circadianWeight = weights[Dimension.CIRCADIAN] ?: 0.0,
-            cognitiveWeight = weights[Dimension.COGNITIVE] ?: 0.0,
-            updatedAtMs = nowMs,
-        )
-    }
-}
-
-object DefaultScoring {
-    /**
-     * Weights follow two things: how strong the evidence is that a signal moves next-day thinking, and how well a
-     * phone and watch can measure it.
-     * v2 (evidence review): sleep is the only signal with causal evidence for next-day cognition (Van Dongen 2003,
-     * Lim & Dinges 2010), so it leads; heart signals are associations (Forte 2019, Buchheit 2014).
-     * v3: light drops from 10% to 5% and sleep takes it. Light is read by the phone only while it is out and in use,
-     * so it is the weakest measurement of the five; sleep is the strongest evidence and measured all night.
-     * v4: sleep 65%, heart 10%, game 10%. Sleep is the one causal driver, and on many watches it is also the most
-     * complete signal (heart readings can have gaps; the game needs the user to play).
-     */
-    const val CONFIG_VERSION = 4
-
-    val DEFAULT = ScoringConfiguration(
-        id = "default-v4",
-        version = CONFIG_VERSION,
-        type = ConfigurationType.DEFAULT,
-        sleepWeight = 0.65,
-        cardiovascularWeight = 0.10,
-        activityWeight = 0.10,
-        circadianWeight = 0.05,
-        cognitiveWeight = 0.10,
-        updatedAtMs = 0L,
+    /** Every value inside its allowed range. */
+    fun clamped() = ScoreSettings(
+        sleepInfluence.coerceIn(0.5, 1.5), hrv.coerceIn(0.0, 2.0), restingHr.coerceIn(0.0, 2.0), temperature.coerceIn(0.0, 2.0),
+        bodyClock.coerceIn(0.0, 2.0), gameWeight.coerceIn(0.0, 0.8), glucose.coerceIn(0.0, 2.0), oxygen.coerceIn(0.0, 2.0),
+        breathing.coerceIn(0.0, 2.0),
     )
-}
 
-sealed interface WeightValidation {
-    data object Valid : WeightValidation
-    data class Invalid(val reason: String) : WeightValidation
-}
-
-/** Rejects invalid weights; never normalizes them silently (spec §3.3). Weights are fractions (0.35 = 35%). */
-fun validateWeights(weights: Map<Dimension, Double>): WeightValidation {
-    if (Dimension.entries.any { it !in weights }) return WeightValidation.Invalid("Every dimension needs a weight.")
-    val values = Dimension.entries.map { weights.getValue(it) }
-    if (values.any { it.isNaN() || it.isInfinite() }) return WeightValidation.Invalid("Weights must be numbers.")
-    if (values.any { it < 0.0 }) return WeightValidation.Invalid("Weights can't be negative.")
-    if (values.all { it == 0.0 }) return WeightValidation.Invalid("At least one dimension needs a weight.")
-    val total = values.sum()
-    if (total < 1.0 - ScoringConfiguration.WEIGHT_TOLERANCE) return WeightValidation.Invalid("Weights add up to ${pct(total)}. They must add up to 100%.")
-    if (total > 1.0 + ScoringConfiguration.WEIGHT_TOLERANCE) return WeightValidation.Invalid("Weights add up to ${pct(total)}. They must add up to 100%.")
-    return WeightValidation.Valid
-}
-
-private fun pct(v: Double) = "${(v * 100).roundToInt()}%"
-
-// ------------------------------------------------------------------ system-controlled parameters (spec §3.6)
-
-/** Normalization and baseline parameters, versioned with [SCORING_ENGINE_VERSION]. Not user-editable. */
-data class ScoringParams(
-    /** Adults need 7 h or more (AASM/SRS consensus, Watson 2015); cognition peaks around 7 h (Li 2022). */
-    val sleepTargetHours: Double = 7.0,
-    /** Last night, the night before, the one before that: sleep loss accumulates (Van Dongen 2003, Belenky 2003). */
-    val sleepLoadWeights: List<Double> = listOf(0.60, 0.25, 0.15),
-    /** HRV is read as the mean of ln(RMSSD) over this many recent nights (Plews 2013/2014). */
-    val hrvRecentNights: Int = 3,
-    val consistencyNights: Int = 14,
-    val consistencyMinNights: Int = 5,
-    val baselineDays: Int = 28,
-    val personalMaxShare: Double = 0.8,
-    /** Reference calibration used before enough personal history exists (spec §7). */
-    val hrvReference: Pair<Double, Double> = 42.0 to 12.0,
-    val restingHrReference: Pair<Double, Double> = 62.0 to 5.0,
-    val stepsReference: Double = 8000.0,
-    val hrvMinScale: Double = 4.0,
-    val restingHrMinScale: Double = 1.5,
-    val lowMovementStepsPerHour: Int = 250,
-    val lowMovementMinObservedHours: Int = 10,
-    val lightMinSamplesPerPeriod: Int = 2,
-    /** Background light readings below this are discarded: the phone may be in a pocket or bag. */
-    val lightBackgroundMinLux: Double = 1.0,
-    /** Earlier days an optional extra needs before "above your usual" can be judged. */
-    val strainMinHistory: Int = 7,
-    /**
-     * Share of the Reaction Test weight that counts after 1, 2 and 3+ games in a day. One 3-minute test is a noisy
-     * reading, so it moves the score less than the median of several.
-     */
-    val gameReliability: List<Double> = listOf(0.6, 0.8, 1.0),
-) {
     companion object {
-        val V1 = ScoringParams()
+        val DEFAULT = ScoreSettings()
     }
 }
 
-// ------------------------------------------------------------------ baselines (spec §7)
-
-/** A baseline as used for scoring: the blend of personal history and reference calibration. */
+/**
+ * Per-user values fitted against the user's own Reaction Tests (spec §2.7). Kept beyond the 10-day window (only these
+ * numbers and the session counter, no raw data). Until [fitted], the starting values apply.
+ */
 @Serializable
-data class BaselineValue(
-    val median: Double,
-    val mad: Double,
-    /** Valid observations behind the personal part. */
-    val sampleCount: Int,
-    /** 0.0 = reference only, up to 0.8 = mostly personal. */
-    val personalShare: Double,
+data class Calibration(
+    val hrvWeight: Double = Recovery.BASE_WEIGHT,
+    val restingHrWeight: Double = Recovery.BASE_WEIGHT,
+    val temperatureWeight: Double = Recovery.BASE_WEIGHT,
+    /** Local hour of the alertness peak; null = usual wake time + 10 h. */
+    val peakHour: Double? = null,
+    val amplitude: Double = SleepModel.DEFAULT_AMPLITUDE,
+    /** Reaction Tests counted so far, ever. */
+    val sessions: Int = 0,
+    /** End time of the newest test counted, so a test is never counted twice. */
+    val lastSessionMs: Long = 0,
+    val fitted: Boolean = false,
+    val updatedMs: Long = 0,
 )
 
-object Baselines {
-    /** Days 1–6 reference only, 7–20 a growing personal share, 21+ the personal maximum (80%). */
-    fun personalShare(validDays: Int, maxShare: Double = ScoringParams.V1.personalMaxShare): Double = when {
-        validDays < 7 -> 0.0
-        validDays >= 21 -> maxShare
-        else -> maxShare * (validDays - 6) / 15.0
-    }
-
-    /**
-     * Blends personal history with the reference. [history] holds earlier valid observations only, so today's value
-     * is always scored against yesterday's baseline (spec §7).
-     */
-    fun blend(history: List<Double>, reference: Pair<Double, Double>, maxShare: Double = ScoringParams.V1.personalMaxShare): BaselineValue {
-        val share = personalShare(history.size, maxShare)
-        val pm = Stats.median(history)
-        val pmad = Stats.mad(history)
-        if (pm == null || pmad == null || share == 0.0) return BaselineValue(reference.first, reference.second, history.size, 0.0)
-        return BaselineValue(
-            median = share * pm + (1 - share) * reference.first,
-            mad = share * pmad + (1 - share) * reference.second,
-            sampleCount = history.size,
-            personalShare = share,
-        )
-    }
-}
-
 // ------------------------------------------------------------------ inputs
+
+/** Where a value came from. Each signal uses one source per day, with its own baseline (spec §2.11). */
+@Serializable
+enum class SignalSource(val label: String) {
+    WATCH("Watch"),
+    PHONE("Phone"),
+    ESTIMATED("Entered by you"),
+    ASSUMED("Your usual sleep"),
+}
 
 /** One night, as resolved from the available providers. Durations in minutes. */
 data class NightInput(
@@ -258,278 +180,289 @@ data class NightInput(
     val midpointMinuteOfDay: Double,
 )
 
-/** Previous complete day of activity. Null fields are missing, not zero. */
-data class ActivityInput(
-    val steps: Long?,
-    /** Minutes inside exercise sessions, overlaps merged. Null when the day was not tracked at all. */
-    val exerciseMinutes: Int?,
-    /** Waking hours with fewer than [ScoringParams.lowMovementStepsPerHour] steps, among [observedHours]. */
-    val lowMovementHours: Int?,
-    val observedHours: Int,
-)
+data class SleepEpisode(val startMs: Long, val endMs: Long)
 
-/** Light on the previous complete day, split by period. Each list holds lux readings that passed quality checks. */
-data class LightInput(val morning: List<Double>, val daytime: List<Double>, val evening: List<Double>)
+/** Today's value of one signal and its earlier daily values from the same source (oldest first). */
+data class Signal(val value: Double, val history: List<Double>, val source: SignalSource)
 
-/** Today's Reaction Test result: the median game score of today's scored reaction tests, and what it rests on. */
-data class CognitiveInput(val score: Int, val sessionLabel: String, /** Scored games behind it today. */ val runs: Int = 3)
+/** The Reaction Test result that counts: the median game score of the tests in the last 2 hours. */
+data class CognitiveInput(val score: Int, val sessionLabel: String, val runs: Int = 1)
 
 data class DayInputs(
     val dayKey: String,
+    /** The moment the score is for. */
+    val atMs: Long,
+    /** Local clock hour at [atMs], 0–24. */
+    val hourOfDay: Double,
     val lastNight: NightInput?,
-    /** Earlier nights, most recent last, at most [ScoringParams.consistencyNights] − 1 of them. */
-    val previousNights: List<NightInput>,
-    val hrv: Double?,
-    val hrvHistory: List<Double>,
-    val restingHr: Double?,
-    val restingHrHistory: List<Double>,
-    val stepsHistory: List<Double>,
-    val activity: ActivityInput?,
-    val light: LightInput?,
-    val cognitive: CognitiveInput?,
-    /** Up to the last [ScoringParams.hrvRecentNights] − 1 HRV values before today, within the last week, oldest first. */
-    val hrvRecent: List<Double> = emptyList(),
-    /** Optional extras that can only lower the score (illness or low-oxygen signs). Null when none are recorded. */
-    val strain: StrainInput? = null,
+    /** Where last night came from; [SignalSource.ASSUMED] when only the usual window is known; null = no sleep info. */
+    val sleepSource: SignalSource?,
+    /** Sleep episodes of the window, oldest first, including assumed ones for missing nights. */
+    val episodes: List<SleepEpisode>,
+    /** Local hour of the usual wake-up; null before any night is recorded. */
+    val usualWakeHour: Double? = null,
+    val hrv: Signal? = null,
+    val restingHr: Signal? = null,
+    val skinTemp: Signal? = null,
+    val spo2: Signal? = null,
+    val respiratoryRate: Signal? = null,
+    /** Mean glucose of the last 24 hours (mmol/L) against earlier daily means. */
+    val glucose: Signal? = null,
+    /** A low under 3.9 mmol/L (70 mg/dL) in the last 24 hours (a CGM must stay low for 3 readings). */
+    val glucoseLow: Boolean = false,
+    val cognitive: CognitiveInput? = null,
+    /** Earlier days in the window with any data. */
+    val historyDays: Int = 0,
+    val settings: ScoreSettings = ScoreSettings.DEFAULT,
+    val calibration: Calibration = Calibration(),
 )
 
-/** Optional extras, each today's value and earlier days (oldest first). Missing is null or empty, never zero. */
-data class StrainInput(
-    val respiratoryRate: Double? = null,
-    val respiratoryRateHistory: List<Double> = emptyList(),
-    val skinTempDelta: Double? = null,
-    val skinTempHistory: List<Double> = emptyList(),
-    val spo2: Double? = null,
-    val spo2History: List<Double> = emptyList(),
-    /** Valid glucose readings (mmol/L) from the 24 hours before scoring, CGM or meter. */
-    val glucose24h: List<Double> = emptyList(),
-)
+// ------------------------------------------------------------------ sleep model (spec §2.2–2.4)
 
-/** A deduction from the score because an optional extra shows strain. Never positive. */
-@Serializable
-data class ScoreModifier(val label: String, val points: Int)
+/**
+ * McCauley et al. 2013 (Sleep 36(12):1987–1997), the biomathematical model of PVT performance under sleep loss,
+ * with every parameter from its Table 2. State: p = predicted PVT lapses, u = slow homeostatic state (days to weeks,
+ * so chronic short sleep keeps adding up), κ = circadian amplitude, which grows during wake and decays in sleep.
+ *
+ * Wake:  dp/dt = α_w(p + β·u) + κ(c + μ_w),   du/dt = η_w·u,       dκ/dt = λ·κ(1 − κ/ξ)
+ * Sleep: dp/dt = α_s(p + β·u) + κ(c + μ_s) + α_s·β/η_s,   du/dt = η_s·u + 1,   dκ/dt = −λ·κ
+ * c(t) = sin(2π(t − φ)/24), t = local clock hours; η_s = A_c/(A_c − 1)·η_w, A_c = 20.2/24.
+ *
+ * Initial state: the periodic steady state of 8-hour nights ending at the usual wake time (the paper starts from
+ * the steady state of its baseline schedule), reached by 20 simulated days. Euler steps of 6 minutes.
+ * Lapses map to predicted alertness P = 100 − 4·max(0, p − 2) [Design]: about 92 after a good night, about 40
+ * after 24 h awake.
+ */
+object SleepModel {
+    const val ALPHA_W = -0.028
+    const val ALPHA_S = -0.26
+    const val BETA = -0.26
+    const val ETA_W = 0.0074
+    const val MU_W = 0.33
+    const val MU_S = -1.5
+    /** φ in clock hours: highest predicted impairment around φ + 6 h (03:12), lowest around φ − 6 h (15:12). */
+    const val PHI = 21.2
+    const val LAMBDA = 0.49
+    const val XI = 1.09
+    const val A_C = 20.2 / 24.0
+    val ETA_S = A_C / (A_C - 1) * ETA_W
 
-// ------------------------------------------------------------------ dimension scorers
+    /** The paper's subjects woke around 07:30; a different usual wake time shifts φ by the same amount [Design]. */
+    const val REFERENCE_WAKE_HOUR = 7.5
+    const val DEFAULT_WAKE_HOUR = 7.5
+    /** Calibrated multiplier on κ; 1 = the paper. */
+    const val DEFAULT_AMPLITUDE = 1.0
+    const val LAPSES_FLOOR = 2.0
+    const val POINTS_PER_LAPSE = 4.0
+    private const val STEP_H = 0.1
+    private const val SPIN_UP_DAYS = 20
+    private const val BASELINE_SLEEP_H = 8.0
 
-/** Pure scoring of the five dimensions. Every function returns null scores for missing data, never zero. */
-class DimensionScorer(private val p: ScoringParams = ScoringParams.V1) {
+    data class State(val p: Double, val u: Double, val k: Double)
 
-    /** How much of the Reaction Test weight counts with [runs] games today. */
-    fun gameReliability(runs: Int): Double = p.gameReliability[(runs.coerceAtLeast(1) - 1).coerceAtMost(p.gameReliability.lastIndex)]
+    /** Clock hour of the best predicted alertness for a given φ. */
+    fun peakOf(phi: Double): Double = ((phi - 6) % 24 + 24) % 24
+    fun phiOf(peakHour: Double): Double = peakHour + 6
+
+    /** The default peak: the paper's, moved with the user's usual wake time. */
+    fun peakHour(usualWakeHour: Double?, calibration: Calibration): Double =
+        calibration.peakHour ?: peakOf(PHI + ((usualWakeHour ?: DEFAULT_WAKE_HOUR) - REFERENCE_WAKE_HOUR))
+
+    fun alertness(lapses: Double): Double = (100 - POINTS_PER_LAPSE * max(0.0, lapses - LAPSES_FLOOR)).coerceIn(0.0, 100.0)
+
+    /** One Euler step of [h] hours at local clock hour [clock]. [amp] scales κ's effect (calibration × slider). */
+    fun step(s: State, clock: Double, asleep: Boolean, h: Double, phi: Double, amp: Double): State {
+        val c = sin(2 * PI * (clock - phi) / 24.0)
+        val k = s.k * amp
+        return if (asleep) State(
+            s.p + h * (ALPHA_S * (s.p + BETA * s.u) + k * (c + MU_S) + ALPHA_S * BETA / ETA_S),
+            s.u + h * (ETA_S * s.u + 1),
+            s.k + h * (-LAMBDA * s.k),
+        ) else State(
+            s.p + h * (ALPHA_W * (s.p + BETA * s.u) + k * (c + MU_W)),
+            s.u + h * (ETA_W * s.u),
+            s.k + h * (LAMBDA * s.k * (1 - s.k / XI)),
+        )
+    }
 
     /**
-     * Full marks for 7–9 h; steeper below (6 h → 60, 5 h → 35, 4 h → 15: Van Dongen 2003, Lim & Dinges 2010),
-     * gentle above (10 h → 85: Li 2022 found both short and long sleep worse).
+     * Runs the model through [episodes] and reports the state at each of [samples] (epoch ms, ascending). Before
+     * the first episode: [SPIN_UP_DAYS] of 8-hour nights ending at [wakeHour]. [offsetH] = local clock − UTC hours.
      */
-    fun sleepDurationScore(hours: Double): Int =
-        Stats.curve(hours, listOf(0.0 to 0.0, 3.0 to 5.0, 4.0 to 15.0, 5.0 to 35.0, 6.0 to 60.0, 7.0 to 100.0, 9.0 to 100.0, 10.0 to 85.0, 11.0 to 65.0, 14.0 to 40.0)).roundToInt()
+    fun run(
+        episodes: List<SleepEpisode>, samples: List<Long>, offsetH: Double, phi: Double, amp: Double, wakeHour: Double,
+    ): List<State?> {
+        val eps = episodes.filter { it.endMs > it.startMs }.sortedBy { it.startMs }
+        if (eps.isEmpty() || samples.isEmpty()) return samples.map { null }
+        val stepMs = (STEP_H * HOUR_MS).toLong()
+        val first = eps.first().startMs
+        val startMs = first - SPIN_UP_DAYS * 24 * HOUR_MS.toLong()
+        fun clock(t: Long) = (((t / HOUR_MS + offsetH) % 24) + 24) % 24
+        fun spinAsleep(t: Long): Boolean {
+            val h = clock(t)
+            val bed = wakeHour - BASELINE_SLEEP_H
+            return ((h - bed) % 24 + 24) % 24 < BASELINE_SLEEP_H
+        }
+        val out = arrayOfNulls<State>(samples.size)
+        var st = State(0.0, -1 / ETA_S, XI)
+        var t = startMs
+        var ei = 0
+        var si = 0
+        while (si < samples.size && samples[si] < first) si++ // no score before the first recorded sleep
+        val end = samples.last()
+        while (t < end) {
+            while (ei < eps.size && eps[ei].endMs <= t) ei++
+            val asleep = if (t < first) spinAsleep(t) else ei < eps.size && t >= eps[ei].startMs
+            val h = min(stepMs, end - t)
+            st = step(st, clock(t), asleep, h / HOUR_MS, phi, amp)
+            t += h
+            while (si < samples.size && samples[si] <= t) { if (samples[si] >= first) out[si] = st; si++ }
+        }
+        return out.toList()
+    }
 
-    /** Weighted hours of the last three nights; a gap of more than a couple of days breaks the chain. */
-    fun sleepLoadHours(last: NightInput, previous: List<NightInput>): Double {
-        val chain = buildList {
-            add(last)
-            for (n in previous.reversed()) {
-                if (size >= p.sleepLoadWeights.size || last.endMs - n.endMs > (size + 0.5) * DAY_MS) break
-                add(n)
+    /** Runs on from [start] at [fromMs] through [segments] (duration ms, asleep), e.g. tonight's sleep and the morning after. */
+    fun project(start: State, fromMs: Long, segments: List<Pair<Long, Boolean>>, offsetH: Double, phi: Double, amp: Double): State {
+        val stepMs = (STEP_H * HOUR_MS).toLong()
+        var st = start
+        var t = fromMs
+        for ((dur, asleep) in segments) {
+            val end = t + max(0L, dur)
+            while (t < end) {
+                val h = min(stepMs, end - t)
+                st = step(st, (((t / HOUR_MS + offsetH) % 24) + 24) % 24, asleep, h / HOUR_MS, phi, amp)
+                t += h
             }
         }
-        val w = p.sleepLoadWeights.take(chain.size)
-        return chain.zip(w).sumOf { (n, k) -> n.asleepMinutes / 60.0 * k } / w.sum()
+        return st
     }
 
-    /** Circular SD of the sleep midpoint, in minutes. */
-    fun sleepConsistencyScore(sdMinutes: Double): Int =
-        Stats.curve(sdMinutes, listOf(0.0 to 100.0, 20.0 to 100.0, 30.0 to 90.0, 45.0 to 75.0, 60.0 to 60.0, 90.0 to 35.0, 120.0 to 20.0, 180.0 to 10.0)).roundToInt()
+    fun at(episodes: List<SleepEpisode>, atMs: Long, offsetH: Double, phi: Double, amp: Double, wakeHour: Double): State? =
+        run(episodes, listOf(atMs), offsetH, phi, amp, wakeHour).single()
 
-    /** Sleep efficiency 0..1. */
-    fun sleepContinuityScore(efficiency: Double): Int =
-        Stats.curve(efficiency, listOf(0.5 to 10.0, 0.65 to 25.0, 0.75 to 50.0, 0.80 to 65.0, 0.85 to 80.0, 0.88 to 90.0, 0.92 to 100.0)).roundToInt()
-
-    /** Higher than baseline is better (HRV). z is clamped to ±4 so a single outlier can't dominate. */
-    fun higherIsBetter(z: Double): Int = (75 + 12.5 * Stats.clamp(z, -4.0, 4.0)).roundToInt().coerceIn(0, 100)
-
-    fun lowerIsBetter(z: Double): Int = higherIsBetter(-z)
-
-    /** Steps relative to the (blended) usual: a target range, not "more is better". */
-    fun stepsScore(steps: Long, usual: Double): Int {
-        val ratio = steps / usual.coerceAtLeast(1000.0)
-        return Stats.curve(ratio, listOf(0.0 to 30.0, 0.3 to 50.0, 0.6 to 80.0, 0.8 to 100.0, 1.5 to 100.0, 2.0 to 90.0, 3.0 to 75.0, 5.0 to 60.0)).roundToInt()
+    /** Local clock hours minus UTC hours at [atMs], from the local [hourOfDay] then. */
+    fun offset(atMs: Long, hourOfDay: Double): Double {
+        val utc = ((atMs / HOUR_MS) % 24 + 24) % 24
+        var d = hourOfDay - utc
+        while (d > 14) d -= 24
+        while (d < -12) d += 24
+        return d
     }
-
-    fun intensityScore(minutes: Int): Int =
-        Stats.curve(minutes.toDouble(), listOf(0.0 to 60.0, 15.0 to 80.0, 30.0 to 100.0, 90.0 to 100.0, 150.0 to 85.0, 240.0 to 65.0, 360.0 to 50.0)).roundToInt()
-
-    fun lowMovementScore(hours: Int): Int =
-        Stats.curve(hours.toDouble(), listOf(0.0 to 100.0, 6.0 to 100.0, 8.0 to 80.0, 10.0 to 60.0, 12.0 to 40.0, 16.0 to 25.0)).roundToInt()
-
-    /** Brown 2022: at least 250 lux by day. */
-    fun morningLightScore(lux: Double): Int =
-        Stats.curve(lux, listOf(0.0 to 10.0, 10.0 to 20.0, 50.0 to 40.0, 100.0 to 60.0, 250.0 to 100.0)).roundToInt()
-
-    fun daytimeLightScore(lux: Double): Int =
-        Stats.curve(lux, listOf(0.0 to 20.0, 50.0 to 45.0, 100.0 to 65.0, 250.0 to 100.0)).roundToInt()
-
-    /** Brown 2022: at most 10 lux in the 3 hours before bed. */
-    fun eveningLightScore(lux: Double): Int =
-        Stats.curve(lux, listOf(0.0 to 100.0, 10.0 to 100.0, 30.0 to 75.0, 100.0 to 40.0, 300.0 to 15.0, 1000.0 to 5.0)).roundToInt()
-
-    /**
-     * Optional extras only ever subtract (spec §11): breathing rate or skin temperature well above the person's
-     * usual (illness signs: Natarajan 2020, Smarr 2020), or low overnight oxygen (Bucks 2013). At most −10.
-     */
-    fun modifiers(s: StrainInput?): List<ScoreModifier> {
-        if (s == null) return emptyList()
-        fun high(v: Double?, history: List<Double>, minScale: Double): Boolean {
-            if (v == null || history.size < p.strainMinHistory) return false
-            return Stats.robustZ(v, Stats.median(history)!!, Stats.mad(history)!!, minScale) >= 2.0
-        }
-        val out = mutableListOf<ScoreModifier>()
-        // Hypoglycaemia impairs cognition, and overnight lows also disturb sleep and next-day thinking (IHSG/ADA 2017).
-        // A CGM (many readings a day) must stay low for ~15 minutes (3 readings), the consensus definition of a
-        // hypoglycaemia event (Battelino 2019); a single CGM dip is often a pressure artefact. A meter reading is a
-        // deliberate finger-prick, so one low counts.
-        val cgm = s.glucose24h.size >= 24
-        fun low(limit: Double) = s.glucose24h.count { it < limit } >= (if (cgm) 3 else 1)
-        when {
-            low(3.0) -> out += ScoreModifier("Glucose under 3.0 in the last 24 hours", -10)
-            low(3.9) -> out += ScoreModifier("Glucose under 3.9 in the last 24 hours", -5)
-        }
-        val resp = high(s.respiratoryRate, s.respiratoryRateHistory, 0.5)
-        val temp = high(s.skinTempDelta, s.skinTempHistory, 0.2)
-        if (resp) out += ScoreModifier("Breathing rate above your usual", -5)
-        if (temp) out += ScoreModifier("Skin temperature above your usual", -5)
-        val usualSpo2 = Stats.median(s.spo2History)
-        if (s.spo2 != null && (s.spo2 < 90.0 || (usualSpo2 != null && s.spo2History.size >= p.strainMinHistory && s.spo2 <= usualSpo2 - 4))) {
-            out += ScoreModifier("Low overnight oxygen", -5)
-        }
-        var left = -10
-        return out.map { m -> val pts = maxOf(m.points, left); left -= pts; m.copy(points = pts) }.filter { it.points < 0 }
-    }
-
-    fun sleep(input: DayInputs): Pair<Int?, List<MetricScore>> {
-        val night = input.lastNight
-        val metrics = mutableListOf<MetricScore>()
-        if (night == null) {
-            metrics += MetricScore(MetricKey.SLEEP_DURATION, null, null, "No sleep recorded for last night.", Availability.NO_DATA)
-            metrics += MetricScore(MetricKey.SLEEP_CONSISTENCY, null, null, "Needs last night's sleep.", Availability.NO_DATA)
-            metrics += MetricScore(MetricKey.SLEEP_CONTINUITY, null, null, "Needs last night's sleep.", Availability.NO_DATA)
-            return null to metrics
-        }
-        val load = sleepLoadHours(night, input.previousNights)
-        metrics += MetricScore(
-            MetricKey.SLEEP_DURATION, sleepDurationScore(load), hm(night.asleepMinutes),
-            "3-night load ${hm((load * 60).roundToInt())} · target ${hm((p.sleepTargetHours * 60).roundToInt())}", Availability.AVAILABLE,
-        )
-
-        val nights = (input.previousNights + night).takeLast(p.consistencyNights)
-        val sd = if (nights.size >= p.consistencyMinNights) Stats.circularSdMinutes(nights.map { it.midpointMinuteOfDay }) else null
-        metrics += if (sd != null) {
-            MetricScore(MetricKey.SLEEP_CONSISTENCY, sleepConsistencyScore(sd), "±${sd.roundToInt()} min", "Midpoint spread over ${nights.size} nights", Availability.AVAILABLE)
-        } else {
-            MetricScore(MetricKey.SLEEP_CONSISTENCY, null, null, "Needs ${p.consistencyMinNights} nights; ${nights.size} so far.", Availability.NOT_ENOUGH_HISTORY)
-        }
-
-        val awake = night.awakeMinutes
-        metrics += if (awake != null && night.asleepMinutes + awake > 0) {
-            val eff = night.asleepMinutes.toDouble() / (night.asleepMinutes + awake)
-            MetricScore(MetricKey.SLEEP_CONTINUITY, sleepContinuityScore(eff), "${(eff * 100).roundToInt()}%", "Awake ${awake} min in bed", Availability.AVAILABLE)
-        } else {
-            MetricScore(MetricKey.SLEEP_CONTINUITY, null, null, "Your sleep source doesn't report time awake.", Availability.NO_DATA)
-        }
-        return combine(metrics) to metrics
-    }
-
-    fun cardio(input: DayInputs): Pair<Int?, List<MetricScore>> {
-        val metrics = mutableListOf<MetricScore>()
-        val hrv = input.hrv?.takeIf { it in 5.0..250.0 }
-        metrics += if (hrv != null) {
-            // ln(RMSSD), averaged over the last few nights: steadier than one night (Plews 2013/2014).
-            val recent = (input.hrvRecent.filter { it in 5.0..250.0 }.takeLast(p.hrvRecentNights - 1) + hrv).map { ln(it) }
-            val history = input.hrvHistory.filter { it in 5.0..250.0 }.map { ln(it) }
-            val ref = ln(p.hrvReference.first) to p.hrvReference.second / p.hrvReference.first
-            val b = Baselines.blend(history, ref)
-            val z = Stats.robustZ(recent.average(), b.median, b.mad, p.hrvMinScale / p.hrvReference.first)
-            val usual = kotlin.math.exp(b.median).roundToInt()
-            MetricScore(MetricKey.HRV, higherIsBetter(z), "${hrv.roundToInt()} ms", "Usual $usual ms · ${recent.size}-night average", Availability.AVAILABLE)
-        } else {
-            MetricScore(MetricKey.HRV, null, null, if (input.hrv != null) "Reading out of range." else "No HRV reading from last night.", if (input.hrv != null) Availability.NOT_RELIABLE else Availability.NO_DATA)
-        }
-        val rhr = input.restingHr?.takeIf { it in 30.0..120.0 }
-        metrics += if (rhr != null) {
-            val b = Baselines.blend(input.restingHrHistory.filter { it in 30.0..120.0 }, p.restingHrReference)
-            val z = Stats.robustZ(rhr, b.median, b.mad, p.restingHrMinScale)
-            MetricScore(MetricKey.RESTING_HR, lowerIsBetter(z), "${rhr.roundToInt()} bpm", "Usual ${b.median.roundToInt()} bpm", Availability.AVAILABLE)
-        } else {
-            MetricScore(MetricKey.RESTING_HR, null, null, if (input.restingHr != null) "Reading out of range." else "No resting heart rate yet.", if (input.restingHr != null) Availability.NOT_RELIABLE else Availability.NO_DATA)
-        }
-        return combine(metrics) to metrics
-    }
-
-    fun activity(input: DayInputs): Pair<Int?, List<MetricScore>> {
-        val a = input.activity
-        val metrics = mutableListOf<MetricScore>()
-        val usual = Baselines.blend(input.stepsHistory.filter { it > 0 }, p.stepsReference to 2500.0).median
-        metrics += if (a?.steps != null) {
-            MetricScore(MetricKey.STEPS, stepsScore(a.steps, usual), "${a.steps}", "Usual ${usual.roundToInt()}", Availability.AVAILABLE)
-        } else {
-            MetricScore(MetricKey.STEPS, null, null, "No steps recorded yesterday.", Availability.NO_DATA)
-        }
-        metrics += if (a?.exerciseMinutes != null) {
-            MetricScore(MetricKey.INTENSITY, intensityScore(a.exerciseMinutes), "${a.exerciseMinutes} min", "Exercise yesterday", Availability.AVAILABLE)
-        } else {
-            MetricScore(MetricKey.INTENSITY, null, null, "Yesterday wasn't tracked.", Availability.NO_DATA)
-        }
-        metrics += if (a?.lowMovementHours != null && a.observedHours >= p.lowMovementMinObservedHours) {
-            MetricScore(MetricKey.LOW_MOVEMENT, lowMovementScore(a.lowMovementHours), "${a.lowMovementHours} h", "Of ${a.observedHours} tracked waking hours", Availability.AVAILABLE)
-        } else {
-            MetricScore(MetricKey.LOW_MOVEMENT, null, null, "Needs ${p.lowMovementMinObservedHours}+ hours of watch wear.", Availability.NOT_RELIABLE)
-        }
-        // Steps anchor the dimension: without them, the day wasn't tracked.
-        if (metrics.first().score == null) return null to metrics
-        return combine(metrics) to metrics
-    }
-
-    fun circadian(input: DayInputs): Pair<Int?, List<MetricScore>> {
-        val l = input.light
-        val parts = buildList {
-            if (l != null && l.morning.size >= p.lightMinSamplesPerPeriod) add(Triple("morning", morningLightScore(Stats.median(l.morning)!!), 0.4))
-            if (l != null && l.daytime.size >= p.lightMinSamplesPerPeriod) add(Triple("daytime", daytimeLightScore(Stats.median(l.daytime)!!), 0.3))
-            if (l != null && l.evening.size >= p.lightMinSamplesPerPeriod) add(Triple("evening", eveningLightScore(Stats.median(l.evening)!!), 0.3))
-        }
-        if (parts.size < 2) {
-            val n = (l?.morning?.size ?: 0) + (l?.daytime?.size ?: 0) + (l?.evening?.size ?: 0)
-            return null to listOf(
-                MetricScore(MetricKey.LIGHT, null, null, if (n == 0) "No light readings yesterday." else "Too few light readings yesterday ($n).", if (n == 0) Availability.NO_DATA else Availability.NOT_RELIABLE),
-            )
-        }
-        val score = (parts.sumOf { it.second * it.third } / parts.sumOf { it.third }).roundToInt()
-        val detail = parts.joinToString(" · ") { "${it.first} ${it.second}" }
-        return score to listOf(MetricScore(MetricKey.LIGHT, score, "${parts.size}/3 periods", detail, Availability.AVAILABLE))
-    }
-
-    fun cognitive(input: DayInputs): Pair<Int?, List<MetricScore>> {
-        val c = input.cognitive
-            ?: return null to listOf(
-                MetricScore(MetricKey.BTC_SPEED, null, null, "No scored Reaction Test today.", Availability.NO_DATA),
-            )
-        val share = (gameReliability(c.runs) * 100).roundToInt()
-        val label = c.sessionLabel + if (share < 100) " · counts $share% until ${p.gameReliability.size} tests" else ""
-        val metrics = listOf(MetricScore(MetricKey.BTC_SPEED, c.score, "${c.score}", label, Availability.AVAILABLE))
-        return combine(metrics) to metrics
-    }
-
-    /** Internal weights re-normalized over the metrics that have a score. */
-    private fun combine(metrics: List<MetricScore>): Int? {
-        val available = metrics.filter { it.score != null }
-        if (available.isEmpty()) return null
-        val w = available.sumOf { it.key.internalWeight }
-        return (available.sumOf { it.score!! * it.key.internalWeight } / w).roundToInt().coerceIn(0, 100)
-    }
-
-    private fun hm(minutes: Int) = if (minutes >= 60) "${minutes / 60}h ${minutes % 60}m" else "${minutes}m"
 }
 
-// ------------------------------------------------------------------ readiness (spec §2, §6)
+// ------------------------------------------------------------------ recovery modifier (spec §2.5, §2.14)
+
+/** Recovery signals scale the predicted alertness down when they deviate unfavourably from the user's own baseline. */
+object Recovery {
+    const val FLOOR = 0.7
+    const val MIN_DAYS = 5
+    const val BASE_WEIGHT = 0.05
+    /** A phone-sourced HRV or resting heart rate counts half. */
+    const val PHONE_FACTOR = 0.5
+
+    /** One signal's contribution: [bad] is the unfavourable part of its z-score; [penalty] = weight × bad. */
+    @Serializable
+    data class Term(val key: MetricKey, val z: Double, val bad: Double, val weight: Double, val penalty: Double, val source: SignalSource)
+
+    /** z of [s] against its own history, or null with fewer than [MIN_DAYS] earlier days. */
+    fun z(s: Signal, minSd: Double, transform: (Double) -> Double = { it }): Double? {
+        if (s.history.size < MIN_DAYS) return null
+        val h = s.history.map(transform)
+        val mean = h.average()
+        val sd = sqrt(h.sumOf { (it - mean) * (it - mean) } / (h.size - 1)).coerceAtLeast(minSd)
+        return ((transform(s.value) - mean) / sd).coerceIn(-4.0, 4.0)
+    }
+
+    fun terms(input: DayInputs, calibration: Calibration = input.calibration, settings: ScoreSettings = input.settings): List<Term> {
+        val out = mutableListOf<Term>()
+        fun add(key: MetricKey, s: Signal?, minSd: Double, higherIsWorse: Boolean, weight: Double, transform: (Double) -> Double = { it }, floorBad: Double = 0.0) {
+            if (s == null) return
+            val z = z(s, minSd, transform) ?: return
+            val bad = maxOf(if (higherIsWorse) maxOf(0.0, z) else maxOf(0.0, -z), floorBad)
+            val w = weight * if (s.source == SignalSource.PHONE) PHONE_FACTOR else 1.0
+            out += Term(key, z, bad, w, w * bad, s.source)
+        }
+        add(MetricKey.HRV, input.hrv?.takeIf { it.value in 5.0..250.0 }, 0.05, higherIsWorse = false, calibration.hrvWeight * settings.hrv, transform = { ln(it) })
+        add(MetricKey.RESTING_HR, input.restingHr?.takeIf { it.value in 30.0..120.0 }, 1.0, higherIsWorse = true, calibration.restingHrWeight * settings.restingHr)
+        // Skin temperature has no phone fallback: the term is dropped.
+        add(MetricKey.SKIN_TEMP, input.skinTemp?.takeIf { it.source != SignalSource.PHONE }, 0.1, higherIsWorse = true, calibration.temperatureWeight * settings.temperature)
+        add(MetricKey.SPO2, input.spo2, 0.5, higherIsWorse = false, BASE_WEIGHT * settings.oxygen)
+        add(MetricKey.RESPIRATORY_RATE, input.respiratoryRate, 0.3, higherIsWorse = true, BASE_WEIGHT * settings.breathing)
+        add(MetricKey.GLUCOSE, input.glucose, 0.3, higherIsWorse = false, BASE_WEIGHT * settings.glucose, floorBad = if (input.glucoseLow) 2.0 else 0.0)
+        return out
+    }
+
+    /** M = clamp(1 − Σ penalty, 0.7, 1). Never above 1: a better-than-usual reading doesn't raise the score. */
+    fun modifier(terms: List<Term>): Double = (1 - terms.sumOf { it.penalty }).coerceIn(FLOOR, 1.0)
+}
+
+// ------------------------------------------------------------------ calibration (spec §2.7)
+
+/** One Reaction Test: when it was played, its score and the recovery signals then (game excluded). */
+data class CalibrationPoint(
+    val game: Double,
+    val atMs: Long,
+    val hrvBad: Double = 0.0,
+    val restingHrBad: Double = 0.0,
+    val temperatureBad: Double = 0.0,
+    /** Penalty from optional extras, which are not fitted. */
+    val otherPenalty: Double = 0.0,
+)
+
+object Calibrator {
+    const val MIN_SESSIONS = 20
+    /** Fewer points than this inside the window and the last fit is kept. */
+    const val MIN_POINTS = 8
+    const val MAX_WEIGHT = 0.2
+    /** Multipliers on the paper's circadian amplitude κ. */
+    val AMPLITUDES = listOf(0.5, 0.75, 1.0, 1.25, 1.5)
+
+    /**
+     * Fits the body-clock phase φ and amplitude (grid search, one model run over the window per candidate) and each
+     * recovery weight (least squares on the game residual) to this user's tests. The paper's rate constants stay
+     * fixed. [episodes], [offsetH] and [wakeHour] describe the window the tests were played in.
+     */
+    fun fit(
+        points: List<CalibrationPoint>, episodes: List<SleepEpisode>, offsetH: Double, wakeHour: Double,
+        current: Calibration, nowMs: Long,
+    ): Calibration {
+        if (current.sessions < MIN_SESSIONS || points.size < MIN_POINTS) return current
+        val pts = points.sortedBy { it.atMs }
+        var best: Calibration? = null
+        var bestErr = Double.MAX_VALUE
+        for (step in 0 until 48) {
+            val peak = step * 0.5
+            for (a in AMPLITUDES) {
+                val states = SleepModel.run(episodes, pts.map { it.atMs }, offsetH, SleepModel.phiOf(peak), a, wakeHour)
+                val idx = pts.indices.filter { states[it] != null }
+                if (idx.size < MIN_POINTS) return current
+                val p = pts.indices.map { i -> states[i]?.let { SleepModel.alertness(it.p) } ?: 0.0 }
+                val y = pts.indices.map { i -> if (p[i] > 5) 1 - pts[i].game / p[i] - pts[i].otherPenalty else 0.0 }
+                fun w(x: (CalibrationPoint) -> Double, fallback: Double): Double {
+                    val sxx = idx.sumOf { x(pts[it]) * x(pts[it]) }
+                    if (sxx < 1e-6) return fallback
+                    return (idx.sumOf { x(pts[it]) * y[it] } / sxx).coerceIn(0.0, MAX_WEIGHT)
+                }
+                val wh = w({ it.hrvBad }, current.hrvWeight)
+                val wr = w({ it.restingHrBad }, current.restingHrWeight)
+                val wt = w({ it.temperatureBad }, current.temperatureWeight)
+                val err = idx.sumOf { i ->
+                    val pt = pts[i]
+                    val m = (1 - wh * pt.hrvBad - wr * pt.restingHrBad - wt * pt.temperatureBad - pt.otherPenalty).coerceIn(Recovery.FLOOR, 1.0)
+                    val d = pt.game - p[i] * m
+                    d * d
+                }
+                if (err < bestErr) {
+                    bestErr = err
+                    best = current.copy(hrvWeight = wh, restingHrWeight = wr, temperatureWeight = wt, peakHour = peak, amplitude = a, fitted = true, updatedMs = nowMs)
+                }
+            }
+        }
+        return best ?: current
+    }
+}
+
+// ------------------------------------------------------------------ readiness (spec §2)
 
 @Serializable
 enum class ReadinessConfidence(val label: String) {
@@ -542,75 +475,104 @@ enum class ReadinessConfidence(val label: String) {
 /** Why there is no score between midnight and waking: the day's score starts with the night behind it. */
 const val REASON_BEFORE_WAKE = "Today's score starts when you wake up"
 
-/** Full earlier days of data for Medium confidence. */
-const val MIN_CONFIDENT_DAYS = 3
-/** Full earlier days of data for High confidence. */
-const val HIGH_CONFIDENCE_DAYS = 7
+/** Days of data that earn baseline confidence points (spec §2.8). */
+const val MIN_CONFIDENT_DAYS = 5
+const val HIGH_CONFIDENCE_DAYS = 8
 
-/**
- * Confidence from both what is in today and how much history is behind it (spec §6): High needs ≥ 90% of the
- * weighted signals and 7 full days; Medium ≥ 50% and 3 days (with sleep in, most of the evidence is there); anything less is Low. INSUFFICIENT means no score.
- */
-fun confidenceFor(coverage: Double, historyDays: Int): ReadinessConfidence = when {
-    coverage >= 0.90 - 1e-9 && historyDays >= HIGH_CONFIDENCE_DAYS -> ReadinessConfidence.HIGH
-    coverage >= 0.50 - 1e-9 && historyDays >= MIN_CONFIDENT_DAYS -> ReadinessConfidence.MEDIUM
+/** A Reaction Test counts in the score for this long after it ends. */
+const val GAME_FRESH_MS = 2 * 3_600_000L
+
+/** Display label for a confidence percentage: High 75–100, Medium 50–74, Low under 50. */
+fun confidenceFor(pct: Int): ReadinessConfidence = when {
+    pct >= 75 -> ReadinessConfidence.HIGH
+    pct >= 50 -> ReadinessConfidence.MEDIUM
     else -> ReadinessConfidence.LOW
 }
 
-/** The configuration and engine a score was calculated with, kept forever with the score (spec §3.7). */
+/** The settings and engine a score was calculated with, kept with the score. */
 @Serializable
 data class ConfigStamp(
     val configId: String,
     val configVersion: Int,
     val configType: ConfigurationType,
-    val weights: Map<Dimension, Double>,
+    /** Engine 4 weights; empty from engine 5. */
+    val weights: Map<Dimension, Double> = emptyMap(),
     val engineVersion: String,
+    val settings: ScoreSettings = ScoreSettings.DEFAULT,
 ) {
-    /** The configuration this score was calculated with, to recalculate the same day with the same weights. */
-    fun toConfig(): ScoringConfiguration = ScoringConfiguration(
-        configId, configVersion, configType,
-        weights[Dimension.SLEEP] ?: 0.0, weights[Dimension.CARDIO] ?: 0.0, weights[Dimension.ACTIVITY] ?: 0.0,
-        weights[Dimension.CIRCADIAN] ?: 0.0, weights[Dimension.COGNITIVE] ?: 0.0, 0L,
-    )
+    companion object {
+        const val SETTINGS_VERSION = 5
+        fun of(settings: ScoreSettings) = ConfigStamp(
+            if (settings.isDefault) "default-v$SETTINGS_VERSION" else "custom-v$SETTINGS_VERSION", SETTINGS_VERSION,
+            if (settings.isDefault) ConfigurationType.DEFAULT else ConfigurationType.CUSTOM, emptyMap(), SCORING_ENGINE_VERSION, settings,
+        )
+    }
 }
+
+/** One line of the confidence breakdown: what earned points, or what is missing and could. */
+@Serializable
+data class ConfidencePart(val label: String, val points: Int, val max: Int)
 
 @Serializable
 data class ReadinessCalculation(
     val dayKey: String,
     /** Null means INSUFFICIENT_DATA. */
     val score: Int?,
+    /** Confidence as a fraction (0–1); [confidencePct] / 100. */
     val coverage: Double,
     val confidence: ReadinessConfidence,
     val dimensions: List<DimensionScore>,
     val stamp: ConfigStamp,
     /** Why no number was published, in plain words. */
     val insufficientReason: String?,
-    /** Full earlier days with any sensor data behind this score. */
-    val historyDays: Int = MIN_CONFIDENT_DAYS,
-    /** Signals (dimensions with weight) that are in today, out of [signalsTotal]. */
+    /** Earlier days in the window with data behind this score. */
+    val historyDays: Int = 0,
     val signalsIn: Int = 0,
     val signalsTotal: Int = 0,
     /** What would raise confidence, in plain words; null at High. */
     val confidenceHint: String? = null,
-    /** Deductions from optional extras (already applied to [score]). */
+    /** Recovery deductions in score points (already inside [score], via the recovery modifier). */
     val modifiers: List<ScoreModifier> = emptyList(),
-)
+    val confidencePct: Int = (coverage * 100).roundToInt(),
+    val confidenceParts: List<ConfidencePart> = emptyList(),
+    /** P after the sleep-influence slider, 0–100. */
+    val alertness: Int? = null,
+    /** M, 0.7–1. */
+    val recovery: Double? = null,
+    /** G when a test from the last 2 hours is in the score. */
+    val gameScore: Int? = null,
+    /** Share of the score the game carries now (0 without a recent test, 1 when the game is the only input). */
+    val gameShare: Double = 0.0,
+    val sleepSource: SignalSource? = null,
+    /** Model state at [atMs], for "if you sleep N hours" projections. */
+    /** Predicted PVT lapses p (McCauley 2013) at [atMs]. */
+    val pressure: Double? = null,
+    /** The model's slow state u and circadian amplitude κ at [atMs], for projections. */
+    val homeostat: Double? = null,
+    val bodyClock: Double? = null,
+    val peakHour: Double? = null,
+    val amplitude: Double? = null,
+    /** Local clock minus UTC, hours, at [atMs]. */
+    val offsetH: Double? = null,
+    val atMs: Long = 0,
+    val recoveryTerms: List<Recovery.Term> = emptyList(),
+) {
+    /** The score without the game: P × M. */
+    val bodyScore: Double? get() = if (alertness != null) alertness * (recovery ?: 1.0) else null
+}
 
-/** "4 of 5 score parts · 6 days of data", shown next to the confidence level. */
+/** A deduction shown in the breakdown. Never positive. */
+@Serializable
+data class ScoreModifier(val label: String, val points: Int)
+
+/** "sleep: watch · 6 days of data", shown next to the confidence level. */
 val ReadinessCalculation.confidenceBasis: String
-    get() = "$signalsIn of $signalsTotal score parts · " + if (historyDays == 0) "first day of data" else "$historyDays ${if (historyDays == 1) "day" else "days"} of data"
+    get() = listOfNotNull(
+        sleepSource?.let { "sleep: ${it.label.lowercase()}" },
+        if (historyDays == 0) "first day of data" else "$historyDays ${if (historyDays == 1) "day" else "days"} of data",
+    ).joinToString(" · ")
 
-/** What adding each missing signal takes, in words that point at an action. */
-private val Dimension.toAdd: String
-    get() = when (this) {
-        Dimension.SLEEP -> "sleep tracking"
-        Dimension.CARDIO -> "overnight heart data"
-        Dimension.ACTIVITY -> "step tracking"
-        Dimension.CIRCADIAN -> "daylight readings"
-        Dimension.COGNITIVE -> "a Reaction Test"
-    }
-
-/** What each dimension means in everyday words, for sentences like "Hercules has your sleep and activity". */
+/** What each part means in everyday words. */
 val Dimension.plain: String
     get() = when (this) {
         Dimension.SLEEP -> "sleep"
@@ -620,15 +582,8 @@ val Dimension.plain: String
         Dimension.COGNITIVE -> "Reaction Test"
     }
 
-private fun List<String>.inWords(): String = when (size) {
-    0 -> ""
-    1 -> first()
-    else -> dropLast(1).joinToString(", ") + " and " + last()
-}
-
 /**
- * Why there is no score, in one or two plain sentences: what is in, what is missing, and what a score needs.
- * Null when there is a score.
+ * Why there is no score, in one or two plain sentences. Null when there is a score.
  */
 val ReadinessCalculation.insufficientDetail: String?
     get() {
@@ -636,73 +591,244 @@ val ReadinessCalculation.insufficientDetail: String?
         if (insufficientReason == REASON_BEFORE_WAKE) {
             return "It's still night. Today's score appears after you wake up, from last night's sleep and recovery."
         }
-        return "Nothing has come in for today yet. One reading is enough to start: last night's sleep, heart rate, " +
-            "steps, daylight or a Reaction Test. Connect Health Connect, wear the watch, or take a test."
+        return "There's no sleep on record yet and no recent Reaction Test. Wear the watch to bed, connect Health " +
+            "Connect, or take a Reaction Test for a score now."
     }
 
-class ReadinessCalculator(private val scorer: DimensionScorer = DimensionScorer()) {
+private fun hm(minutes: Int) = if (minutes >= 60) "${minutes / 60}h ${minutes % 60}m" else "${minutes}m"
 
-    fun calculate(input: DayInputs, config: ScoringConfiguration): ReadinessCalculation {
-        val raw = mapOf(
-            Dimension.SLEEP to scorer.sleep(input),
-            Dimension.CARDIO to scorer.cardio(input),
-            Dimension.ACTIVITY to scorer.activity(input),
-            Dimension.CIRCADIAN to scorer.circadian(input),
-            Dimension.COGNITIVE to scorer.cognitive(input),
-        )
-        val dims = Dimension.entries.map { d ->
-            val (score, metrics) = raw.getValue(d)
-            // A single game is a noisy reading: its weight grows with the number of games played today.
-            val reliability = if (d == Dimension.COGNITIVE && score != null) scorer.gameReliability(input.cognitive?.runs ?: 1) else 1.0
-            val w = config.weight(d) * reliability
-            val availability = when {
-                w == 0.0 -> Availability.ZERO_WEIGHT
-                score != null -> Availability.AVAILABLE
-                metrics.any { it.availability == Availability.NOT_ENOUGH_HISTORY } -> Availability.NOT_ENOUGH_HISTORY
-                metrics.any { it.availability == Availability.NOT_RELIABLE } -> Availability.NOT_RELIABLE
-                else -> Availability.NO_DATA
+private fun clock(hour: Double): String {
+    val m = ((hour * 60).roundToInt() % (24 * 60) + 24 * 60) % (24 * 60)
+    return "${(m / 60).toString().padStart(2, '0')}:${(m % 60).toString().padStart(2, '0')}"
+}
+
+/**
+ * Score = g·G + (1 − g)·(P_adj × M) with a Reaction Test from the last 2 hours, otherwise P_adj × M (spec §2.6).
+ * Missing sleep falls back in order: entered or phone sleep (as usual), a recent test alone, your usual sleep window,
+ * nothing (spec §2.10).
+ */
+class ReadinessCalculator {
+
+    fun calculate(input: DayInputs): ReadinessCalculation {
+        val st = input.settings.clamped()
+        val cal = input.calibration
+        val stamp = ConfigStamp.of(st)
+        val game = input.cognitive
+        val hasSleep = input.sleepSource != null && input.episodes.isNotEmpty()
+        val gameOnly = game != null && (!hasSleep || input.sleepSource == SignalSource.ASSUMED)
+
+        var alertness: Double? = null
+        var state: SleepModel.State? = null
+        val peak = SleepModel.peakHour(input.usualWakeHour, cal)
+        val amp = cal.amplitude * st.bodyClock
+        val offset = SleepModel.offset(input.atMs, input.hourOfDay)
+        val wakeHour = input.usualWakeHour ?: SleepModel.DEFAULT_WAKE_HOUR
+        if (hasSleep && !gameOnly) {
+            state = SleepModel.at(input.episodes, input.atMs, offset, SleepModel.phiOf(peak), amp, wakeHour)
+            if (state != null) {
+                val p = SleepModel.alertness(state.p)
+                alertness = 100 - st.sleepInfluence * (100 - p)
             }
-            DimensionScore(d, score, w, metrics, availability)
         }
-        // Full earlier days with any data: the longest per-signal history. Steps history stops before yesterday
-        // (yesterday's steps are the activity input), so yesterday is added back when it has steps.
-        val stepDays = input.stepsHistory.size + if (input.activity != null) 1 else 0
-        val historyDays = maxOf(input.previousNights.size, input.hrvHistory.size, input.restingHrHistory.size, stepDays)
-        return combine(input.dayKey, dims, config, historyDays, scorer.modifiers(input.strain))
+        val terms = if (alertness != null) Recovery.terms(input, cal, st) else emptyList()
+        val m = Recovery.modifier(terms)
+        val g = if (game != null && alertness != null) st.gameWeight else if (game != null) 1.0 else 0.0
+        val raw = when {
+            alertness != null && game != null -> g * game.score + (1 - g) * alertness * m
+            alertness != null -> alertness * m
+            game != null -> game.score.toDouble()
+            else -> null
+        }
+        val score = raw?.roundToInt()?.coerceIn(1, 100)
+
+        val parts = confidenceParts(input, st, cal, gameOnly, terms)
+        var pct = parts.sumOf { it.points }.coerceIn(0, 100)
+        if (score != null) {
+            // Without measured sleep a score can't reach High; on a test or usual sleep alone it stays Low.
+            if (input.sleepSource != SignalSource.WATCH) pct = minOf(pct, 74)
+            if (gameOnly || input.sleepSource == SignalSource.ASSUMED) pct = minOf(pct, 49)
+        } else pct = 0
+        val confidence = if (score == null) ReadinessConfidence.INSUFFICIENT else confidenceFor(pct)
+
+        val bodyShare = if (alertness == null) 0.0 else 1 - g
+        val dims = dimensions(input, alertness, state, peak, terms, m, bodyShare, game, g)
+        val modifiers = if (alertness == null) emptyList() else terms.filter { it.penalty > 0 }.map { t ->
+            ScoreModifier("${t.key.label} off your usual", -(alertness * bodyShare * t.penalty).roundToInt())
+        }.filter { it.points < 0 }
+        val hint = if (score == null || confidence == ReadinessConfidence.HIGH) null else hint(parts, input.historyDays)
+        return ReadinessCalculation(
+            dayKey = input.dayKey,
+            score = score,
+            coverage = pct / 100.0,
+            confidence = confidence,
+            dimensions = dims,
+            stamp = stamp,
+            insufficientReason = if (score == null) "Waiting on sleep or a Reaction Test" else null,
+            historyDays = input.historyDays,
+            signalsIn = dims.count { it.available },
+            signalsTotal = dims.size,
+            confidenceHint = hint,
+            modifiers = modifiers,
+            confidencePct = pct,
+            confidenceParts = parts,
+            alertness = alertness?.roundToInt(),
+            recovery = if (alertness != null) m else null,
+            gameScore = game?.score,
+            gameShare = g,
+            sleepSource = if (gameOnly) null else input.sleepSource,
+            pressure = state?.p,
+            homeostat = state?.u,
+            bodyClock = state?.k,
+            peakHour = peak,
+            amplitude = amp,
+            offsetH = offset,
+            atMs = input.atMs,
+            recoveryTerms = terms,
+        )
     }
 
-    /**
-     * Weighted mean over available dimensions (spec §6). One available signal is enough for a score; optional extras
-     * can only subtract. Confidence follows coverage and days of history; the hint says what would raise it.
-     */
-    fun combine(
-        dayKey: String,
-        dims: List<DimensionScore>,
-        config: ScoringConfiguration,
-        historyDays: Int = MIN_CONFIDENT_DAYS,
-        modifiers: List<ScoreModifier> = emptyList(),
-    ): ReadinessCalculation {
-        val stamp = ConfigStamp(config.id, config.version, config.type, config.weights, SCORING_ENGINE_VERSION)
-        val available = dims.filter { it.available }
-        val coverage = available.sumOf { it.weight }.let { if (it > 1.0) 1.0 else it }
-        val weight = available.sumOf { it.weight }
-        val applied = if (available.isNotEmpty() && weight > 0.0) modifiers else emptyList()
-        val score = if (available.isNotEmpty() && weight > 0.0) {
-            ((available.sumOf { it.weight * it.score!! } / weight).roundToInt() + applied.sumOf { it.points }).coerceIn(0, 100)
-        } else null
-        val reason = if (score == null) "Waiting on the first reading" else null
-        val confidence = if (score == null) ReadinessConfidence.INSUFFICIENT else confidenceFor(coverage, historyDays)
-        val counted = dims.filter { it.weight > 0.0 }
-        val hint = if (score == null || confidence == ReadinessConfidence.HIGH) null else {
-            val missing = counted.filterNot { it.available }.sortedByDescending { it.weight }.map { it.dimension.toAdd }
-            val target = if (confidence == ReadinessConfidence.LOW && historyDays < MIN_CONFIDENT_DAYS) MIN_CONFIDENT_DAYS else HIGH_CONFIDENCE_DAYS
-            val days = (target - historyDays).takeIf { it > 0 }?.let { "$it more ${if (it == 1) "day" else "days"} of data" }
-            listOfNotNull(missing.takeIf { it.isNotEmpty() }?.let { "add ${it.inWords()}" }, days)
-                .joinToString("; ").takeIf { it.isNotEmpty() }?.let { "To raise it: $it." }
+    /** Confidence points (spec §2.8): core data up to 93, optional extras up to 7, minus 5 for custom settings. */
+    fun confidenceParts(input: DayInputs, st: ScoreSettings, cal: Calibration, gameOnly: Boolean, terms: List<Recovery.Term>): List<ConfidencePart> {
+        val out = mutableListOf<ConfidencePart>()
+        val sleep = when (if (gameOnly) null else input.sleepSource) {
+            SignalSource.WATCH -> 35
+            SignalSource.PHONE, SignalSource.ESTIMATED -> 15
+            SignalSource.ASSUMED -> 5
+            null -> 0
         }
-        return ReadinessCalculation(
-            dayKey, score, coverage, confidence, dims, stamp, reason, historyDays,
-            signalsIn = counted.count { it.available }, signalsTotal = counted.size, confidenceHint = hint, modifiers = applied,
+        out += ConfidencePart("Sleep" + (input.sleepSource?.takeIf { !gameOnly }?.let { " (${it.label.lowercase()})" } ?: ""), sleep, 35)
+        val days = input.historyDays
+        out += ConfidencePart("Days of data ($days)", if (days >= HIGH_CONFIDENCE_DAYS) 15 else if (days >= MIN_CONFIDENT_DAYS) 8 else 0, 15)
+        fun tiered(label: String, s: Signal?, watchOnly: Boolean = false) {
+            val pts = when (s?.source) {
+                null -> 0
+                SignalSource.PHONE -> if (watchOnly) 0 else 4
+                else -> 8
+            }
+            out += ConfidencePart(label, pts, 8)
+        }
+        tiered("HRV", input.hrv)
+        tiered("Resting heart rate", input.restingHr)
+        tiered("Skin temperature", input.skinTemp, watchOnly = true)
+        val gamePts = when {
+            input.cognitive != null -> 19
+            cal.fitted -> 12
+            else -> 0
+        }
+        out += ConfidencePart(if (input.cognitive == null && cal.fitted) "Reaction Test (tuned to you)" else "Reaction Test in the last 2 hours", gamePts, 19)
+        val optional = minOf(
+            7,
+            (if (terms.any { it.key == MetricKey.GLUCOSE }) 3 else 0) +
+                terms.count { it.key == MetricKey.SPO2 || it.key == MetricKey.RESPIRATORY_RATE },
         )
+        if (optional > 0) out += ConfidencePart("Extra sensors", optional, 7)
+        if (!st.isDefault) out += ConfidencePart("Custom score settings", -5, 0)
+        return out
+    }
+
+    private fun hint(parts: List<ConfidencePart>, historyDays: Int): String? {
+        val asks = parts.filter { it.max > 0 && it.points < it.max }.sortedByDescending { it.max - it.points }.mapNotNull { p ->
+            when {
+                p.label.startsWith("Sleep") -> "wear the watch to bed"
+                p.label.startsWith("Days of data") -> (HIGH_CONFIDENCE_DAYS - historyDays).takeIf { it > 0 }?.let { "$it more ${if (it == 1) "day" else "days"} of data" }
+                p.label.startsWith("Reaction Test") -> "take a Reaction Test"
+                p.label == "HRV" || p.label == "Resting heart rate" -> "overnight heart data"
+                else -> null
+            }
+        }.distinct().take(3)
+        return asks.takeIf { it.isNotEmpty() }?.let { "To raise it: ${it.joinToString("; ")}." }
+    }
+
+    private fun dimensions(
+        input: DayInputs, alertness: Double?, state: SleepModel.State?, peak: Double, terms: List<Recovery.Term>, m: Double,
+        bodyShare: Double, game: CognitiveInput?, g: Double,
+    ): List<DimensionScore> {
+        val night = input.lastNight
+        val sleepMetrics = listOf(
+            if (night != null) MetricScore(MetricKey.SLEEP_DURATION, null, hm(night.asleepMinutes), input.sleepSource?.label ?: "", Availability.AVAILABLE)
+            else if (input.sleepSource == SignalSource.ASSUMED) MetricScore(MetricKey.SLEEP_DURATION, null, null, "Not recorded; using your usual sleep window", Availability.NO_DATA)
+            else MetricScore(MetricKey.SLEEP_DURATION, null, null, "No sleep recorded for last night.", Availability.NO_DATA),
+            if (state != null) MetricScore(
+                MetricKey.SLEEP_PRESSURE, alertness?.roundToInt(), "${(max(0.0, state.p) * 10).roundToInt() / 10.0} lapses",
+                "Predicted slow reactions on a 10-minute vigilance test; builds while you're awake, clears while you sleep", Availability.AVAILABLE,
+            )
+            else MetricScore(MetricKey.SLEEP_PRESSURE, null, null, "Needs a night of sleep.", Availability.NO_DATA),
+            MetricScore(MetricKey.BODY_CLOCK, null, clock(peak), "Your best time of day, predicted", if (state != null) Availability.AVAILABLE else Availability.NO_DATA),
+        )
+        val recoveryMetrics = listOf(MetricKey.HRV, MetricKey.RESTING_HR, MetricKey.SKIN_TEMP, MetricKey.SPO2, MetricKey.RESPIRATORY_RATE, MetricKey.GLUCOSE).mapNotNull { k ->
+            val sig = when (k) {
+                MetricKey.HRV -> input.hrv
+                MetricKey.RESTING_HR -> input.restingHr
+                MetricKey.SKIN_TEMP -> input.skinTemp
+                MetricKey.SPO2 -> input.spo2
+                MetricKey.RESPIRATORY_RATE -> input.respiratoryRate
+                else -> input.glucose
+            }
+            val t = terms.firstOrNull { it.key == k }
+            val optional = k == MetricKey.SPO2 || k == MetricKey.RESPIRATORY_RATE || k == MetricKey.GLUCOSE
+            when {
+                sig == null && optional -> null
+                sig == null -> MetricScore(k, null, null, "No reading.", Availability.NO_DATA)
+                t == null -> MetricScore(k, null, valueText(k, sig.value), "${sig.source.label} · needs ${Recovery.MIN_DAYS} days to compare", Availability.NOT_ENOUGH_HISTORY)
+                else -> MetricScore(
+                    k, (100 - t.bad * 25).roundToInt().coerceIn(0, 100), valueText(k, sig.value),
+                    "${sig.source.label} · " + (if (t.bad > 0) "off your usual" else "within your usual"), Availability.AVAILABLE,
+                )
+            }
+        }
+        val gameMetrics = listOf(
+            if (game != null) MetricScore(MetricKey.BTC_SPEED, game.score, "${game.score}", game.sessionLabel, Availability.AVAILABLE)
+            else MetricScore(MetricKey.BTC_SPEED, null, null, "No Reaction Test in the last 2 hours.", Availability.NO_DATA),
+        )
+        val recScore = if (terms.isNotEmpty()) ((m - Recovery.FLOOR) / (1 - Recovery.FLOOR) * 100).roundToInt() else null
+        return listOf(
+            DimensionScore(Dimension.SLEEP, alertness?.roundToInt(), bodyShare, sleepMetrics, if (alertness != null) Availability.AVAILABLE else Availability.NO_DATA),
+            DimensionScore(
+                Dimension.CARDIO, recScore, if (recScore != null) bodyShare else 0.0, recoveryMetrics,
+                when {
+                    recScore != null -> Availability.AVAILABLE
+                    recoveryMetrics.any { it.availability == Availability.NOT_ENOUGH_HISTORY } -> Availability.NOT_ENOUGH_HISTORY
+                    else -> Availability.NO_DATA
+                },
+            ),
+            DimensionScore(Dimension.COGNITIVE, game?.score, g, gameMetrics, if (game != null) Availability.AVAILABLE else Availability.NO_DATA),
+        )
+    }
+
+    private fun valueText(k: MetricKey, v: Double): String = when (k) {
+        MetricKey.HRV -> "${v.roundToInt()} ms"
+        MetricKey.RESTING_HR -> "${v.roundToInt()} bpm"
+        MetricKey.SKIN_TEMP -> "${if (v >= 0) "+" else "−"}${((abs(v) * 10).roundToInt() / 10.0)} °C"
+        MetricKey.SPO2 -> "${v.roundToInt()}%"
+        MetricKey.RESPIRATORY_RATE -> "${(v * 10).roundToInt() / 10.0}/min"
+        MetricKey.GLUCOSE -> "${(v * 10).roundToInt() / 10.0} mmol/L"
+        else -> v.roundToInt().toString()
+    }
+}
+
+/** Mean and sample SD of [values]; null when empty. */
+fun meanSd(values: List<Double>): Pair<Double, Double>? {
+    if (values.isEmpty()) return null
+    val m = values.average()
+    val sd = if (values.size < 2) 0.0 else sqrt(values.sumOf { (it - m) * (it - m) } / (values.size - 1))
+    return m to sd
+}
+
+/** A baseline as stored for display: the mean and spread of the last [RETENTION_DAYS] days. */
+@Serializable
+data class BaselineValue(
+    val median: Double,
+    val mad: Double,
+    val sampleCount: Int,
+    val personalShare: Double,
+)
+
+/** System-controlled values that are not part of the formula itself. */
+data class ScoringParams(
+    /** Adults need 7 h or more (AASM/SRS consensus). Used for bedtime advice. */
+    val sleepTargetHours: Double = 7.0,
+) {
+    companion object {
+        val V1 = ScoringParams()
     }
 }

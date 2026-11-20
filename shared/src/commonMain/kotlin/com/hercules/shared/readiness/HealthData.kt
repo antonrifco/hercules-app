@@ -22,6 +22,9 @@ enum class DataQuality { VALID, INVALID }
 enum class CollectionMethod { HEALTH_CONNECT, WATCH, PHONE_SENSOR, DERIVED }
 
 @Serializable
+/** [HealthMetric.metadata] for a Health Connect value recorded on a phone: a phone reading, never mixed with a wearable's (spec §2.11). */
+const val METADATA_PHONE = "device:phone"
+
 data class HealthMetric(
     val id: String,
     val type: HealthMetricType,

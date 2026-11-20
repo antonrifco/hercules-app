@@ -23,6 +23,10 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -41,11 +45,12 @@ import com.hercules.mobile.graph
 import com.hercules.shared.cognitive.DailyBrief
 import com.hercules.shared.cognitive.EventStatus
 import com.hercules.shared.demo.DemoData
+import com.hercules.shared.readiness.RETENTION_DAYS
 import androidx.lifecycle.repeatOnLifecycle
 import com.hercules.mobile.health.HealthPermissions
 import com.hercules.shared.cognitive.CombinedTask
 import com.hercules.shared.cognitive.PlanEvent
-import com.hercules.shared.readiness.DefaultScoring
+import com.hercules.shared.readiness.ScoreSettings
 import com.hercules.shared.readiness.LightContext
 import com.hercules.shared.readiness.MomentStatus
 import com.hercules.shared.readiness.PeakWindowPrediction
@@ -81,7 +86,11 @@ class MainActivity : ComponentActivity() {
             HerculesTheme(isSystemInDarkTheme()) {
                 val (onboarded, finishOnboarding) = rememberOnboarded()
                 Box {
-                    if (onboarded) HerculesApp(loadDemo, launch) { launch = null } else Onboarding(finishOnboarding)
+                    HerculesApp(loadDemo, launch) { launch = null }
+                    // After the launch animation: a dialog is its own window and would cover it.
+                    var launchDone by remember { mutableStateOf(!coldStart) }
+                    LaunchedEffect(Unit) { if (!launchDone) { delay(2_600); launchDone = true } }
+                    if (!onboarded && launchDone) OnboardingDialog(finishOnboarding)
                     LaunchArt(coldStart)
                 }
             }
@@ -125,13 +134,6 @@ private fun HerculesApp(loadDemoOnStart: Boolean, launch: android.content.Intent
         tab = Tab.HOME
     }
 
-    fun removeDemo() = scope.launch(kotlinx.coroutines.Dispatchers.Default) {
-        DemoData.remove(g.insights, g.cognitive, System.currentTimeMillis())
-        g.pushToWatch()
-        tick++
-        tab = Tab.HOME
-    }
-
     LaunchedEffect(Unit) {
         if (loadDemoOnStart) loadDemo().join()
         runCatching { g.retention.apply(System.currentTimeMillis()) }
@@ -158,10 +160,9 @@ private fun HerculesApp(loadDemoOnStart: Boolean, launch: android.content.Intent
     val store = g.cognitive.store
     val evaluation by remember(today) { store.observeEvaluation(today) }.collectAsStateWithLifecycle(null)
     val sleep by remember(today) { store.observeSleep(today) }.collectAsStateWithLifecycle(null)
-    val sleepWeek by remember(today) { store.observeSleepRange(dk.plusDays(today, -6), today) }.collectAsStateWithLifecycle(emptyList())
+    val sleepWeek by remember(today) { store.observeSleepRange(dk.plusDays(today, -(RETENTION_DAYS - 1)), today) }.collectAsStateWithLifecycle(emptyList())
     val trend by remember(today) { store.observeReadinessRange(dk.plusDays(today, -13), today) }.collectAsStateWithLifecycle(emptyList())
     val sessionsToday by remember(today) { store.observeSessionsFrom(dk.startOf(today)) }.collectAsStateWithLifecycle(emptyList())
-    val config by remember { store.observeActiveConfig() }.collectAsStateWithLifecycle(DefaultScoring.DEFAULT)
     val events by remember { store.observeEvents() }.collectAsStateWithLifecycle(emptyList())
     val peak by produceState<PeakWindowPrediction?>(null, evaluation, tick) { value = store.latestPeak() }
     val all by produceState(emptyList<EventStatus>(), events, evaluation, peak, tick) {
@@ -231,7 +232,8 @@ private fun HerculesApp(loadDemoOnStart: Boolean, launch: android.content.Intent
                 MomentFab(empty = statuses.isEmpty()) { adding = true }
             }
         },
-        containerColor = MaterialTheme.colorScheme.background,
+        modifier = Modifier.background(Ink).drawBehind { appBackdrop() },
+        containerColor = Color.Transparent,
     ) { inner ->
         when {
             legal != null -> LegalScreen(legal!!, inner)
@@ -257,7 +259,7 @@ private fun HerculesApp(loadDemoOnStart: Boolean, launch: android.content.Intent
                 onSynced = { nowMs = System.currentTimeMillis(); tick++ },
             )
             tab == Tab.MOMENTS -> PlanScreen(g, statuses, history, combined, inner) { openEventId = it }
-            else -> DataScreen(g, today, inner, onLoadDemo = { loadDemo() }, onRemoveDemo = { removeDemo() }, onOpenLegal = { legal = it }, onCleared = { tick++; tab = Tab.HOME }, onPlay = { playing = true }, healthConnected = healthConnected)
+            else -> DataScreen(g, today, inner, onOpenLegal = { legal = it }, onCleared = { tick++; tab = Tab.HOME }, onPlay = { playing = true }, healthConnected = healthConnected)
         }
     }
 
@@ -265,7 +267,7 @@ private fun HerculesApp(loadDemoOnStart: Boolean, launch: android.content.Intent
     editing?.let { e -> MomentDialog(g, nowMs, existing = e) { editing = null; tick++ } }
     if (guide) {
         ModalBottomSheet(onDismissRequest = { guide = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = Panel) {
-            GuideContent(config.weights)
+            GuideContent()
         }
     }
 }

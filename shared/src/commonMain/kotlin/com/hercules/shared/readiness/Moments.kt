@@ -167,7 +167,7 @@ class MomentPreparationEngine {
         if (c.recentSleepMinutes != null && c.recentSleepMinutes < c.sleepTargetMinutes - 60) {
             reasons += "You've averaged ${hm(c.recentSleepMinutes.toInt())} of sleep over the last nights."
         } else if (c.sleepScore != null && c.sleepScore < 60) {
-            reasons += "Sleep & Recovery is low (${c.sleepScore})."
+            reasons += "Your sleep score is low (${c.sleepScore})."
         }
         if (c.consistencyScore != null && c.consistencyScore < 60) reasons += "Your sleep times have been irregular."
         if (c.cardioScore != null && c.cardioScore < 55) reasons += "Recovery signals are below your usual."
@@ -223,7 +223,7 @@ class MomentPreparationEngine {
             PrepPhase.FINAL -> {
                 out += PrepTask(
                     "sleep_opportunity", "Full night tonight: in bed by $bedtime",
-                    "Allows about ${c.sleepTargetMinutes / 60} hours of sleep and time to wake up before the moment.", RecCategory.SLEEP, 10 + boost,
+                    "Allows about ${c.sleepTargetMinutes / 60} hours of sleep and time to wake up properly before your Moment.", RecCategory.SLEEP, 10 + boost,
                     if (lowSleep) "You've been sleeping less than your target." else null,
                 )
                 out += PrepTask("no_exertion", "Save your energy", "Keep training light so you peak on the day.", RecCategory.RECOVERY, 30 + boost, if (strained) "Recovery signals are below your usual." else null)
@@ -260,11 +260,11 @@ class MomentPreparationEngine {
     )
 
     private fun peakTask(c: PrepContext): PrepTask? = when (peakAlignment(c)) {
-        PeakAlignment.WITHIN_PEAK -> PrepTask("peak_within", "Your moment falls in your peak window", "You tend to perform best at this time of day.", RecCategory.COGNITIVE, 40, "Based on your Reaction Test history.")
-        PeakAlignment.NEAR_PEAK -> PrepTask("peak_near", "Your moment is close to your peak window", "You tend to be near your sharpest around this time.", RecCategory.COGNITIVE, 40, "Based on your Reaction Test history.")
+        PeakAlignment.WITHIN_PEAK -> PrepTask("peak_within", "Your Moment falls in your peak window", "You tend to perform best at this time of day.", RecCategory.COGNITIVE, 40, "Based on your Reaction Test history.")
+        PeakAlignment.NEAR_PEAK -> PrepTask("peak_near", "Your Moment is close to your peak window", "You tend to be near your sharpest around this time.", RecCategory.COGNITIVE, 40, "Based on your Reaction Test history.")
         PeakAlignment.OUTSIDE_PEAK -> c.peak?.window?.let { w ->
             val wake = c.eventDayWakeMs ?: return null
-            PrepTask("peak_outside", "Your moment is outside your peak window (${c.clock(w.startMs(wake))}–${c.clock(w.endMs(wake))})", "A walk and a few slow breaths beforehand help you arrive sharper.", RecCategory.COGNITIVE, 40, "Based on your Reaction Test history.")
+            PrepTask("peak_outside", "Your Moment is outside your peak window (${c.clock(w.startMs(wake))}–${c.clock(w.endMs(wake))})", "A walk and a few slow breaths beforehand help you arrive sharper.", RecCategory.COGNITIVE, 40, "Based on your Reaction Test history.")
         }
         PeakAlignment.UNKNOWN -> null
     }

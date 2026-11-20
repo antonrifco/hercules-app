@@ -2,23 +2,22 @@ package com.hercules.shared.cognitive
 
 import com.hercules.shared.data.HerculesRepository
 import com.hercules.shared.insights.DayKeys
-import com.hercules.shared.model.MetricType
-import com.hercules.shared.readiness.ActivityInput
 import com.hercules.shared.readiness.AssessmentWindow
 import com.hercules.shared.readiness.BaselineValue
-import com.hercules.shared.readiness.Baselines
 import com.hercules.shared.readiness.BeatTheClock
+import com.hercules.shared.readiness.Calibration
+import com.hercules.shared.readiness.CalibrationPoint
+import com.hercules.shared.readiness.Calibrator
 import com.hercules.shared.readiness.CognitiveInput
 import com.hercules.shared.readiness.CognitiveRound
 import com.hercules.shared.readiness.CognitiveSession
 import com.hercules.shared.readiness.DataQuality
 import com.hercules.shared.readiness.DayInputs
-import com.hercules.shared.readiness.DefaultScoring
 import com.hercules.shared.readiness.DeviceKind
 import com.hercules.shared.readiness.Dimension
+import com.hercules.shared.readiness.GAME_FRESH_MS
 import com.hercules.shared.readiness.HealthMetricType
-import com.hercules.shared.readiness.LightContext
-import com.hercules.shared.readiness.LightInput
+import com.hercules.shared.readiness.METADATA_PHONE
 import com.hercules.shared.readiness.MetricKey
 import com.hercules.shared.readiness.MomentPreparationEngine
 import com.hercules.shared.readiness.MomentRules
@@ -26,20 +25,26 @@ import com.hercules.shared.readiness.MomentStatus
 import com.hercules.shared.readiness.PeakWindowPrediction
 import com.hercules.shared.readiness.PeakWindowPredictor
 import com.hercules.shared.readiness.ReadinessCalculation
-import com.hercules.shared.readiness.StrainInput
 import com.hercules.shared.readiness.PrepContext
 import com.hercules.shared.readiness.PrepPhase
 import com.hercules.shared.readiness.PrepTask
 import com.hercules.shared.readiness.ReadinessCalculator
 import com.hercules.shared.readiness.REASON_BEFORE_WAKE
+import com.hercules.shared.readiness.RETENTION_DAYS
 import com.hercules.shared.readiness.ReadinessConfidence
+import com.hercules.shared.readiness.Recovery
 import com.hercules.shared.readiness.SCORING_ENGINE_VERSION
-import com.hercules.shared.readiness.ScoringConfiguration
+import com.hercules.shared.readiness.ScoreSettings
 import com.hercules.shared.readiness.ScoringParams
+import com.hercules.shared.readiness.Signal
+import com.hercules.shared.readiness.SignalSource
+import com.hercules.shared.readiness.SleepEpisode
+import com.hercules.shared.readiness.SleepModel
+import com.hercules.shared.readiness.ScreenSleep
+import com.hercules.shared.model.MetricType
 import com.hercules.shared.readiness.Stats
 import com.hercules.shared.readiness.Urgency
-import com.hercules.shared.readiness.WeightValidation
-import com.hercules.shared.readiness.validateWeights
+import com.hercules.shared.readiness.meanSd
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -90,26 +95,19 @@ class CognitiveService(
     suspend fun wakeMs(dayKey: String): Long =
         store.sleep(dayKey)?.endMs ?: (dayKeys.startOf(dayKey) + (typicalWakeMinute(dayKey) ?: DEFAULT_WAKE_MINUTE) * MIN_MS)
 
-    // ---------------------------------------------------------------- scoring configuration
+    // ---------------------------------------------------------------- score settings
 
-    suspend fun config(): ScoringConfiguration = store.activeConfig()
+    suspend fun settings(): ScoreSettings = store.scoreSettings()
 
-    /** Validates and activates custom weights. Past scores keep the configuration they were calculated with. */
-    suspend fun saveWeights(weights: Map<Dimension, Double>): WeightValidation {
-        val v = validateWeights(weights)
-        if (v !is WeightValidation.Valid) return v
-        val now = clock()
-        store.activateConfig(ScoringConfiguration.custom("custom-$now", weights, now))
-        refresh()
-        return v
-    }
-
-    /** Restores the recommended defaults as a new history entry (the UI confirms first). */
-    suspend fun restoreDefaultWeights() {
-        val now = clock()
-        store.activateConfig(DefaultScoring.DEFAULT.copy(id = "default-v${DefaultScoring.CONFIG_VERSION}-$now", updatedAtMs = now))
+    /** Saves the sliders (clamped to their ranges) and recalculates today. Past scores keep the settings they had. */
+    suspend fun saveSettings(s: ScoreSettings) {
+        store.saveScoreSettings(s.clamped())
         refresh()
     }
+
+    suspend fun restoreDefaultSettings() = saveSettings(ScoreSettings.DEFAULT)
+
+    suspend fun calibration(): Calibration = store.calibration()
 
     // ---------------------------------------------------------------- sleep
 
@@ -122,7 +120,12 @@ class CognitiveService(
         if (existing?.corrected == true) return
         val (from, to) = analyzer.window(dayKey)
         val watch = analyzer.analyze(dayKey, repo.samplesBetween(from - 12 * HOUR_MS, to), nowMs)
-        val hc = store.sleepSessions(dayKey).filter { it.quality == DataQuality.VALID && it.endMs <= nowMs }.maxByOrNull { it.asleepMinutes }
+        val sessions = store.sleepSessions(dayKey).filter { it.quality == DataQuality.VALID && it.endMs <= nowMs && it.endMs >= analyzer.earliestWake(dayKey) }
+        fun isStaged(s: com.hercules.shared.readiness.SleepSessionRecord) = listOf(s.deepMinutes, s.remMinutes, s.lightMinutes).any { it != null && it > 0 }
+        // A staged session first, then other Health Connect sessions, then the phone's screen-use estimate.
+        val hc = sessions.filter { isStaged(it) }.maxByOrNull { it.asleepMinutes }
+            ?: sessions.filter { it.sourcePackage != ScreenSleep.SOURCE }.maxByOrNull { it.asleepMinutes }
+            ?: sessions.maxByOrNull { it.asleepMinutes }
         // Most reliable night first: a wearable's own staged sleep in Health Connect (its validated algorithm), then
         // the Hercules watch's detection, then any other Health Connect session (often a phone-only estimate).
         val staged = hc != null && listOf(hc.deepMinutes, hc.remMinutes, hc.lightMinutes).any { it != null && it > 0 }
@@ -140,7 +143,7 @@ class CognitiveService(
                 deepMinutes = hc.deepMinutes,
                 remMinutes = hc.remMinutes,
                 lightMinutes = hc.lightMinutes,
-                provider = hc.sourcePackage,
+                provider = if (hc.sourcePackage == ScreenSleep.SOURCE) "Phone screen use" else hc.sourcePackage,
             )
             else -> watch
         }
@@ -208,117 +211,141 @@ class CognitiveService(
         }
     }
 
-    private suspend fun nightInputs(fromKey: String, toKey: String) = store.sleepRange(fromKey, toKey).map { it.toInput(dayKeys) }
+    /**
+     * Today's value of [type] and its earlier days from one source, never mixed (spec §2.11). Most reliable first:
+     * Health Connect from a wearable (its own overnight measurement), the Hercules watch, then Health Connect
+     * recorded on a phone. Each source keeps its own baseline.
+     */
+    private suspend fun signal(type: HealthMetricType, dayKey: String, fromKey: String): Signal? {
+        val rows = store.metrics(type, fromKey, dayKey).filter { it.quality == DataQuality.VALID }
+        fun daily(list: List<Double>) = if (type == HealthMetricType.RESTING_HR) list.min() else Stats.median(list)!!
+        fun hc(phone: Boolean): Map<String, Double> = rows.filter { (it.metadata == METADATA_PHONE) == phone }
+            .groupBy { it.dayKey }.mapValues { (_, l) -> daily(l.map { it.value }) }
+        val watch: Map<String, Double> = when (type) {
+            HealthMetricType.HRV_RMSSD -> repo.allDaily().filter { it.dayKey in fromKey..dayKey }.mapNotNull { d -> d.hrvRmssd?.let { d.dayKey to it } }.toMap()
+            HealthMetricType.RESTING_HR -> repo.allDaily().filter { it.dayKey in fromKey..dayKey }.mapNotNull { d -> d.restingHr?.let { d.dayKey to it.toDouble() } }.toMap()
+            else -> emptyMap()
+        }
+        for ((values, source) in listOf(hc(false) to SignalSource.WATCH, watch to SignalSource.WATCH, hc(true) to SignalSource.PHONE)) {
+            val today = values[dayKey] ?: continue
+            return Signal(today, values.filterKeys { it < dayKey }.entries.sortedBy { it.key }.map { it.value }, source)
+        }
+        return null
+    }
 
-    /** Everything the calculator needs for [dayKey], using only data available at [nowMs]. */
+    private fun sourceOf(n: SleepNight): SignalSource = when {
+        n.source == SleepNight.SOURCE_USER -> SignalSource.ESTIMATED
+        n.source == SleepNight.SOURCE_SENSOR -> SignalSource.WATCH
+        // Sleep stages need a wearable; an unstaged session is usually a phone estimate.
+        listOf(n.deepMinutes, n.remMinutes, n.lightMinutes).any { it != null && it > 0 } -> SignalSource.WATCH
+        else -> SignalSource.PHONE
+    }
+
+    /**
+     * The window's sleep episodes for the sleep model, oldest first. A missing night after the first recorded one is
+     * filled with the usual window (median wake time and time in bed), so one forgotten night doesn't read as a night
+     * awake. Today's assumed night only counts once its usual wake time has passed.
+     */
+    private fun episodes(nights: List<SleepNight>, dayKey: String, nowMs: Long): Pair<List<SleepEpisode>, Boolean> {
+        if (nights.isEmpty()) return emptyList<SleepEpisode>() to false
+        val wakeMinute = Stats.median(nights.map { dayKeys.minuteOfDay(it.endMs).toDouble() })!!
+        val inBedMs = Stats.median(nights.map { (it.endMs - it.startMs).toDouble() })!!.toLong()
+        val byDay = nights.associateBy { it.dayKey }
+        val out = mutableListOf<SleepEpisode>()
+        var assumedToday = false
+        var d = nights.minOf { it.dayKey }
+        while (d <= dayKey) {
+            val n = byDay[d]
+            if (n != null) out += SleepEpisode(n.startMs, n.endMs)
+            else {
+                val wake = dayKeys.startOf(d) + (wakeMinute * MIN_MS).toLong()
+                if (wake <= nowMs) {
+                    out += SleepEpisode(wake - inBedMs, wake)
+                    if (d == dayKey) assumedToday = true
+                }
+            }
+            d = dayKeys.plusDays(d, 1)
+        }
+        return out to assumedToday
+    }
+
+    /**
+     * Naps and other sleep outside the main nights (spec §2.2): Health Connect sessions and the watch's sleep
+     * episodes of at least [MIN_NAP_MIN] minutes that don't overlap a night. Each counts as sleep in the model.
+     */
+    private suspend fun naps(fromKey: String, dayKey: String, nowMs: Long, nights: List<SleepEpisode>): List<SleepEpisode> {
+        val fromMs = dayKeys.startOf(fromKey) - 6 * HOUR_MS
+        val candidates = store.sleepSessionsRange(fromKey, dayKeys.plusDays(dayKey, 1))
+            .filter { it.quality == DataQuality.VALID && it.endMs <= nowMs && it.sourcePackage != ScreenSleep.SOURCE }.map { SleepEpisode(it.startMs, it.endMs) } +
+            analyzer.episodes(repo.samplesOfType(MetricType.ACTIVITY_STATE, fromMs - 12 * HOUR_MS, nowMs), fromMs, nowMs).map { SleepEpisode(it.first, it.second) }
+        val out = mutableListOf<SleepEpisode>()
+        for (c in candidates.sortedBy { it.startMs }) {
+            if (c.endMs - c.startMs < MIN_NAP_MIN * MIN_MS) continue
+            if ((nights + out).any { c.startMs < it.endMs && it.startMs < c.endMs }) continue
+            out += c
+        }
+        return out
+    }
+
+    /** Everything the calculator needs for the score at [nowMs] on [dayKey], using only data available then. */
     suspend fun inputs(dayKey: String, nowMs: Long): DayInputs {
-        val yesterday = dayKeys.plusDays(dayKey, -1)
-        val historyFrom = dayKeys.plusDays(dayKey, -params.baselineDays)
+        val from = dayKeys.plusDays(dayKey, -RETENTION_DAYS)
+        val nights = store.sleepRange(from, dayKey).filter { it.endMs <= nowMs }.sortedBy { it.dayKey }
+        val last = nights.lastOrNull { it.dayKey == dayKey }
+        val (nightEpisodes, assumed) = episodes(nights, dayKey, nowMs)
+        val episodes = (nightEpisodes + naps(from, dayKey, nowMs, nightEpisodes)).sortedBy { it.startMs }
+        val sleepSource = when {
+            last != null -> sourceOf(last)
+            assumed -> SignalSource.ASSUMED
+            else -> null
+        }
 
-        val lastNight = store.sleep(dayKey)?.toInput(dayKeys)
-        val previous = nightInputs(dayKeys.plusDays(dayKey, -(params.consistencyNights - 1)), yesterday)
+        val glucoseRows = store.metrics(HealthMetricType.BLOOD_GLUCOSE, from, dayKey).filter { it.quality == DataQuality.VALID && it.measuredMs <= nowMs }
+        val last24 = glucoseRows.filter { it.measuredMs > nowMs - DAY_MS }.map { it.value }
+        val glucoseHistory = glucoseRows.filter { it.measuredMs <= nowMs - DAY_MS }.groupBy { it.dayKey }.entries.sortedBy { it.key }.map { (_, l) -> l.map { it.value }.average() }
+        // A CGM (many readings a day) must stay low for ~15 minutes (3 readings), the consensus definition of a
+        // hypoglycaemia event (Battelino 2019); a meter reading is a deliberate finger-prick, so one low counts.
+        val cgm = last24.size >= 24
+        val glucoseLow = last24.count { it < 3.9 } >= (if (cgm) 3 else 1)
 
-        val hrv = dailyValues(HealthMetricType.HRV_RMSSD, historyFrom, dayKey)
-        val rhr = dailyValues(HealthMetricType.RESTING_HR, historyFrom, dayKey)
-        val steps = dailyValues(HealthMetricType.STEPS_DAILY, historyFrom, yesterday)
-        val weekAgo = dayKeys.plusDays(dayKey, -7)
-
-        suspend fun extra(type: HealthMetricType): Pair<Double?, List<Double>> =
-            dailyValues(type, historyFrom, dayKey).let { m -> m[dayKey] to m.filterKeys { it < dayKey }.values.toList() }
-        val (resp, respHist) = extra(HealthMetricType.RESPIRATORY_RATE)
-        val (skin, skinHist) = extra(HealthMetricType.SKIN_TEMPERATURE_DELTA)
-        val (spo2, spo2Hist) = extra(HealthMetricType.SPO2)
-        val glucose = store.metrics(HealthMetricType.BLOOD_GLUCOSE, yesterday, dayKey)
-            .filter { it.quality == DataQuality.VALID && it.measuredMs in (nowMs - DAY_MS)..nowMs }
-            .map { it.value }
-        val strain = StrainInput(resp, respHist, skin, skinHist, spo2, spo2Hist, glucose)
-            .takeIf { resp != null || skin != null || spo2 != null || glucose.isNotEmpty() }
-
+        val hrv = signal(HealthMetricType.HRV_RMSSD, dayKey, from)
+        val rhr = signal(HealthMetricType.RESTING_HR, dayKey, from)
         return DayInputs(
             dayKey = dayKey,
-            lastNight = lastNight,
-            previousNights = previous,
-            hrv = hrv[dayKey],
-            hrvHistory = hrv.filterKeys { it < dayKey }.values.toList(),
-            hrvRecent = hrv.entries.filter { it.key >= weekAgo && it.key < dayKey }.sortedBy { it.key }.map { it.value },
-            restingHr = rhr[dayKey],
-            restingHrHistory = rhr.filterKeys { it < dayKey }.values.toList(),
-            stepsHistory = steps.filterKeys { it < yesterday }.values.toList(),
-            activity = activity(yesterday, steps[yesterday]),
-            light = light(yesterday, dayKey),
-            cognitive = cognitive(dayKey, nowMs),
-            strain = strain,
+            atMs = nowMs,
+            hourOfDay = dayKeys.minuteOfDay(nowMs) / 60.0,
+            lastNight = last?.toInput(dayKeys),
+            sleepSource = sleepSource,
+            episodes = episodes,
+            usualWakeHour = typicalWakeMinute(dayKey)?.let { it / 60.0 },
+            hrv = hrv,
+            restingHr = rhr,
+            skinTemp = signal(HealthMetricType.SKIN_TEMPERATURE_DELTA, dayKey, from),
+            spo2 = signal(HealthMetricType.SPO2, dayKey, from),
+            respiratoryRate = signal(HealthMetricType.RESPIRATORY_RATE, dayKey, from),
+            glucose = if (last24.isNotEmpty()) Signal(last24.average(), glucoseHistory, SignalSource.WATCH) else null,
+            glucoseLow = glucoseLow,
+            cognitive = cognitive(nowMs),
+            historyDays = historyDays(dayKey, from, nights),
+            settings = store.scoreSettings(),
+            calibration = store.calibration(),
         )
     }
 
-    /** Yesterday's activity: steps, exercise minutes (overlaps merged across providers) and low-movement hours. */
-    private suspend fun activity(dayKey: String, steps: Double?): ActivityInput? {
-        if (steps == null) return null
-        val start = dayKeys.startOf(dayKey)
-        val end = dayKeys.nextDayStart(dayKey)
-        val intervals = store.exerciseBetween(start, end).map { it.startMs to it.endMs } +
-            repo.summarizedSessions().filter { it.endMs > start && it.startMs < end }.map { it.startMs to it.endMs }
-        val exercise = mergedMinutes(intervals.map { maxOf(it.first, start) to minOf(it.second, end) })
-
-        // Low-movement time needs proof of wear: an hour counts only when the watch recorded heart rate in it.
-        val wake = wakeMs(dayKey)
-        val samples = repo.samplesBetween(wake, start + 22 * HOUR_MS)
-        var observed = 0
-        var low = 0
-        var t = wake
-        while (t + HOUR_MS <= start + 22 * HOUR_MS) {
-            val hour = samples.filter { it.startMs >= t && it.startMs < t + HOUR_MS }
-            if (hour.any { it.type == MetricType.HEART_RATE }) {
-                observed++
-                if (hour.filter { it.type == MetricType.STEPS && it.source.countsTowardDailyTotals }.sumOf { it.value } < params.lowMovementStepsPerHour) low++
-            }
-            t += HOUR_MS
-        }
-        return ActivityInput(steps.toLong(), exercise, if (observed > 0) low else null, observed)
+    /** Earlier days in the window with any data: a night, a heart reading, steps from a worn watch, or a test. */
+    private suspend fun historyDays(dayKey: String, from: String, nights: List<SleepNight>): Int {
+        val days = mutableSetOf<String>()
+        days += nights.map { it.dayKey }
+        days += repo.allDaily().filter { it.hrSampleCount > 0 }.map { it.dayKey }
+        for (t in listOf(HealthMetricType.HRV_RMSSD, HealthMetricType.RESTING_HR, HealthMetricType.STEPS_DAILY)) days += store.metrics(t, from, dayKey).map { it.dayKey }
+        days += store.sessionsFrom(dayKeys.startOf(from)).filter { it.valid }.map { it.dayKey }
+        return days.count { it in from..dayKey && it < dayKey }
     }
 
-    private fun mergedMinutes(intervals: List<Pair<Long, Long>>): Int {
-        var total = 0L
-        var curStart = -1L
-        var curEnd = -1L
-        for ((a, b) in intervals.filter { it.second > it.first }.sortedBy { it.first }) {
-            if (a > curEnd) {
-                if (curEnd > curStart) total += curEnd - curStart
-                curStart = a
-                curEnd = b
-            } else if (b > curEnd) curEnd = b
-        }
-        if (curEnd > curStart) total += curEnd - curStart
-        return (total / MIN_MS).toInt()
-    }
-
-    /**
-     * Light on [dayKey] split into morning (3 h after waking), evening (3 h before bed) and the daytime between.
-     * Background readings under 1 lux are dropped: the phone was probably in a pocket.
-     */
-    private suspend fun light(dayKey: String, nextDayKey: String): LightInput? {
-        val wake = wakeMs(dayKey)
-        val bed = store.sleep(nextDayKey)?.startMs ?: (dayKeys.startOf(nextDayKey) - HOUR_MS)
-        if (bed <= wake + 6 * HOUR_MS) return null
-        val samples = store.lightBetween(wake, bed)
-            .filterNot { it.context == LightContext.BACKGROUND && it.lux < params.lightBackgroundMinLux }
-            .filter { it.lux >= 0 && !it.lux.isNaN() }
-        if (samples.isEmpty()) return null
-        val morningEnd = wake + 3 * HOUR_MS
-        val eveningStart = bed - 3 * HOUR_MS
-        return LightInput(
-            morning = samples.filter { it.measuredMs < morningEnd }.map { it.lux },
-            daytime = samples.filter { it.measuredMs in morningEnd until eveningStart }.map { it.lux },
-            evening = samples.filter { it.measuredMs >= eveningStart }.map { it.lux },
-        )
-    }
-
-    /**
-     * The day's Reaction Test result from either device. Play once or many times: the median of the day's scored
-     * tests, so one lucky or sloppy test doesn't swing it.
-     */
-    private suspend fun cognitive(dayKey: String, nowMs: Long): CognitiveInput? {
-        val runs = store.sessionsFrom(dayKeys.startOf(dayKey)).filter { it.dayKey == dayKey && it.scored && it.endMs <= nowMs }
+    /** The Reaction Test that counts now: the median score of the tests that ended in the last 2 hours, either device. */
+    private suspend fun cognitive(nowMs: Long): CognitiveInput? {
+        val runs = store.sessionsFrom(nowMs - GAME_FRESH_MS - HOUR_MS)
+            .filter { it.scored && it.endMs <= nowMs && nowMs - it.endMs <= GAME_FRESH_MS }
         if (runs.isEmpty()) return null
         val score = Stats.median(runs.mapNotNull { it.cognitiveScore?.toDouble() })!!.roundToInt()
         val ms = Stats.median(runs.mapNotNull { it.medianMs })?.roundToInt()
@@ -335,22 +362,27 @@ class CognitiveService(
     suspend fun refresh(atMs: Long = clock()): Evaluation = withContext(Dispatchers.Default) { mutex.withLock {
         val today = dayKeys.of(atMs)
         for (back in RECALC_DAYS downTo 0) resolveSleep(dayKeys.plusDays(today, -back), atMs)
-        // Health Connect hands over its history in one go (30 days on the first import). Give each older night its
-        // resolved row once, so sleep consistency, the 3-night load and the week chart can use it from day one.
+        // Health Connect hands over its history in one go (10 days on the first import). Give each older night its
+        // resolved row once, so the sleep model and the week chart can use it from day one.
+        purgeOld(atMs)
+        // Older nights in the window: fill missing ones, and upgrade a phone-tier night (unstaged Health Connect or the
+        // screen-use estimate) as soon as watch sleep for it arrives, however late. Your own edits are never replaced.
         for (back in RECALC_DAYS + 1..SLEEP_BACKFILL_DAYS) {
             val day = dayKeys.plusDays(today, -back)
-            if (store.sleep(day) == null && store.sleepSessions(day).any { it.quality == DataQuality.VALID }) resolveSleep(day, atMs)
+            val night = store.sleep(day)
+            val phoneTier = night != null && !night.corrected && sourceOf(night) != SignalSource.WATCH
+            if ((night == null && store.sleepSessions(day).any { it.quality == DataQuality.VALID }) || phoneTier) resolveSleep(day, atMs)
         }
 
         rescoreUnscored(today, atMs)
+        updateCalibration(atMs)
         recalcRecent(today, atMs)
-        val config = store.activeConfig()
         val input = inputs(today, atMs)
         // A day's score starts at wake-up. Between midnight and waking there is no night behind it yet, and whatever
         // has trickled in (ten minutes of pulse, yesterday's steps) would pass for a score. Withhold it until then.
         val beforeWake = input.lastNight == null && atMs < wakeMs(today)
-        val calc = calculator.calculate(input, config).let { c ->
-            if (!beforeWake || c.score == null) c
+        val calc = calculator.calculate(input).let { c ->
+            if (!beforeWake) c
             else c.copy(score = null, confidence = ReadinessConfidence.INSUFFICIENT, insufficientReason = REASON_BEFORE_WAKE, confidenceHint = null, modifiers = emptyList())
         }
         val evaluation = save(today, calc, atMs)
@@ -367,7 +399,7 @@ class CognitiveService(
     /** Stores [calc] for [dayKey] as its evaluation and, when it has a number, its readiness. */
     private suspend fun save(dayKey: String, calc: ReadinessCalculation, atMs: Long): Evaluation {
         val wake = wakeMs(dayKey)
-        val baselineDays = store.sleepRange(dayKeys.plusDays(dayKey, -params.baselineDays), dayKeys.plusDays(dayKey, -1)).size
+        val baselineDays = store.sleepRange(dayKeys.plusDays(dayKey, -RETENTION_DAYS), dayKeys.plusDays(dayKey, -1)).size
         val readiness = calc.score?.let { score ->
             val band = ReadinessBand.of(score)
             // Same rule as the Coach's "Lights out": the sleep target plus 15 minutes before the next wake-up.
@@ -379,31 +411,77 @@ class CognitiveService(
     }
 
     /**
-     * Data often arrives late: last night's sleep after midnight, the rest of yesterday's steps, a watch that synced
-     * hours later. The previous [RECALC_DAYS] days are recalculated with what is known now, using the weights each day
-     * was first scored with (so a later weight change never rewrites history), and saved only when they change.
-     * Older days stay as they were.
+     * Data often arrives late: last night's sleep after midnight, a watch that synced hours later. The previous
+     * [RECALC_DAYS] days are recalculated with what is known now, with the settings each day was first scored with,
+     * and saved only when they change. A past day is scored at its wake time + 6 hours, so the history shows the
+     * middle of each day, not its last minutes awake. Older days stay as they were.
      */
     private suspend fun recalcRecent(today: String, atMs: Long) {
         for (back in 1..RECALC_DAYS) {
             val day = dayKeys.plusDays(today, -back)
             val old = store.evaluation(day)
-            val config = old?.calc?.stamp?.toConfig() ?: store.activeConfig()
             val endOfDay = dayKeys.startOf(dayKeys.plusDays(day, 1)) - 1
-            val calc = calculator.calculate(inputs(day, endOfDay), config)
+            val at = minOf(wakeMs(day) + PAST_DAY_OFFSET_MS, endOfDay)
+            val input = inputs(day, at).let { i -> old?.calc?.stamp?.settings?.let { i.copy(settings = it) } ?: i }
+            val calc = calculator.calculate(input)
             if (old == null && calc.score == null) continue
-            if (old != null && old.calc.score == calc.score && old.calc.coverage == calc.coverage && old.calc.historyDays == calc.historyDays) continue
+            if (old != null && old.calc.score == calc.score && old.calc.confidencePct == calc.confidencePct && old.calc.stamp.engineVersion == calc.stamp.engineVersion) continue
             save(day, calc, atMs)
         }
     }
 
+    /** Once a day: everything older than [RETENTION_DAYS] days is deleted (spec §2.12). */
+    private suspend fun purgeOld(nowMs: Long) {
+        val today = dayKeys.of(nowMs)
+        if (store.kvGet(KEY_PURGED) == today) return
+        val cutoffKey = dayKeys.plusDays(today, -RETENTION_DAYS)
+        store.purgeBefore(cutoffKey, dayKeys.startOf(cutoffKey))
+        store.kvPut(KEY_PURGED, today)
+    }
+
+    /**
+     * Counts new Reaction Tests and, from [Calibrator.MIN_SESSIONS] tests on, fits the body-clock peak, its amplitude
+     * and the recovery weights to the tests in the window (spec §2.7). Only the fitted numbers are kept.
+     */
+    private suspend fun updateCalibration(nowMs: Long) {
+        var cal = store.calibration()
+        val window = store.sessionsFrom(nowMs - RETENTION_DAYS * DAY_MS)
+            .filter { it.gameVersion == BeatTheClock.GAME_VERSION && it.valid && it.cognitiveScore != null && it.endMs <= nowMs }
+        val fresh = window.filter { it.endMs > cal.lastSessionMs }
+        if (fresh.isEmpty()) return
+        cal = cal.copy(sessions = cal.sessions + fresh.size, lastSessionMs = fresh.maxOf { it.endMs })
+        if (cal.sessions >= Calibrator.MIN_SESSIONS) {
+            val now = inputs(dayKeys.of(nowMs), nowMs)
+            cal = Calibrator.fit(
+                window.mapNotNull { point(it) }, now.episodes, SleepModel.offset(nowMs, now.hourOfDay),
+                now.usualWakeHour ?: SleepModel.DEFAULT_WAKE_HOUR, cal, nowMs,
+            )
+        }
+        store.saveCalibration(cal)
+    }
+
+    /** The model's state when [s] was played, without the game itself. */
+    private suspend fun point(s: CognitiveSession): CalibrationPoint? {
+        val input = inputs(s.dayKey, s.startMs).copy(cognitive = null)
+        if (input.sleepSource == null) return null
+        val terms = Recovery.terms(input, Calibration(), ScoreSettings.DEFAULT)
+        fun x(k: MetricKey) = terms.firstOrNull { it.key == k }?.let { it.bad * if (it.source == SignalSource.PHONE) Recovery.PHONE_FACTOR else 1.0 } ?: 0.0
+        val fitted = setOf(MetricKey.HRV, MetricKey.RESTING_HR, MetricKey.SKIN_TEMP)
+        return CalibrationPoint(
+            s.cognitiveScore!!.toDouble(), s.startMs, x(MetricKey.HRV), x(MetricKey.RESTING_HR), x(MetricKey.SKIN_TEMP),
+            terms.filter { it.key !in fitted }.sumOf { it.penalty },
+        )
+    }
+
     private suspend fun saveBaselines(input: DayInputs, nowMs: Long) {
         val v = SCORING_ENGINE_VERSION
-        val list = mutableListOf(
-            StoredBaseline(MetricKey.HRV.name, null, null, Baselines.blend(input.hrvHistory, params.hrvReference), v, nowMs),
-            StoredBaseline(MetricKey.RESTING_HR.name, null, null, Baselines.blend(input.restingHrHistory, params.restingHrReference), v, nowMs),
-            StoredBaseline(MetricKey.STEPS.name, null, null, Baselines.blend(input.stepsHistory.filter { it > 0 }, params.stepsReference to 2500.0), v, nowMs),
-        )
+        val list = mutableListOf<StoredBaseline>()
+        fun add(key: MetricKey, s: Signal?) {
+            val (m, sd) = meanSd(s?.history ?: return) ?: return
+            list += StoredBaseline(key.name, null, null, BaselineValue(m, sd, s.history.size, 1.0), v, nowMs)
+        }
+        add(MetricKey.HRV, input.hrv)
+        add(MetricKey.RESTING_HR, input.restingHr)
         val history = store.sessionsFrom(nowMs - BeatTheClock.BASELINE_DAYS * DAY_MS)
         for (d in DeviceKind.entries) {
             val base = BeatTheClock.baselineSessions(history, d, nowMs + 1)
@@ -418,12 +496,6 @@ class CognitiveService(
     suspend fun evaluation(dayKey: String = today()): Evaluation? = store.evaluation(dayKey)
 
     // ---------------------------------------------------------------- Reaction Test
-
-    /** How well the body part of the score has tracked Reaction Test over the last [ScoreCheck.WINDOW_DAYS] days. */
-    suspend fun scoreCheck(): ScoreCheck.Result {
-        val from = dayKeys.plusDays(today(), -ScoreCheck.WINDOW_DAYS)
-        return ScoreCheck.run(store.readinessRange(from, today()), store.sessionsFrom(dayKeys.startOf(from)))
-    }
 
     suspend fun playsToday(dayKey: String = today()): Int =
         store.sessionsFrom(dayKeys.startOf(dayKey)).count { it.dayKey == dayKey && it.valid }
@@ -521,7 +593,6 @@ class CognitiveService(
         val eventDay = dayKeys.of(e.startMs)
         val calc = evaluation?.calc
         fun dim(d: Dimension) = calc?.dimensions?.firstOrNull { it.dimension == d }?.score
-        val consistency = calc?.dimensions?.flatMap { it.metrics }?.firstOrNull { it.key == MetricKey.SLEEP_CONSISTENCY }?.score
         val recent = store.sleepRange(dayKeys.plusDays(today, -2), today)
         val wakeMinute = typicalWakeMinute(today) ?: store.sleep(today)?.let { dayKeys.minuteOfDay(it.endMs) } ?: DEFAULT_WAKE_MINUTE
         return PrepContext(
@@ -533,10 +604,10 @@ class CognitiveService(
             latestConfidence = calc?.confidence,
             latestCoverage = calc?.coverage,
             sleepScore = dim(Dimension.SLEEP),
-            consistencyScore = consistency,
+            consistencyScore = null,
             cardioScore = dim(Dimension.CARDIO),
-            activityScore = dim(Dimension.ACTIVITY),
-            lightScore = dim(Dimension.CIRCADIAN),
+            activityScore = null,
+            lightScore = null,
             recentSleepMinutes = recent.takeIf { it.isNotEmpty() }?.map { it.asleepMinutes.toDouble() }?.average(),
             sleepTargetMinutes = (params.sleepTargetHours * 60).toInt(),
             peak = peak,
@@ -644,6 +715,8 @@ class CognitiveService(
             playsToday = playsToday(today),
             wakeMs = wakeMs(today),
             ended = recentlyEnded(),
+            scoreSettings = store.scoreSettings(),
+            calibration = store.calibration(),
         )
     }
 
@@ -654,7 +727,7 @@ class CognitiveService(
     suspend fun clearAll() = store.clearAll()
 
     /**
-     * The user's best days over the last year, from whatever source delivered them (Health Connect, the watch, the
+     * The user's best days in what the device keeps (the last $RETENTION_DAYS days), from whatever source delivered them (Health Connect, the watch, the
      * games): highest score, sharpest game, longest sleep, most steps, lowest resting heart rate, highest HRV.
      */
     suspend fun personalBests(): List<PersonalBest> {
@@ -667,7 +740,7 @@ class CognitiveService(
             .maxByOrNull { it.cognitiveScore!! }?.let { out += PersonalBest("Fastest Reaction Test", "${it.cognitiveScore} / 100", it.dayKey) }
         store.sleepRange(from, to).maxByOrNull { it.asleepMinutes }?.let { out += PersonalBest("Longest sleep", formatDuration(it.asleepMinutes), it.dayKey) }
         dailyValues(HealthMetricType.STEPS_DAILY, from, to).filterValues { it > 0 }.maxByOrNull { it.value }
-            ?.let { out += PersonalBest("Most steps", "${it.value.roundToInt()}", it.key) }
+            ?.let { out += PersonalBest("Most steps", it.value.grouped(), it.key) }
         dailyValues(HealthMetricType.RESTING_HR, from, to).minByOrNull { it.value }
             ?.let { out += PersonalBest("Lowest resting heart rate", "${it.value.roundToInt()} bpm", it.key) }
         dailyValues(HealthMetricType.HRV_RMSSD, from, to).maxByOrNull { it.value }
@@ -687,7 +760,11 @@ class CognitiveService(
     companion object {
         const val WAKE_HISTORY_NIGHTS = 14
         /** How far back a Health Connect night without a resolved row is still picked up. Matches the first import. */
-        const val SLEEP_BACKFILL_DAYS = 30
+        const val SLEEP_BACKFILL_DAYS = RETENTION_DAYS
+        private const val KEY_PURGED = "purged_day"
+        private const val PAST_DAY_OFFSET_MS = 6 * HOUR_MS
+        /** Shorter sleep than this is ignored (dozing, sensor noise). */
+        const val MIN_NAP_MIN = 15
         const val DEFAULT_WAKE_MINUTE = 7 * 60
         private const val DAY_MS = 24 * HOUR_MS
     }

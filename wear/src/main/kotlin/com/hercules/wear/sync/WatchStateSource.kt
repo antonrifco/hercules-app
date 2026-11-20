@@ -21,11 +21,31 @@ import kotlinx.coroutines.tasks.await
 class WatchStateSource(context: Context, private val cognitive: CognitiveService) {
     private val ctx = context.applicationContext
 
-    suspend fun current(nowMs: Long = System.currentTimeMillis()): WatchState {
+    private val prefs = ctx.getSharedPreferences("watch_state", Context.MODE_PRIVATE)
+
+    /**
+     * The last state shown, saved so the app opens on it at once instead of waiting for a fresh one. Only from
+     * today: yesterday's score would be wrong by morning.
+     */
+    fun cached(): WatchState? = runCatching {
+        prefs.getString(KEY_STATE, null)?.let { cognitive.decodeWatchState(it) }
+            ?.takeIf { cognitive.dayKeys.of(it.updatedMs) == cognitive.today() }
+    }.getOrNull()
+
+    suspend fun current(nowMs: Long = System.currentTimeMillis()): WatchState =
+        compute(nowMs).also { s -> runCatching { prefs.edit().putString(KEY_STATE, cognitive.encodeWatchState(s)).apply() } }
+
+    private suspend fun compute(nowMs: Long): WatchState {
         val fromPhone = runCatching { fromPhone() }
             .onFailure { Log.w(TAG, "no phone state", it) }
             .getOrNull()
         val today = cognitive.today()
+        // Follow the phone's score settings so both devices score the same way.
+        fromPhone?.scoreSettings?.let { s -> runCatching { if (cognitive.store.scoreSettings() != s) cognitive.store.saveScoreSettings(s) } }
+        // Same for the personal tuning, unless the watch has counted more tests itself (phone out of reach for a while).
+        fromPhone?.calibration?.let { c ->
+            runCatching { val mine = cognitive.store.calibration(); if (c != mine && c.sessions >= mine.sessions) cognitive.store.saveCalibration(c) }
+        }
         val lastLocal = runCatching { cognitive.store.sessionsFrom(cognitive.dayKeys.startOf(today)).maxOfOrNull { it.endMs } }.getOrNull()
         val phoneFresh = fromPhone != null && nowMs - fromPhone.updatedMs < STALE_MS && fromPhone.evaluation?.dayKey == today
         val localNewer = lastLocal != null && lastLocal > (fromPhone?.updatedMs ?: 0L)
@@ -83,5 +103,6 @@ class WatchStateSource(context: Context, private val cognitive: CognitiveService
         const val TAG = "HerculesState"
         const val HOUR_MS = 3_600_000L
         const val STALE_MS = 6 * HOUR_MS
+        const val KEY_STATE = "state"
     }
 }

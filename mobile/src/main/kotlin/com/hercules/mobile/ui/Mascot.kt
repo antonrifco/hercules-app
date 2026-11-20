@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -97,6 +98,24 @@ fun Herc(
 
 private val IconBox = floatArrayOf(0f, 0f, 108f, 108f)
 
+/** Herc's head as a bitmap, for places without Compose (home-screen widgets). Eyes open, gentle glow. */
+fun hercBitmap(mood: HercMood, px: Int): android.graphics.Bitmap {
+    val image = androidx.compose.ui.graphics.ImageBitmap(px, px)
+    val box = HercArt.HEAD_BOX
+    val k = minOf(px / (box[2] - box[0]), px / (box[3] - box[1]))
+    androidx.compose.ui.graphics.drawscope.CanvasDrawScope().draw(
+        androidx.compose.ui.unit.Density(1f), androidx.compose.ui.unit.LayoutDirection.Ltr,
+        androidx.compose.ui.graphics.Canvas(image), androidx.compose.ui.geometry.Size(px.toFloat(), px.toFloat()),
+    ) {
+        withTransform({
+            translate((px - (box[2] - box[0]) * k) / 2f, (px - (box[3] - box[1]) * k) / 2f)
+            scale(k, k, Offset.Zero)
+            translate(-box[0], -box[1])
+        }) { drawLion(mood.face, mood.eyes, mood.eyesOpen, if (mood == HercMood.SLEEPING) 0f else 0.8f) }
+    }
+    return image.asAndroidBitmap()
+}
+
 private val Mane = Color(0xFFFEB221)
 private val ManeDark = Color(0xFFE5841B)
 private val Face = Color(0xFFFEE1AD)
@@ -104,7 +123,8 @@ private val FaceDark = Color(0xFFF3C378)
 private val Nose = Color(0xFF1A0F08)
 private val EyeRim = Color(0xFF2A1608)
 
-private val paths = HashMap<String, Path>()
+// Shared by the UI and background work (widgets, complications), so it must be thread-safe.
+private val paths = java.util.concurrent.ConcurrentHashMap<String, Path>()
 private fun pathOf(d: String): Path = paths.getOrPut(d) { PathParser().parsePathString(d).toPath() }
 
 private fun DrawScope.drawLion(face: Int, eyes: Color, open: Float, glow: Float) {

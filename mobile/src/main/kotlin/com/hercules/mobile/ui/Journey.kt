@@ -1,5 +1,8 @@
 package com.hercules.mobile.ui
 
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
+
 import androidx.core.content.edit
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
@@ -101,18 +104,18 @@ val SplashPlays = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_C
 
 // ------------------------------------------------------------------ onboarding
 
-private class Step(val image: Int, val eyebrow: String, val title: String, val body: String, val herc: HercMood? = null)
+private class Step(val image: Int, val title: String, val body: String)
 
+/** What the app does, in three steps. */
 private val Steps = listOf(
-    Step(R.drawable.ill_score, "01 · Meet Herc", "Know when you're at your sharpest", "Herc turns your sleep, heart, movement, daylight and a quick reaction test into one score from 1 to 100. Watch his eyes: green means Prime, red means recharge.", HercMood.PRIME),
-    Step(R.drawable.ill_sleep, "02 · Health Connect", "Zero logging", "Herc reads sleep, heart rate and activity from Health Connect, and never writes to it. In week one he learns what your normal looks like.", HercMood.SLEEPING),
-    Step(R.drawable.ill_checkin, "03 · Reaction Test", "A 3-minute reaction test. Play any time.", "Tap the moment Herc appears, on your phone or watch. Your first test counts; Herc learns your normal and finds your peak window."),
-    Step(R.drawable.ill_plan, "04 · Moments", "Win the big day", "Add an interview, exam or pitch up to 7 days out. Get daily prep steps and a straight answer: On Track or Needs Attention."),
-    Step(R.drawable.ill_no_watch, "05 · The watch", "Optional, but powerful", "The Hercules watch adds overnight tracking and the Reaction Test on your wrist. Your data never leaves your devices."),
+    Step(R.drawable.ill_score, "One score for how sharp you are", "Herc turns your sleep, body clock and heart signals into a score from 1 to 100, right now. His face shows it at a glance."),
+    Step(R.drawable.ill_sleep, "No logging", "Sleep and heart data come in by themselves from Health Connect or the Hercules watch. No watch? Your phone's screen use stands in for sleep."),
+    Step(R.drawable.ill_checkin, "Test, then plan", "A 3-minute Reaction Test sharpens the score and finds your best time of day. Add a Moment, like an exam or a pitch, and Herc helps you get ready."),
 )
 
 private const val PREFS = "hercules_ui"
-private const val KEY_ONBOARDED = "onboarded"
+/** v2: the three-step dialog, shown once to everyone (also to people who saw the old five-page intro). */
+private const val KEY_ONBOARDED = "onboarded_v2"
 
 @Composable
 fun rememberOnboarded(): Pair<Boolean, () -> Unit> {
@@ -122,68 +125,56 @@ fun rememberOnboarded(): Pair<Boolean, () -> Unit> {
     return done to { prefs.edit { putBoolean(KEY_ONBOARDED, true) }; done = true }
 }
 
+/** First-use dialog over Home: three steps, each with an illustration. Ends by asking for notifications. */
 @Composable
-fun Onboarding(onDone: () -> Unit) {
+fun OnboardingDialog(onDone: () -> Unit) {
     val pager = rememberPagerState { Steps.size }
-    // On "Meet Herc" he walks through the five bands so the colours explain themselves.
-    var cycling by remember { mutableStateOf(HercMood.PRIME) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(1_400)
-            cycling = HercMood.entries[(cycling.ordinal + 1) % HercMood.DRAINED.ordinal.plus(1)]
-        }
-    }
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
     val askNotifications = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { onDone() }
-    Column(Modifier.fillMaxSize().background(Ink).statusBarsPadding().navigationBarsPadding().padding(horizontal = 24.dp)) {
-        Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("HERCULES", color = Text1, fontSize = 13.sp, letterSpacing = 5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-            TextButton(onClick = onDone) { Text("SKIP", letterSpacing = 1.5.sp, color = Text2, fontSize = 12.sp) }
-        }
-        HorizontalPager(pager, modifier = Modifier.weight(1f)) { page ->
-            val s = Steps[page]
-            val shown by animateFloatAsState(if (pager.currentPage == page) 1f else 0.3f, tween(400), label = "step")
-            Column(Modifier.fillMaxSize().alpha(shown), verticalArrangement = Arrangement.Center) {
-                if (s.herc != null) {
-                    Box(Modifier.fillMaxWidth().aspectRatio(1f), contentAlignment = Alignment.Center) {
-                        val m = if (s.herc == HercMood.PRIME) cycling else s.herc
-                        Herc(m, size = 260.dp, pose = HercPose.HEAD)
-                        if (s.herc == HercMood.PRIME) {
-                            Text(
-                                m.label.uppercase(), color = m.eyes, fontSize = 12.sp, letterSpacing = 3.sp, fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.align(Alignment.BottomCenter),
-                            )
+    val needsNotifications = android.os.Build.VERSION.SDK_INT >= 33 && !com.hercules.mobile.notify.Notifier.canPost(ctx)
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDone, properties = androidx.compose.ui.window.DialogProperties(dismissOnClickOutside = false)) {
+        Column(
+            // The lighter, cyan-edged surface Home uses for its key sections.
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(BrightPanel).border(1.dp, Cyan.copy(alpha = 0.35f), RoundedCornerShape(16.dp)).padding(20.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("WELCOME TO HERCULES", color = BrightSubtle, fontSize = 11.sp, letterSpacing = 3.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                Text("${pager.currentPage + 1}/${Steps.size}", fontFamily = Mono, fontSize = 12.sp, color = Cyan)
+            }
+            VSpace(12.dp)
+            HorizontalPager(pager, verticalAlignment = Alignment.Top) { page ->
+                val s = Steps[page]
+                Column {
+                    Illustration(s.image, Modifier.fillMaxWidth().aspectRatio(1.25f).clip(RoundedCornerShape(10.dp)))
+                    VSpace(14.dp)
+                    Text(s.title, fontSize = 22.sp, fontWeight = FontWeight.Light, color = Text1, lineHeight = 28.sp)
+                    VSpace(8.dp)
+                    Text(s.body, fontSize = 14.sp, color = BrightSubtle, lineHeight = 20.sp, minLines = 4)
+                }
+            }
+            VSpace(16.dp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Steps.indices.forEach { i ->
+                        Box(Modifier.size(width = if (i == pager.currentPage) 24.dp else 8.dp, height = 3.dp).background(if (i <= pager.currentPage) Cyan else BrightSubtle.copy(alpha = 0.3f)))
+                    }
+                }
+                val last = pager.currentPage == Steps.lastIndex
+                if (!last) TextButton(onClick = onDone) { Text("SKIP", letterSpacing = 1.5.sp, color = BrightSubtle, fontSize = 12.sp) }
+                Button(
+                    onClick = {
+                        when {
+                            !last -> scope.launch { pager.animateScrollToPage(pager.currentPage + 1) }
+                            needsNotifications -> askNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                            else -> onDone()
                         }
-                    }
-                } else {
-                    Illustration(s.image, Modifier.fillMaxWidth().aspectRatio(1f))
-                }
-                Eyebrow(s.eyebrow, color = Cyan)
-                Text(s.title, fontSize = 30.sp, fontWeight = FontWeight.Light, color = Text1, lineHeight = 36.sp, modifier = Modifier.padding(top = 10.dp))
-                Text(s.body, fontSize = 15.sp, color = Text2, lineHeight = 22.sp, modifier = Modifier.padding(top = 12.dp))
+                    },
+                    modifier = Modifier.height(44.dp),
+                    shape = RoundedCornerShape(6.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Ink),
+                ) { Text(if (!last) "NEXT" else if (needsNotifications) "ALLOW & START" else "START", letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold) }
             }
-        }
-        Row(Modifier.fillMaxWidth().padding(vertical = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Steps.indices.forEach { i ->
-                    Box(Modifier.size(width = if (i == pager.currentPage) 28.dp else 10.dp, height = 3.dp).background(if (i <= pager.currentPage) Cyan else Hairline))
-                }
-            }
-            val last = pager.currentPage == Steps.lastIndex
-            if (last) TextButton(onClick = onDone) { Text("NOT NOW", letterSpacing = 1.5.sp, color = Text2, fontSize = 12.sp) }
-            Button(
-                onClick = {
-                    when {
-                        !last -> scope.launch { pager.animateScrollToPage(pager.currentPage + 1) }
-                        android.os.Build.VERSION.SDK_INT >= 33 && !com.hercules.mobile.notify.Notifier.canPost(ctx) -> askNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                        else -> onDone()
-                    }
-                },
-                modifier = Modifier.height(48.dp),
-                shape = RoundedCornerShape(6.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Ink),
-            ) { Text(if (!last) "NEXT" else if (android.os.Build.VERSION.SDK_INT >= 33 && !com.hercules.mobile.notify.Notifier.canPost(ctx)) "ALLOW & START" else "START", letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold) }
         }
     }
 }

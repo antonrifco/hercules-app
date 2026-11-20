@@ -20,6 +20,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hercules.mobile.MobileGraph
+import com.hercules.shared.cognitive.grouped
 import com.hercules.shared.model.MetricType
 import com.hercules.shared.readiness.DataQuality
 import com.hercules.shared.readiness.HealthMetricType
@@ -107,7 +108,7 @@ suspend fun signalHistory(g: MobileGraph, kind: SignalKind, nowMs: Long = System
                 val w = watch.filter { it.startMs in a until b }.sumOf { it.value }.roundToLong()
                 val h = hc[a]
                 val best = maxOf(w, h ?: 0L)
-                if (best > 0 || h != null) "%,d".format(best) else null
+                if (best > 0 || h != null) best.grouped() else null
             }
         }
         SignalKind.WORKOUTS -> {
@@ -160,8 +161,8 @@ suspend fun latestReading(g: MobileGraph, kind: SignalKind, nowMs: Long = System
             val watchDay = watch?.let { dk.of(it.startMs) }
             val watchTotal = watchDay?.let { d -> g.repo.allDaily().firstOrNull { it.dayKey == d }?.steps }
             pick(
-                hc?.let { Latest("%,d steps".format(it.value.roundToLong()) + if (it.dayKey == today) " today" else "", it.endMs) },
-                if (watch != null && watchTotal != null) Latest("%,d steps".format(watchTotal) + if (watchDay == today) " today" else "", watch.endMs) else null,
+                hc?.let { Latest("%,d steps".format(UiLocale, it.value.roundToLong()) + if (it.dayKey == today) " today" else "", it.endMs) },
+                if (watch != null && watchTotal != null) Latest("%,d steps".format(UiLocale, watchTotal) + if (watchDay == today) " today" else "", watch.endMs) else null,
             )
         }
         SignalKind.WORKOUTS -> {
@@ -170,7 +171,7 @@ suspend fun latestReading(g: MobileGraph, kind: SignalKind, nowMs: Long = System
                 g.repo.summarizedSessions().filter { it.endMs > from }.map { it.startMs to it.endMs }).maxByOrNull { it.second }
             last?.let { Latest("${(it.second - it.first) / MIN} min", it.second) }
         }
-        SignalKind.LIGHT -> store.latestLight()?.let { Latest("${it.lux.roundToInt()} lx", it.measuredMs) }
+        SignalKind.LIGHT -> store.latestLight()?.let { Latest("${it.lux.grouped()} lx", it.measuredMs) }
     }
 }
 
@@ -195,7 +196,7 @@ private fun unit(k: SignalKind) = when (k) {
 private fun format(k: SignalKind, v: Double) = when (k) {
     SignalKind.SKIN_TEMP -> "%+.1f".format(v)
     SignalKind.GLUCOSE, SignalKind.RESPIRATORY -> "%.1f".format(v)
-    else -> "${v.roundToInt()}"
+    else -> v.grouped()
 }
 
 private fun hm(minutes: Int) = if (minutes >= 60) "${minutes / 60}h ${minutes % 60}m" else "${minutes}m"
